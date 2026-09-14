@@ -87,6 +87,9 @@ struct SettingsScreen: View {
 
                     VStack(spacing: Tokens.Spacing.s) {
                         allowanceRow("Active tasks", entitlements.plan.tasks)
+                        if let aiPlans = entitlements.plan.aiPlans {
+                            allowanceRow("AI plans", aiPlans, unit: "this week")
+                        }
                         allowanceRow("Marking", entitlements.plan.grader, unit: "this week")
                         allowanceRow("Saved rubrics", entitlements.plan.rubrics)
                     }

@@ -91,7 +91,8 @@ struct HomeScreen: View {
             AddTaskSheet { draft in
                 Task {
                     await coordinator.addAssignment(draft, context: context,
-                                                    availability: preferences.availability)
+                                                    availability: preferences.availability,
+                                                    taskLimit: entitlements.plan.tasks.limit)
                 }
             }
         }
@@ -322,6 +323,11 @@ struct HomeScreen: View {
     @ViewBuilder private var status: some View {
         if coordinator.status == .planning {
             StatusBanner(tone: .working, message: "Albus is planning…")
+        }
+        if case .plannedLocally(let note, let suggestsUpgrade) = coordinator.status {
+            StatusBanner(tone: .working, message: note,
+                         retryTitle: suggestsUpgrade ? "See Plus" : nil,
+                         retry: suggestsUpgrade ? { showingPaywall = true } : nil)
         }
         if case .failed(let message) = coordinator.status {
             StatusBanner(tone: .error, message: message)

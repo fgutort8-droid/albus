@@ -17,6 +17,9 @@ final class PlanCoordinator {
     enum Status: Equatable {
         case idle
         case planning
+        /// The AI did not plan this, so the phone did. Not a failure: the
+        /// assignment has sessions and they are scheduled.
+        case plannedLocally(note: String, suggestsUpgrade: Bool)
         case failed(String)
     }
 
@@ -72,7 +75,19 @@ final class PlanCoordinator {
     func addAssignment(_ draft: NewAssignment,
                        context: ModelContext,
                        availability: Availability = .default,
+                       taskLimit: Int? = nil,
                        now: Date = .now) async {
+        // The open-task cap, checked on the device first. The server trigger is
+        // the authority, but it only sees assignments that reach it -- without
+        // this, an offline student could plan past the cap on the phone.
+        if let taskLimit,
+           let open = try? context.fetch(FetchDescriptor<Assignment>())
+               .count(where: { !$0.isComplete }),
+           open >= taskLimit {
+            status = .failed(PlanService.Failure.quotaReached.errorDescription ?? "")
+            return
+        }
+
         status = .planning
 
         let assignment = Assignment(
@@ -114,12 +129,40 @@ final class PlanCoordinator {
             reschedule(context: context, availability: availability, now: now)
             status = .idle
 
+        } catch let failure as PlanService.Failure where failure.plansLocally {
+            planLocally(assignment, context: context, availability: availability, now: now)
+            status = .plannedLocally(note: failure.localPlanNote,
+                                     suggestsUpgrade: failure.suggestsUpgrade)
         } catch let failure as PlanService.Failure {
-            // The assignment survives; only the generated steps are missing.
+            // Over the open-task cap: the server refused the assignment itself,
+            // so keeping it here would leave an unplanned copy nobody can act on.
+            if failure == .quotaReached {
+                context.delete(assignment)
+                save(context, "remove refused assignment")
+            }
             status = .failed(failure.errorDescription ?? "Couldn't plan that.")
         } catch {
-            status = .failed("Couldn't plan that.")
+            planLocally(assignment, context: context, availability: availability, now: now)
+            status = .plannedLocally(note: PlanService.Failure.unavailable.localPlanNote,
+                                     suggestsUpgrade: false)
         }
+    }
+
+    /// Sessions made on the phone, sized so every one can be placed.
+    private func planLocally(_ assignment: Assignment, context: ModelContext,
+                             availability: Availability, now: Date) {
+        let sessions = LocalPlan.sessions(
+            title: assignment.title,
+            totalMinutes: assignment.estimatedMinutes,
+            dailyCapacityMinutes: availability.dailyCapacityMinutes)
+        for (i, session) in sessions.enumerated() {
+            context.insert(Subtask(title: session.title, guidance: nil, ordinal: i,
+                                   estimatedMinutes: session.minutes,
+                                   criterionCode: nil, toolNeed: nil,
+                                   assignment: assignment))
+        }
+        save(context, "insert local plan")
+        reschedule(context: context, availability: availability, now: now)
     }
 
     /// Removes an assignment and everything that came from it.

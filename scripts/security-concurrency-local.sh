@@ -6,6 +6,7 @@ set -euo pipefail
 PROJECT_REF=$(sed -nE 's/^project_id = "([^"]+)"/\1/p' supabase/config.toml)
 DB_CONTAINER="supabase_db_${PROJECT_REF}"
 TEST_USER_ID='40000000-0000-4000-8000-000000000001'
+FREE_USER_ID='41000000-0000-4000-8000-000000000001'
 COLLISION_USER_PREFIX='42000000-0000-4000-8000-'
 COLLISION_RUBRIC_ID='43000000-0000-4000-8000-000000000001'
 TEST_OUTPUT_DIR=$(mktemp -d)
@@ -44,6 +45,7 @@ assert_race_outcomes() {
 
 cleanup() {
   db -q -c "delete from auth.users where id = '${TEST_USER_ID}'" >/dev/null 2>&1 || true
+  db -q -c "delete from auth.users where id = '${FREE_USER_ID}'" >/dev/null 2>&1 || true
   db -q -c "delete from auth.users where id::text like '${COLLISION_USER_PREFIX}%'" \
     >/dev/null 2>&1 || true
   rm -rf "$TEST_OUTPUT_DIR"
@@ -90,6 +92,43 @@ GRADE_RESERVED=$(db -Atq -c "select count(*) from public.ai_usage
   where user_id = '${TEST_USER_ID}' and kind = 'grade' and attempt_state = 'reserved'")
 if [ "$GRADE_SUCCESS" -ne 1 ] || [ "$GRADE_RESERVED" -ne 1 ]; then
   echo "grading race failed: successes=$GRADE_SUCCESS reserved=$GRADE_RESERVED" >&2
+  exit 1
+fi
+
+# Free has three AI plans a week. Seed two, two days back -- inside the weekly
+# allowance, outside the rate-limit windows -- then race twelve for the last.
+db -q -c "
+  insert into auth.users (
+    id, instance_id, aud, role, email, encrypted_password,
+    raw_app_meta_data, raw_user_meta_data, created_at, updated_at, is_anonymous
+  ) values (
+    '${FREE_USER_ID}', '00000000-0000-0000-0000-000000000000',
+    'authenticated', 'authenticated', null, '', '{}', '{}', now(), now(), true
+  );
+  insert into public.ai_usage (user_id, kind, model, attempt_state,
+                               reserved_cost_microusd, created_at)
+  select '${FREE_USER_ID}', 'breakdown', 'claude-haiku-4-5', 'completed', 1,
+         now() - interval '2 days'
+    from generate_series(1, 2);
+" >/dev/null
+
+for i in $(seq 1 12); do
+  (
+    set +e
+    db -Atq -c "select public.check_and_record_ai_usage(
+      '${FREE_USER_ID}', 'breakdown', 'claude-haiku-4-5')" \
+      >"$TEST_OUTPUT_DIR/breakdown-$i" 2>&1
+    status=$?
+    printf '%s\n' "$status" >"$TEST_OUTPUT_DIR/breakdown-$i.status"
+  ) &
+done
+wait
+assert_race_outcomes breakdown ALLOWANCE_WEEKLY
+
+PLAN_RESERVED=$(db -Atq -c "select count(*) from public.ai_usage
+  where user_id = '${FREE_USER_ID}' and kind = 'breakdown' and attempt_state = 'reserved'")
+if [ "$PLAN_RESERVED" -ne 1 ]; then
+  echo "AI plan race failed: reserved=$PLAN_RESERVED" >&2
   exit 1
 fi
 
@@ -199,4 +238,4 @@ if [ "$COLLISION_RUBRICS" -ne 1 ] || [ "$COLLISION_ITEMS" -ne 1 ]; then
   exit 1
 fi
 
-printf 'concurrency attacks pass: grading 1/12, task 1/12, rubric 1/12, rubric-owner 1/12\n'
+printf 'concurrency attacks pass: grading 1/12, AI plan 1/12, task 1/12, rubric 1/12, rubric-owner 1/12\n'

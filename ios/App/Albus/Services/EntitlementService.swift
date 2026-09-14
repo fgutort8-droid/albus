@@ -98,6 +98,10 @@ final class EntitlementService {
         let expiresAt: Date?
 
         let tasks: Allowance
+        /// AI step plans this week; past it, the phone plans instead. Nil when
+        /// the server does not meter AI plans at all, which is different from
+        /// unlimited and must not be shown as it.
+        let aiPlans: Allowance?
         let grader: Allowance
         let rubrics: Allowance
 
@@ -118,7 +122,7 @@ final class EntitlementService {
 
         static let freeFallback = Plan(
             tier: .free, displayName: "Free", priceCents: 0, currency: "EUR", expiresAt: nil,
-            tasks: Allowance(limit: 5),
+            tasks: Allowance(limit: 5), aiPlans: Allowance(limit: 3),
             grader: Allowance(limit: 0), rubrics: Allowance(limit: 3),
             toolsAccess: .basic, curriculumIntelligence: false, advancedModels: false)
     }
@@ -191,7 +195,7 @@ struct PlanReader: PlanReading, Sendable {
 
     /// The wire shape of `my_plan()`. Flat, because a Postgres function
     /// returning a table returns one flat row.
-    private struct Row: Decodable, Sendable {
+    struct Row: Decodable, Sendable {
         let tier: String
         let displayName: String
         let priceCents: Int
@@ -200,6 +204,16 @@ struct PlanReader: PlanReading, Sendable {
 
         let activeTasksLimit: Int?
         let activeTasksUsed: Int
+        // Optional because the app ships against whichever server is live: a
+        // server without the weekly AI-plan allowance sends none of these, and
+        // a missing required key would fail the whole plan read.
+        //
+        // `breakdownUsedWeek` is the tell. A server that meters AI plans always
+        // sends a count, so its absence means "not metered here" -- which must
+        // not be confused with a null limit, which means unlimited.
+        let breakdownLimitWeek: Int?
+        let breakdownUsedWeek: Int?
+        let breakdownResetsAt: String?
         let gradeLimitWeek: Int?
         let gradeUsedWeek: Int
         let gradeResetsAt: String?
@@ -218,6 +232,9 @@ struct PlanReader: PlanReading, Sendable {
             case expiresAt = "expires_at"
             case activeTasksLimit = "active_tasks_limit"
             case activeTasksUsed = "active_tasks_used"
+            case breakdownLimitWeek = "breakdown_limit_week"
+            case breakdownUsedWeek = "breakdown_used_week"
+            case breakdownResetsAt = "breakdown_resets_at"
             case gradeLimitWeek = "grade_limit_week"
             case gradeUsedWeek = "grade_used_week"
             case gradeResetsAt = "grade_resets_at"
@@ -250,13 +267,21 @@ struct PlanReader: PlanReading, Sendable {
         let rows: [Row] = try await client.rpc("my_plan").execute().value
         guard let row = rows.first else { return nil }
 
-        return EntitlementService.Plan(
+        return Self.plan(from: row)
+    }
+
+    static func plan(from row: Row) -> EntitlementService.Plan {
+        EntitlementService.Plan(
             tier: EntitlementService.Tier(rawValue: row.tier) ?? .free,
             displayName: row.displayName,
             priceCents: row.priceCents,
             currency: row.currency,
             expiresAt: PostgresTimestamp.parse(row.expiresAt),
             tasks: .init(limit: row.activeTasksLimit, used: row.activeTasksUsed),
+            aiPlans: row.breakdownUsedWeek.map { used in
+                .init(limit: row.breakdownLimitWeek, used: used,
+                      resetsAt: PostgresTimestamp.parse(row.breakdownResetsAt))
+            },
             grader: .init(limit: row.gradeLimitWeek, used: row.gradeUsedWeek,
                           resetsAt: PostgresTimestamp.parse(row.gradeResetsAt)),
             rubrics: .init(limit: row.rubricsLimit, used: row.rubricsUsed),

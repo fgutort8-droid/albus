@@ -226,7 +226,7 @@ struct OnboardingFlow: View {
                         .font(Tokens.Typography.cardTitle)
                         .foregroundStyle(Tokens.Palette.ink)
                         .multilineTextAlignment(.center)
-                    Text("You'll find me in the Albus tab, any time you need a plan or a hand.")
+                    Text("It's waiting on Home. Add anything else you need to plan with the + button.")
                         .font(Tokens.Typography.body)
                         .foregroundStyle(Tokens.Palette.inkSecondary)
                         .multilineTextAlignment(.center)

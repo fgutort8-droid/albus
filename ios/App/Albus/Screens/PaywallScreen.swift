@@ -84,7 +84,7 @@ struct PaywallScreen: View {
             switch self {
             case .free: "The planner, in full."
             case .plus: "Albus marks your work."
-            case .pro:  "Marks more, and answers back."
+            case .pro:  "More marking, and no limits."
             }
         }
 
@@ -99,17 +99,20 @@ struct PaywallScreen: View {
         var lines: [(String, String)] {
             switch self {
             case .free:
-                [("5 active tasks", "Planned, scheduled, and rebuilt when your week moves."),
+                [("3 AI plans a week", "After that, Albus plans on your phone."),
+                 ("5 active tasks", "Planned, scheduled, and rebuilt when your week moves."),
                  ("3 saved rubrics", "Paste a mark scheme once and reuse it."),
                  ("No marking", "The Grader needs Plus."),
                  ("The core tools", "The study tools Albus picks for a step.")]
             case .plus:
-                [("10 active tasks", "For a term carrying more than one deadline."),
+                [("Unlimited AI plans", "A step-by-step plan for every assignment."),
+                 ("10 active tasks", "For a term carrying more than one deadline."),
                  ("5 saved rubrics", "Paste a mark scheme once and reuse it."),
                  ("2 markings a week", "Your work, your rubric, a real grade."),
                  ("The expanded tools", "More of the library, picked per step.")]
             case .pro:
-                [("Unlimited tasks", "However much you are actually carrying."),
+                [("Unlimited AI plans", "A step-by-step plan for every assignment."),
+                 ("Unlimited tasks", "However much you are actually carrying."),
                  ("Unlimited rubrics", "However many mark schemes you carry."),
                  ("5 markings a week", "Mark a draft, revise it, mark it again."),
                  ("Every study tool", "The whole library, picked per step.")]

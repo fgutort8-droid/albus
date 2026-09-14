@@ -206,22 +206,12 @@ struct AddTaskSheet: View {
     }
 }
 
-/// What the student chose: one of Albus's own subjects, or a name they typed.
+/// The subject the student named.
 struct SubjectChoice {
     let displayName: String
-    /// Nil for a subject Albus has no specification for. That is not a failure
-    /// — it is most subjects today — and everything downstream has to keep
-    /// working without it.
 }
 
-/// Adding a subject.
-///
-/// Two shapes, deliberately. A student whose qualification is in the corpus
-/// picks their real course and gets everything Albus knows about how it is
-/// assessed. A student whose is not types a name, exactly as before. The second
-/// case is not a degraded version of the first — it is what the app does for
-/// every qualification we have not read the official documents for, and it has
-/// to feel like a first-class answer rather than a fallback.
+/// Adding a subject: the student types its name.
 ///
 /// Built from the same scaffold as every other popup: a `.alert` with a text
 /// field is the single most "default iPhone" control there is.

@@ -49,6 +49,12 @@ struct PlanService {
     /// silently rendered as raw text to a student.
     enum Failure: LocalizedError, Equatable {
         case quotaReached
+        /// This week's AI plans are spent. The server answers 402 exactly as it
+        /// does for the open-task cap, so the code must be read before the
+        /// status or a student out of AI plans is told they have too many tasks.
+        case aiPlansUsed
+        /// The student's plan includes no AI plans at all.
+        case aiPlansNotIncluded
         case rateLimited
         case fairUseReached
         case offline
@@ -65,13 +71,17 @@ struct PlanService {
                 // never see it — which is how it stayed wrong.
                 "That's as many tasks as your plan keeps open at once. "
                 + "Finish one, or move up a plan."
+            case .aiPlansUsed:
+                "You've used this week's AI plans."
+            case .aiPlansNotIncluded:
+                "AI plans aren't included in your plan."
             case .rateLimited:
                 "That's a lot of planning at once. Try again shortly."
             case .fairUseReached:
                 "This account has reached its monthly AI safety limit. "
                 + "Existing tasks still work, and capacity returns gradually over 30 days."
             case .offline:
-                "No connection — Albus will plan this when you're back online."
+                "No connection."
             case .unusableResponse:
                 ModelResponseFailure.retryableDescription
             case .unavailable:
@@ -80,6 +90,39 @@ struct PlanService {
                 why
             }
         }
+
+        /// Whether Albus should plan this on the phone instead.
+        ///
+        /// Every refusal that is about the AI rather than the assignment. Not
+        /// the open-task cap — planning locally past it would make the cap
+        /// meaningless — and not a rejected request, which needs correcting.
+        var plansLocally: Bool {
+            switch self {
+            case .quotaReached, .rejected: false
+            case .aiPlansUsed, .aiPlansNotIncluded, .rateLimited, .fairUseReached,
+                 .offline, .unusableResponse, .unavailable: true
+            }
+        }
+
+        /// What the student is told when the phone made the plan.
+        var localPlanNote: String {
+            switch self {
+            case .aiPlansUsed:
+                "You've used this week's AI plans, so Albus split this into study "
+                + "sessions for you. Plus writes a step-by-step plan every time."
+            case .aiPlansNotIncluded:
+                "Albus split this into study sessions for you. "
+                + "Plus writes a step-by-step plan every time."
+            case .offline:
+                "No connection, so Albus split this into study sessions for you."
+            default:
+                "Albus couldn't write a step-by-step plan right now, "
+                + "so it split this into study sessions for you."
+            }
+        }
+
+        /// True when the honest next step is a plan with more AI in it.
+        var suggestsUpgrade: Bool { self == .aiPlansUsed || self == .aiPlansNotIncluded }
     }
 
     private struct Request: Encodable {
@@ -87,9 +130,8 @@ struct PlanService {
         let task_type: String
         let deadline: String
         let estimated_minutes: Int
-        /// Which curriculum subject and which of its components, by code. The
-        /// server resolves the pair against its own copy of the specification;
-        /// nothing about how the work is assessed is taken from the client.
+        /// The student's own subject, by server id. The server checks it belongs
+        /// to the caller before attaching the assignment to it.
         let course_id: String?
         /// What the student typed about the assignment. Reaches the model
         /// fenced as data; the server caps it at 2000 characters.
@@ -158,6 +200,8 @@ struct PlanService {
         // and an app in someone's hand is always older than the server it talks to.
         case "PLAN_TASK_LIMIT_REACHED", "FREE_PLAN_LIMIT_REACHED":
             return .quotaReached
+        case "ALLOWANCE_WEEKLY":                        return .aiPlansUsed
+        case "PLAN_UPGRADE_REQUIRED":                   return .aiPlansNotIncluded
         case "RATE_LIMIT_HOURLY", "RATE_LIMIT_DAILY":   return .rateLimited
         case "FAIR_USE_REACHED":                        return .fairUseReached
         case "GLOBAL_CAPACITY_REACHED":                 return .unavailable

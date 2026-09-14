@@ -163,7 +163,26 @@ struct PricingTests {
         #expect(pro.contains("5 markings a week"))
     }
 
-    /// Every plan says the same four things in the same order, so the eye can
+    /// The same guard for AI plans, now the headline difference between tiers.
+    /// It must agree with `plans.breakdown_per_week`: Free 3, paid unlimited.
+    @Test("each plan's card names its own AI-plan allowance")
+    func aiPlanAllowanceIsOnTheCard() {
+        #expect(PaywallScreen.Plan.free.lines.first?.0 == "3 AI plans a week")
+        #expect(PaywallScreen.Plan.plus.lines.first?.0 == "Unlimited AI plans")
+        #expect(PaywallScreen.Plan.pro.lines.first?.0 == "Unlimited AI plans")
+    }
+
+    /// "Answers back" sold Ask Albus, which no longer exists. A pitch that
+    /// promises a withdrawn feature is a mis-sold plan, not a stale string.
+    @Test("no plan's pitch promises the withdrawn assistant")
+    func pitchesPromiseOnlyWhatShips() {
+        for plan in PaywallScreen.Plan.allCases {
+            #expect(!plan.pitch.localizedCaseInsensitiveContains("answer"),
+                    "\(plan) pitch: \(plan.pitch)")
+        }
+    }
+
+    /// Every plan says the same things in the same order, so the eye can
     /// run down a column. Three lists of different lengths is three lists.
     @Test("the three cards are comparable line for line")
     func linesAreParallel() {
