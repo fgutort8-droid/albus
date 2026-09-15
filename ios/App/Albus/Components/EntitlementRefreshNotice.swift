@@ -49,6 +49,10 @@ struct EntitlementRefreshNotice: View {
             RoundedRectangle(cornerRadius: Tokens.Radius.chip, style: .continuous)
                 .strokeBorder(Tokens.SubjectColor.amber.color.opacity(0.18), lineWidth: 0.5)
         }
+        // Without `.contain`, an identifier on a stack is stamped onto every
+        // element inside it: Retry and dismiss both became
+        // "entitlementRefreshFailure", and Retry's own identifier was lost.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("entitlementRefreshFailure")
         .transition(.opacity.combined(with: .move(edge: .top)))
     }

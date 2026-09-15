@@ -20,7 +20,7 @@ final class PopupChromeUITests: XCTestCase {
     /// software, and *why* is the useful half — a system dialog rendered that
     /// as grey subtitle text under a shouted title.
     func testLeavingForAToolIsAnAlbusSheet() throws {
-        app.launch()
+        OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
 
         app.buttons["Tools"].tap()
@@ -42,7 +42,7 @@ final class PopupChromeUITests: XCTestCase {
     /// Editing a step was a `Form` with a system Cancel/Save toolbar —
     /// indistinguishable from any other app's settings screen.
     func testEditingAStepUsesTheSheetScaffold() throws {
-        app.launch()
+        OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
 
         app.buttons["Home"].tap()

@@ -14,10 +14,63 @@ import XCTest
 @MainActor
 enum OnboardingPath {
 
+    /// Launches the app for a test that goes through onboarding.
+    ///
+    /// "Show me" asks for notification permission and waits for the answer.
+    /// XCUITest keeps that system prompt from presenting, so on a freshly
+    /// erased device the request never returns and onboarding never finishes.
+    /// A student sees the prompt and answers it; a test skips it.
+    static func launch(_ app: XCUIApplication) {
+        app.launchArguments += ["-albus.debug.skipNotificationPrompt"]
+        app.launch()
+    }
+
     /// Titles that mean "carry on" at some step of onboarding. The subject
     /// picker offers "Skip for now" until something is selected, and offering a
     /// student a step they have nothing to say to is the point of it.
     private static let advanceTitles = ["Next", "Skip for now", "Continue"]
+
+    /// Taps a field and types into it once it has focus.
+    ///
+    /// `tap()` then `typeText()` races focus: the tap registers before focus
+    /// lands, and typing fails with "neither element nor any descendant has
+    /// keyboard focus". The software keyboard is not a usable signal: on an
+    /// erased simulator a hardware keyboard counts as connected, so it never
+    /// appears. This waits on the field's own focus instead, and taps once more
+    /// if the first tap landed while the screen was still settling.
+    static func type(_ text: String, into field: XCUIElement,
+                     file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "field never appeared",
+                      file: file, line: line)
+        for _ in 0..<2 {
+            field.tap()
+            let deadline = Date().addingTimeInterval(5)
+            while Date() < deadline {
+                if (field.value(forKey: "hasKeyboardFocus") as? Bool) == true {
+                    field.typeText(text)
+                    return
+                }
+                usleep(100_000)
+            }
+        }
+        XCTFail("field never took keyboard focus", file: file, line: line)
+    }
+
+    /// Waits until an element stops moving.
+    ///
+    /// A long-press that starts while a view is still animating in reads as a
+    /// tap: the view moves under a stationary finger, which cancels the press
+    /// and leaves only the touch-up.
+    static func waitUntilStill(_ element: XCUIElement, timeout: TimeInterval = 5) {
+        var last = element.frame
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            usleep(250_000)
+            let now = element.frame
+            if now == last { return }
+            last = now
+        }
+    }
 
     static func reachApp(_ app: XCUIApplication, file: StaticString = #filePath,
                          line: UInt = #line) {
@@ -57,8 +110,7 @@ enum OnboardingPath {
 
         XCTAssertTrue(deadlineField.waitForExistence(timeout: 15),
                       "onboarding never reached the deadline step", file: file, line: line)
-        deadlineField.tap()
-        deadlineField.typeText("Onboarding first assignment")
+        type("Onboarding first assignment", into: deadlineField, file: file, line: line)
 
         app.buttons["Build my plan"].tap()
 

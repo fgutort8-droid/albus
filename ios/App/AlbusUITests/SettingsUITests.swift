@@ -15,7 +15,7 @@ final class SettingsUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
     func testSettingsIsInTheTabBar() throws {
-        app.launch()
+        OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
 
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 15),
@@ -26,7 +26,7 @@ final class SettingsUITests: XCTestCase {
 
     /// The plan card is the only place a student can see what they are on.
     func testSettingsShowsThePlanAndItsMeters() throws {
-        app.launch()
+        OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
         app.buttons["Settings"].tap()
 
@@ -52,7 +52,7 @@ final class SettingsUITests: XCTestCase {
 
     /// Notifications were reachable only from one small button on Home.
     func testNotificationsAreReachableFromSettings() throws {
-        app.launch()
+        OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
         app.buttons["Settings"].tap()
 

@@ -38,7 +38,7 @@ final class CoreLoopUITests: XCTestCase {
     }
 
     func testAddAssignmentProducesAPlacedPlan() throws {
-        app.launch()
+        OnboardingPath.launch(app)
 
         OnboardingPath.reachApp(app)
         XCTAssertFalse(app.staticTexts.containing(
@@ -63,7 +63,7 @@ final class CoreLoopUITests: XCTestCase {
     /// The plan has to be reachable from Home and openable into its steps —
     /// the screens a student actually works from.
     func testPlanIsVisibleOnHomeAndInDetail() throws {
-        app.launch()
+        OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
 
         addAssignment(app, titled: assignmentTitle)
@@ -112,7 +112,7 @@ final class CoreLoopUITests: XCTestCase {
     /// Tools is static, so this is cheap — but it is the one tab that opens
     /// external links, and a crash here would only ever be found by tapping.
     func testToolsLibraryRenders() throws {
-        app.launch()
+        OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
 
         app.buttons["Tools"].tap()
@@ -123,45 +123,17 @@ final class CoreLoopUITests: XCTestCase {
         // search narrows it.
         XCTAssertTrue(app.textFields["Search tools"].waitForExistence(timeout: 10),
                       "the tool library did not render")
-        let search = app.textFields["Search tools"]
-        search.tap()
-        search.typeText("grammar")
+        OnboardingPath.type("grammar", into: app.textFields["Search tools"])
         XCTAssertTrue(app.staticTexts["Grammarly"].waitForExistence(timeout: 5),
                       "search did not narrow the library")
     }
 
     // MARK: - Helpers
 
-    /// Gets to the app proper, completing onboarding when it is showing.
-    ///
-    /// A fresh install has no account, so first launch lands in onboarding —
-    /// which is also where the account is created. A later launch restores the
-    /// session and goes straight through. Tests must tolerate both, because
-    /// which one they get depends on what ran before them.
-    /// Taps a field and types, waiting for focus first.
-    ///
-    /// `tap()` then `typeText()` races the keyboard: the tap registers but
-    /// focus has not landed, and the event fails with "neither element nor any
-    /// descendant has keyboard focus". Intermittent, which is worse than
-    /// broken — so wait for the keyboard, and retry the tap once if it does
-    /// not come up.
-    private func type(_ text: String, into field: XCUIElement, file: StaticString = #filePath,
-                      line: UInt = #line) {
-        XCTAssertTrue(field.waitForExistence(timeout: 10), "field never appeared",
-                      file: file, line: line)
-        field.tap()
-        if !app.keyboards.element.waitForExistence(timeout: 5) {
-            field.tap()
-            XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5),
-                          "keyboard never appeared", file: file, line: line)
-        }
-        field.typeText(text)
-    }
-
     private func addAssignment(_ app: XCUIApplication, titled title: String) {
         app.buttons["Add assignment"].firstMatch.tap()
 
-        type(title, into: app.textFields["What is it?"])
+        OnboardingPath.type(title, into: app.textFields["What is it?"])
 
         app.buttons["Plan it"].tap()
     }
@@ -180,7 +152,7 @@ final class CoreLoopUITests: XCTestCase {
     /// `public.plans` by everything that enforces it; this comment is the only
     /// place it is written down, and only to explain the shape of the test.
     func testDeleteRemovesTheAssignmentFromHome() throws {
-        app.launch()
+        OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
         app.buttons["Home"].tap()
 
@@ -195,10 +167,19 @@ final class CoreLoopUITests: XCTestCase {
         let before = cards.count
         let card = cards.element(boundBy: 0)
 
-        // Long-press, because Home is a stack of cards rather than a List.
-        card.press(forDuration: 1.1)
+        // Long-press, because Home is a stack of cards rather than a List. A
+        // press that lands while Home is still animating in opens the
+        // assignment instead, so wait for the card to settle, and come back and
+        // press again once if it opened anyway. A missing menu still fails.
         let delete = app.buttons["Delete assignment"]
-        XCTAssertTrue(delete.waitForExistence(timeout: 5), "no way to delete from Home")
+        for _ in 0..<2 {
+            OnboardingPath.waitUntilStill(card)
+            card.press(forDuration: 1.1)
+            if delete.waitForExistence(timeout: 3) { break }
+            let back = app.buttons["Back to home"]
+            if back.exists { back.tap() }
+        }
+        XCTAssertTrue(delete.waitForExistence(timeout: 2), "no way to delete from Home")
         delete.tap()
 
         let confirm = app.buttons["Delete"]

@@ -72,6 +72,15 @@ struct NotificationScheduler: Sendable, NotificationCenterClient {
     /// nothing now — the sheet looks identical to the student either way.
     @discardableResult
     func requestPermission() async -> Bool {
+#if DEBUG
+        // UI tests cannot answer this prompt. Under XCUITest it never presents,
+        // so an awaited request never returns and onboarding's "Show me" waits
+        // forever on a freshly erased device. Compiled out of Release, and it
+        // grants nothing: the permission is reported as not given.
+        if ProcessInfo.processInfo.arguments.contains("-albus.debug.skipNotificationPrompt") {
+            return false
+        }
+#endif
         do {
             return try await center.requestAuthorization(options: [.alert, .sound, .badge])
         } catch {

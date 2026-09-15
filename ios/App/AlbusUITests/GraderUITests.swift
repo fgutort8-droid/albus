@@ -31,7 +31,7 @@ final class GraderUITests: XCTestCase {
     /// and no offer — which, before three tiers, is exactly how a changed RPC
     /// shape presented twice.
     func testFreeIsOfferedThePlansRatherThanABrokenGrader() throws {
-        app.launch()
+        OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
 
         app.buttons["Tools"].tap()
@@ -83,7 +83,7 @@ final class GraderUITests: XCTestCase {
 
     /// The paywall itself. The only test that renders it.
     func testThePaywallShowsThreePlansAndMarksTheCurrentOne() throws {
-        app.launch()
+        OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
 
         app.buttons["Tools"].tap()
@@ -150,7 +150,7 @@ final class GraderUITests: XCTestCase {
     /// pushes it rather than silently doing nothing: `navigationDestination`
     /// has failed quietly in this app before.
     func testMarkingFromAnAssignmentOpensTheSameGrader() throws {
-        app.launch()
+        OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
 
         app.buttons["Home"].tap()
