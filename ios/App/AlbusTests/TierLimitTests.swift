@@ -163,8 +163,8 @@ struct TierLimitTests {
             "tools_access": "basic", "curriculum_intelligence": false, "advanced_models": false,
         ]
         if withAIPlans {
-            row["breakdown_limit_week"] = 3
-            row["breakdown_used_week"] = 2
+            row["breakdown_limit_week"] = 5
+            row["breakdown_used_week"] = 4
             row["breakdown_resets_at"] = NSNull()
         }
         return try JSONDecoder().decode(PlanReader.Row.self,
@@ -174,7 +174,7 @@ struct TierLimitTests {
     @Test("the meter reads this week's AI plans from the server")
     func meterReadsTheAllowance() throws {
         let plan = PlanReader.plan(from: try freeRow(withAIPlans: true))
-        #expect(plan.aiPlans?.limit == 3)
+        #expect(plan.aiPlans?.limit == 5)
         #expect(plan.aiPlans?.remaining == 1)
     }
 
@@ -190,10 +190,10 @@ struct TierLimitTests {
         #expect(plan.aiPlans == nil)
     }
 
-    @Test("Free's offline fallback still knows it has three AI plans")
+    @Test("Free's offline fallback still knows it has five AI plans")
     func fallbackKnowsTheAllowance() {
         let fallback = EntitlementService.Plan.freeFallback
-        #expect(fallback.aiPlans?.limit == 3)
+        #expect(fallback.aiPlans?.limit == 5)
         #expect(fallback.aiPlans?.hasAny == true)
     }
 }

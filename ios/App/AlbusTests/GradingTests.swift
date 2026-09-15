@@ -164,10 +164,10 @@ struct PricingTests {
     }
 
     /// The same guard for AI plans, now the headline difference between tiers.
-    /// It must agree with `plans.breakdown_per_week`: Free 3, paid unlimited.
+    /// It must agree with `plans.breakdown_per_week`: Free 5, paid unlimited.
     @Test("each plan's card names its own AI-plan allowance")
     func aiPlanAllowanceIsOnTheCard() {
-        #expect(PaywallScreen.Plan.free.lines.first?.0 == "3 AI plans a week")
+        #expect(PaywallScreen.Plan.free.lines.first?.0 == "5 AI plans a week")
         #expect(PaywallScreen.Plan.plus.lines.first?.0 == "Unlimited AI plans")
         #expect(PaywallScreen.Plan.pro.lines.first?.0 == "Unlimited AI plans")
     }

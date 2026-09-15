@@ -122,7 +122,7 @@ final class EntitlementService {
 
         static let freeFallback = Plan(
             tier: .free, displayName: "Free", priceCents: 0, currency: "EUR", expiresAt: nil,
-            tasks: Allowance(limit: 5), aiPlans: Allowance(limit: 3),
+            tasks: Allowance(limit: 5), aiPlans: Allowance(limit: 5),
             grader: Allowance(limit: 0), rubrics: Allowance(limit: 3),
             toolsAccess: .basic, curriculumIntelligence: false, advancedModels: false)
     }

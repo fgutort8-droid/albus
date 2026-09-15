@@ -77,7 +77,7 @@ select is(public.effective_tier('a1000000-0000-4000-8000-000000000004'), 'free',
 select results_eq(
   $$select tier, active_tasks, breakdown_per_week, grade_per_week, rubrics
       from public.plans order by rank$$,
-  $$values ('free', 5,          3,             0, 3),
+  $$values ('free', 5,          5,             0, 3),
            ('plus', 10,         null::integer, 2, 5),
            ('pro',  null::integer, null::integer, 5, null::integer)$$,
   'every tier carries exactly the approved limits');
@@ -85,31 +85,31 @@ select results_eq(
 -- -------------------------------------------------------------------------
 -- AI step plans.
 
-select pg_temp.used('a1000000-0000-4000-8000-000000000001', 'breakdown', 2);
+select pg_temp.used('a1000000-0000-4000-8000-000000000001', 'breakdown', 4);
 select lives_ok(
   $$select public.check_and_record_ai_usage(
       'a1000000-0000-4000-8000-000000000001', 'breakdown', 'claude-haiku-4-5')$$,
-  'Free: the third AI plan of the week is allowed');
+  'Free: the fifth AI plan of the week is allowed');
 select throws_ok(
   $$select public.check_and_record_ai_usage(
       'a1000000-0000-4000-8000-000000000001', 'breakdown', 'claude-haiku-4-5')$$,
   'Q0006', 'ALLOWANCE_WEEKLY',
-  'Free: the fourth AI plan of the week is refused as a used-up allowance');
+  'Free: the sixth AI plan of the week is refused as a used-up allowance');
 
 select pg_temp.clear('a1000000-0000-4000-8000-000000000001');
-select pg_temp.used('a1000000-0000-4000-8000-000000000001', 'breakdown', 3, interval '8 days');
+select pg_temp.used('a1000000-0000-4000-8000-000000000001', 'breakdown', 5, interval '8 days');
 select lives_ok(
   $$select public.check_and_record_ai_usage(
       'a1000000-0000-4000-8000-000000000001', 'breakdown', 'claude-haiku-4-5')$$,
   'Free: plans from more than a week ago no longer count');
 
 select pg_temp.clear('a1000000-0000-4000-8000-000000000001');
-select pg_temp.used('a1000000-0000-4000-8000-000000000001', 'breakdown', 3,
+select pg_temp.used('a1000000-0000-4000-8000-000000000001', 'breakdown', 5,
                     interval '2 days', 'failed');
 select lives_ok(
   $$select public.check_and_record_ai_usage(
       'a1000000-0000-4000-8000-000000000001', 'breakdown', 'claude-haiku-4-5')$$,
-  'Free: a plan that failed to generate does not spend one of the three');
+  'Free: a plan that failed to generate does not spend one of the five');
 
 select pg_temp.used('a1000000-0000-4000-8000-000000000002', 'breakdown', 30);
 select lives_ok(
@@ -123,12 +123,12 @@ select lives_ok(
       'a1000000-0000-4000-8000-000000000003', 'breakdown', 'claude-haiku-4-5')$$,
   'Pro: AI plans are unlimited');
 
-select pg_temp.used('a1000000-0000-4000-8000-000000000004', 'breakdown', 3);
+select pg_temp.used('a1000000-0000-4000-8000-000000000004', 'breakdown', 5);
 select throws_ok(
   $$select public.check_and_record_ai_usage(
       'a1000000-0000-4000-8000-000000000004', 'breakdown', 'claude-haiku-4-5')$$,
   'Q0006', 'ALLOWANCE_WEEKLY',
-  'Lapsed Plus: back to three AI plans a week');
+  'Lapsed Plus: back to five AI plans a week');
 
 -- -------------------------------------------------------------------------
 -- AI marking.
@@ -219,8 +219,8 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', 'a1000000-0000-4000-8000-000000000001', true);
 select results_eq(
   $$select breakdown_limit_week, breakdown_used_week from public.my_plan()$$,
-  $$values (3, 2)$$,
-  'Free: the meter shows 2 of 3 AI plans used');
+  $$values (5, 2)$$,
+  'Free: the meter shows 2 of 5 AI plans used');
 
 select set_config('request.jwt.claim.sub', 'a1000000-0000-4000-8000-000000000002', true);
 select is((select breakdown_limit_week from public.my_plan()), null::integer,

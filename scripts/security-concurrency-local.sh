@@ -44,6 +44,11 @@ assert_race_outcomes() {
 }
 
 cleanup() {
+  # Usage rows outlive a deleted account (the foreign key sets null) and count
+  # toward the app-wide spending cap for a day. Remove them first, or a few
+  # local runs fill the US$1 cap and the next test is refused.
+  db -q -c "delete from public.ai_usage where user_id in ('${TEST_USER_ID}', '${FREE_USER_ID}')
+              or user_id::text like '${COLLISION_USER_PREFIX}%'" >/dev/null 2>&1 || true
   db -q -c "delete from auth.users where id = '${TEST_USER_ID}'" >/dev/null 2>&1 || true
   db -q -c "delete from auth.users where id = '${FREE_USER_ID}'" >/dev/null 2>&1 || true
   db -q -c "delete from auth.users where id::text like '${COLLISION_USER_PREFIX}%'" \
@@ -95,7 +100,7 @@ if [ "$GRADE_SUCCESS" -ne 1 ] || [ "$GRADE_RESERVED" -ne 1 ]; then
   exit 1
 fi
 
-# Free has three AI plans a week. Seed two, two days back -- inside the weekly
+# Free has five AI plans a week. Seed four, two days back -- inside the weekly
 # allowance, outside the rate-limit windows -- then race twelve for the last.
 db -q -c "
   insert into auth.users (
@@ -109,7 +114,7 @@ db -q -c "
                                reserved_cost_microusd, created_at)
   select '${FREE_USER_ID}', 'breakdown', 'claude-haiku-4-5', 'completed', 1,
          now() - interval '2 days'
-    from generate_series(1, 2);
+    from generate_series(1, 4);
 " >/dev/null
 
 for i in $(seq 1 12); do

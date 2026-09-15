@@ -99,7 +99,7 @@ struct PaywallScreen: View {
         var lines: [(String, String)] {
             switch self {
             case .free:
-                [("3 AI plans a week", "After that, Albus plans on your phone."),
+                [("5 AI plans a week", "After that, Albus plans on your phone."),
                  ("5 active tasks", "Planned, scheduled, and rebuilt when your week moves."),
                  ("3 saved rubrics", "Paste a mark scheme once and reuse it."),
                  ("No marking", "The Grader needs Plus."),
@@ -359,7 +359,7 @@ struct PaywallScreen: View {
     private var callToAction: String {
         if isCurrentPlan { return "Your plan" }
         if plan == .free { return "Free is included" }
-        return current == .free ? "Start 7 days free" : "Switch to \(plan.title)"
+        return current == .free ? "Start 3 days free" : "Switch to \(plan.title)"
     }
 
     private var subCaption: String {
