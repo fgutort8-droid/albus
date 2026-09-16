@@ -82,6 +82,15 @@ select results_eq(
            ('pro',  null::integer, null::integer, 5, null::integer)$$,
   'every tier carries exactly the approved limits');
 
+-- The fair-use ceiling exists to bound "unlimited" AI plans, not to describe
+-- a student's real month -- pinned here so nobody loosens it back toward the
+-- rate limit's theoretical maximum (money the app-wide cap would then also
+-- have to catch) by accident.
+select results_eq(
+  $$select tier, rolling_30d_cost_microusd from private.ai_tier_budgets order by tier$$,
+  $$values ('free', 1000000), ('plus', 3000000), ('pro', 6000000)$$,
+  'fair-use ceilings sit near real use, not the rate limit''s theoretical maximum');
+
 -- -------------------------------------------------------------------------
 -- AI step plans.
 
