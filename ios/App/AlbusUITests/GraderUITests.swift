@@ -130,10 +130,10 @@ final class GraderUITests: XCTestCase {
 
         // Prices, as a student reads them. A card with no price is not a plan.
         XCTAssertTrue(app.staticTexts.containing(
-            NSPredicate(format: "label CONTAINS '7.99'")).element.waitForExistence(timeout: 5),
+            NSPredicate(format: "label CONTAINS '9.99'")).element.waitForExistence(timeout: 5),
                       "Plus has no price on the paywall")
         XCTAssertTrue(app.staticTexts.containing(
-            NSPredicate(format: "label CONTAINS '14.99'")).element.exists,
+            NSPredicate(format: "label CONTAINS '17.99'")).element.exists,
                       "Pro has no price on the paywall")
 
         // "You are here". The most useful thing a price list can tell somebody.

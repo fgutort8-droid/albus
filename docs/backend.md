@@ -78,9 +78,10 @@ the student's stated budget by more than 50%.
 Three tiers. Every limit lives in **`public.plans`** — one row per tier, read by
 the gate, the meter and the paywall alike:
 
-| | Free (€0) | Plus (€7.99/mo) | Pro (€14.99/mo) |
+| | Free (€0) | Plus (€9.99/mo) | Pro (€17.99/mo) |
 |---|---|---|---|
 | Active tasks | 5 | 10 | unlimited |
+| AI step plans | 5 / week | unlimited | unlimited |
 | Albus Grader | — | 2 / week | 5 / week |
 | Saved rubrics | 3 | 5 | unlimited |
 | Tools | basic | expanded | all |

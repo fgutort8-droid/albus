@@ -257,10 +257,10 @@ before any model runs.
 
 ## Plans — Free, Plus, Pro
 
-| | Free (€0) | Plus (€7.99/mo) | Pro (€14.99/mo) |
+| | Free (€0) | Plus (€9.99/mo) | Pro (€17.99/mo) |
 |---|---|---|---|
 | Active tasks | 5 | 10 | unlimited |
-| Ask Albus | — | — | 300 / month |
+| AI step plans | 5 / week | unlimited | unlimited |
 | Albus Grader | — | 2 / week | 5 / week |
 | Saved rubrics | 3 | 5 | unlimited |
 | Tools | basic | expanded | all + curriculum intelligence |

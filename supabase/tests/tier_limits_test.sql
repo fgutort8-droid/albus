@@ -75,12 +75,12 @@ select is(public.effective_tier('a1000000-0000-4000-8000-000000000004'), 'free',
 -- it by accident must fail here rather than reach a student.
 
 select results_eq(
-  $$select tier, active_tasks, breakdown_per_week, grade_per_week, rubrics
+  $$select tier, price_cents, active_tasks, breakdown_per_week, grade_per_week, rubrics
       from public.plans order by rank$$,
-  $$values ('free', 5,          5,             0, 3),
-           ('plus', 10,         null::integer, 2, 5),
-           ('pro',  null::integer, null::integer, 5, null::integer)$$,
-  'every tier carries exactly the approved limits');
+  $$values ('free',    0, 5,             5,             0, 3),
+           ('plus',  999, 10,            null::integer, 2, 5),
+           ('pro',  1799, null::integer, null::integer, 5, null::integer)$$,
+  'every tier carries exactly the approved price and limits');
 
 -- The fair-use ceiling exists to bound "unlimited" AI plans, not to describe
 -- a student's real month -- pinned here so nobody loosens it back toward the

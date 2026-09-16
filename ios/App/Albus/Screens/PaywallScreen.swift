@@ -67,8 +67,8 @@ struct PaywallScreen: View {
         var priceCents: Int {
             switch self {
             case .free: 0
-            case .plus: 799
-            case .pro:  1499
+            case .plus: 999
+            case .pro:  1799
             }
         }
 

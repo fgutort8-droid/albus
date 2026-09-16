@@ -104,7 +104,8 @@ struct PlanAllowanceTests {
 @Suite("Pricing")
 struct PricingTests {
 
-    /// Mirrors `public.plans` as applied by migration 0034. Update together.
+    /// Mirrors `public.plans` as applied by migration 0034, with prices from
+    /// `20260916120000_launch_prices`. Update together.
     private struct ServerPlan {
         let plan: PaywallScreen.Plan
         let priceCents: Int
@@ -115,8 +116,8 @@ struct PricingTests {
 
     private static let server: [ServerPlan] = [
         .init(plan: .free, priceCents:    0, tasks:    5, gradeWeek: 0, rubrics:    3),
-        .init(plan: .plus, priceCents:  799, tasks:   10, gradeWeek: 2, rubrics:    5),
-        .init(plan: .pro,  priceCents: 1499, tasks:  nil, gradeWeek: 5, rubrics:  nil),
+        .init(plan: .plus, priceCents:  999, tasks:   10, gradeWeek: 2, rubrics:    5),
+        .init(plan: .pro,  priceCents: 1799, tasks:  nil, gradeWeek: 5, rubrics:  nil),
     ]
 
     @Test("every plan's price matches the server's")
@@ -126,8 +127,8 @@ struct PricingTests {
                     "\(row.plan.title): \(row.plan.priceCents)c on screen, \(row.priceCents)c in public.plans")
         }
         #expect(PaywallScreen.Plan.free.price == "Free")
-        #expect(PaywallScreen.Plan.plus.price == "€7.99")
-        #expect(PaywallScreen.Plan.pro.price == "€14.99")
+        #expect(PaywallScreen.Plan.plus.price == "€9.99")
+        #expect(PaywallScreen.Plan.pro.price == "€17.99")
     }
 
     /// `EntitlementService.Plan.freeFallback` is what the app shows before the
