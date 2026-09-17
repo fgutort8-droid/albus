@@ -18,10 +18,6 @@ final class Course {
     /// error rather than silent data corruption.
     var colorKey: String
     var courseTemplateID: UUID?
-    /// What the student is aiming for in this subject, on whatever scale their
-    /// school uses. Stored alongside the server column so later sync cannot
-    /// lose it.
-    var targetGrade: Int? = nil
     var createdAt: Date
 
     @Relationship(deleteRule: .cascade, inverse: \Assignment.course)
@@ -29,13 +25,12 @@ final class Course {
 
     init(id: UUID = UUID(), remoteID: UUID? = nil, displayName: String,
          colorKey: Tokens.SubjectColor = .violet, courseTemplateID: UUID? = nil,
-         targetGrade: Int? = nil, createdAt: Date = .now) {
+         createdAt: Date = .now) {
         self.id = id
         self.remoteID = remoteID
         self.displayName = displayName
         self.colorKey = colorKey.rawValue
         self.courseTemplateID = courseTemplateID
-        self.targetGrade = targetGrade
         self.createdAt = createdAt
     }
 
