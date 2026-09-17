@@ -1,5 +1,9 @@
 -- One-shot production deploy: history repair + the three pending migrations.
 --
+-- RAN IN PRODUCTION ON 16 SEP 2026. Kept as the record of what ran; do not run
+-- it again. Since 20260917120000_retire_ib_schema it would refuse anyway,
+-- because the IB objects it checks for no longer exist.
+--
 -- WHY THIS IS ONE FILE. Applying a migration through the dashboard (or the
 -- MCP apply_migration tool) stamps the *moment of application* as its version,
 -- not the version in its filename. That is not a hypothesis: production records

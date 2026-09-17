@@ -19,15 +19,12 @@ but it makes one loud instead of silent.
 **`main` is protected.** No direct commits, no direct pushes, no force-pushes.
 Every change reaches `main` through a reviewed pull request.
 
-This is not ceremony. Merging to `main` is what deploys migrations to the live
-database, and a bad migration is the one class of mistake that is genuinely
-hard to undo.
+This is not ceremony. Production is deployed from `main`, and a bad migration
+is the one class of mistake that is genuinely hard to undo.
 
-**Nothing deploys automatically, by design.** There is no deploy workflow.
-Migrations are applied by hand, with the owner's authorization, because
-`supabase db push` cannot be trusted until the recorded history is repaired
-(below) and because a migration is the one class of mistake that is genuinely
-hard to undo.
+**Nothing deploys automatically, by design.** There is no deploy workflow, and
+merging changes nothing in production. The owner applies each deploy by hand,
+after the merge (see "How a migration reaches production" below).
 
 A `Deploy migrations` workflow used to exist and failed on all twelve of its
 runs, since the three secrets it needed were never set. It was removed on
@@ -67,7 +64,10 @@ Once a migration has been applied to the live database it is **history**.
 Never edit it, never delete it, never renumber it. Fix forward with a new file.
 CI enforces this on every PR.
 
-Naming: `NNNN_short_description.sql`, four digits, zero-padded.
+Naming: `YYYYMMDDHHMMSS_short_description.sql`, the form
+`supabase migration new` creates. The timestamp is the version production
+records, so it must be later than every existing one. `0001`–`0037` predate
+this and keep their names.
 
 ## Before you open a PR
 
@@ -81,25 +81,33 @@ The PR template carries the full checklist. The three that matter most:
 3. Run `supabase test db --local` and
    `scripts/security-concurrency-local.sh`. Both must pass.
 
-## Applying migrations by hand
+## How a migration reaches production
 
-Don't, except on a throwaway branch database. The path to production is a
-merged PR. If you need to apply something urgently, apply it via a PR with
-`workflow_dispatch` rather than reaching into the dashboard — otherwise the
-repo and the database drift, and the repo stops being the source of truth.
+After its pull request merges, the owner runs `supabase db push`. It applies
+every migration whose version production has not recorded, and records each
+one under its filename version. The owner runs it from a deploy script written
+for that change. The script has a dry-run mode, checks each step before the
+next, and stops at the first problem. When a change also touches an Edge
+Function, its pull request says which goes first.
 
-That drift is not hypothetical: two migrations were applied by hand and never
-written to a file, so the repo could not rebuild the database it described.
-They were recovered from `supabase_migrations.schema_migrations` and are now
-`0016` and `0017`. If you ever have to apply something directly, write the file
-in the same change — a migration that exists only in the database is a migration
-nobody can review, roll forward, or reproduce.
+**Never apply a migration through the dashboard's SQL editor or the MCP
+`apply_migration` tool.** Both record the moment of application as the version
+instead of the filename's, and `db push` would later apply that migration a
+second time. That is how the history drifted, twice (below).
 
-### The history table is currently drifted, and it is a loaded gun
+Don't reach into the database by hand either. Two migrations were once applied
+by hand and never written to a file, so the repo could not rebuild the
+database it described. They were recovered from
+`supabase_migrations.schema_migrations` and are now `0016` and `0017`. If you
+ever have to apply something directly, write the file in the same change — a
+migration that exists only in the database is a migration nobody can review,
+roll forward, or reproduce.
 
-It happened again, in the other direction. Every migration since `0030` was
-applied by hand through the dashboard, which stamps its own timestamp, so the
-recorded `version` no longer matches the filename:
+### The history table drifted, and was repaired on 16 Sep 2026
+
+It happened again, in the other direction. Every migration from `0030` to
+`20260901200000` was applied by hand through the dashboard, which stamps its
+own timestamp, so the recorded `version` stopped matching the filename:
 
 | File | Recorded as |
 | --- | --- |
@@ -109,15 +117,15 @@ recorded `version` no longer matches the filename:
 | `20260831174227_drop_scaffold_course_templates.sql` | `20260901225530` |
 | `20260901200000_ib_student_context.sql` | **not recorded at all** |
 
-The schema itself is fine — `supabase db reset --local` rebuilds it from these
-files and the pgTAP suite passes against the result, so the files are accurate.
-What is wrong is only the bookkeeping.
+The schema was fine; only the bookkeeping was wrong. It still mattered: `db
+push` applies every migration whose version it does not recognise, and it did
+not recognise thirteen of them, so it would have replayed the entire security
+hardening against a database that already had it. That is why `db push` was
+off limits until then, and why the deploy workflow was removed rather than
+fixed.
 
-**This is why `supabase db push` must not be run against production, and why
-there is no deploy workflow.** `db push` applies every migration whose version
-it does not recognise. It does not recognise thirteen of them. An automatic
-deploy would, on the next merge touching `supabase/migrations/**`, replay the
-entire security hardening against a database that already has it.
-
-Repair it by aligning the recorded versions with the filenames — bookkeeping
-only, no DDL — before enabling automated deploys.
+`scripts/deploy-2026-09-05.sql` repaired the history on 16 Sep 2026. It also
+applied the three migrations still pending. `supabase db push` then applied the
+rest. Every migration is now recorded under its filename version. The
+pre-repair table is kept as
+`supabase_migrations.schema_migrations_backup_20260905`.
