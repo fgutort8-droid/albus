@@ -43,8 +43,9 @@ not match, and SwiftData then failed with *Sandbox access to file-write-create
 denied*. A working app is worth more than an entitlement that cannot be
 verified here.
 
-Quota enforcement does not depend on any of this. The global spend fuse
-(migration 0013) bounds abuse regardless of how many accounts exist, and
+Quota enforcement does not depend on any of this. The free accounts' spend
+fuse (`private.ai_pool_budget`) bounds abuse regardless of how many accounts
+exist, and
 `account_risk` (0035) notices a device that has signed up five times this
 afternoon — neither of which cares whether the Keychain held.
 
@@ -141,10 +142,10 @@ sign-up, so testing on it proves nothing. A fresh install must reach the app.
 xcodebuild test -scheme Albus -only-testing:AlbusUITests
 ```
 
-**Until it is on**, account farming stays bounded by the global spend fuse
-(`app_config.global_ai_calls_per_hour`, currently 2000/hour) plus the per-IP
-sign-up limit of 10/hour. The residual risk is cost, not data — see
-`docs/security-model.md` § 6.
+**Until it is on**, account farming stays bounded by the free accounts' fuses
+(100 AI calls/hour and US$1/day, which paying students do not share) plus the
+per-IP sign-up limit of 10/hour. The residual risk is cost, not data — see
+`docs/security-model.md` § 4 and § 5.
 
 
 ---

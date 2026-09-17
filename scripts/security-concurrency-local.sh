@@ -9,6 +9,8 @@ TEST_USER_ID='40000000-0000-4000-8000-000000000001'
 FREE_USER_ID='41000000-0000-4000-8000-000000000001'
 COLLISION_USER_PREFIX='42000000-0000-4000-8000-'
 COLLISION_RUBRIC_ID='43000000-0000-4000-8000-000000000001'
+RESTORE_FROM_ID='44000000-0000-4000-8000-000000000001'
+RESTORE_TO_ID='44000000-0000-4000-8000-000000000002'
 TEST_OUTPUT_DIR=$(mktemp -d)
 
 db() {
@@ -48,7 +50,14 @@ cleanup() {
   # toward the app-wide spending cap for a day. Remove them first, or a few
   # local runs fill the US$1 cap and the next test is refused.
   db -q -c "delete from public.ai_usage where user_id in ('${TEST_USER_ID}', '${FREE_USER_ID}')
-              or user_id::text like '${COLLISION_USER_PREFIX}%'" >/dev/null 2>&1 || true
+              or user_id::text like '${COLLISION_USER_PREFIX}%'
+              or user_id in ('${RESTORE_FROM_ID}', '${RESTORE_TO_ID}')" >/dev/null 2>&1 || true
+  db -q -c "delete from public.subscription_transactions
+              where original_transaction_id = 'race-restore';
+            delete from public.subscription_webhook_events
+              where event_id like 'race-restore-%';
+            delete from auth.users
+              where id in ('${RESTORE_FROM_ID}', '${RESTORE_TO_ID}')" >/dev/null 2>&1 || true
   db -q -c "delete from auth.users where id = '${TEST_USER_ID}'" >/dev/null 2>&1 || true
   db -q -c "delete from auth.users where id = '${FREE_USER_ID}'" >/dev/null 2>&1 || true
   db -q -c "delete from auth.users where id::text like '${COLLISION_USER_PREFIX}%'" \
@@ -243,4 +252,89 @@ if [ "$COLLISION_RUBRICS" -ne 1 ] || [ "$COLLISION_ITEMS" -ne 1 ]; then
   exit 1
 fi
 
-printf 'concurrency attacks pass: grading 1/12, AI plan 1/12, task 1/12, rubric 1/12, rubric-owner 1/12\n'
+# A restore moves a purchase and its last 30 days of AI use while the same two
+# accounts ask for AI and RevenueCat delivers renewals. The restore takes the
+# AI gate's locks in the gate's own order, global then accounts; the other
+# order deadlocks within a few rounds. Twelve rounds of all four must finish
+# with no deadlock and leave the purchase, and Pro, with exactly one account.
+db -q -c "
+  insert into auth.users (
+    id, instance_id, aud, role, email, encrypted_password,
+    raw_app_meta_data, raw_user_meta_data, created_at, updated_at, is_anonymous
+  )
+  select u, '00000000-0000-0000-0000-000000000000',
+         'authenticated', 'authenticated', null, '', '{}', '{}', now(), now(), true
+    from unnest(array['${RESTORE_FROM_ID}', '${RESTORE_TO_ID}']::uuid[]) u;
+  select public.apply_subscription_state(
+    'race-restore', '${RESTORE_FROM_ID}', 'race-restore-0',
+    'com.felipegutierrez.albus.pro.monthly', 'Production', now(),
+    now() + interval '1 month', null, 'race-restore-event-0',
+    now() - interval '1 hour');
+" >/dev/null
+
+for i in $(seq 1 12); do
+  FROM_ID=$RESTORE_FROM_ID
+  TO_ID=$RESTORE_TO_ID
+  if [ $((i % 2)) -eq 0 ]; then
+    FROM_ID=$RESTORE_TO_ID
+    TO_ID=$RESTORE_FROM_ID
+  fi
+  (
+    set +e
+    db -Atq -c "select public.transfer_subscriptions(
+      array['${FROM_ID}']::uuid[], '${TO_ID}', 'race-restore-transfer-$i', now())" \
+      >"$TEST_OUTPUT_DIR/restore-transfer-$i" 2>&1
+  ) &
+  (
+    set +e
+    db -Atq -c "select public.apply_subscription_state(
+      'race-restore', '${FROM_ID}', 'race-restore-$i',
+      'com.felipegutierrez.albus.pro.monthly', 'Production', now(),
+      now() + interval '1 month' + interval '$i minutes', null,
+      'race-restore-event-$i', now() - interval '1 hour' + interval '$i seconds')" \
+      >"$TEST_OUTPUT_DIR/restore-renewal-$i" 2>&1
+  ) &
+  (
+    set +e
+    db -Atq -c "select public.check_and_record_ai_usage(
+      '${FROM_ID}', 'breakdown', 'claude-haiku-4-5')" \
+      >"$TEST_OUTPUT_DIR/restore-plan-$i" 2>&1
+  ) &
+  (
+    set +e
+    db -Atq -c "select public.check_and_record_ai_usage(
+      '${TO_ID}', 'grade', 'claude-opus-5')" \
+      >"$TEST_OUTPUT_DIR/restore-grade-$i" 2>&1
+  ) &
+done
+wait
+
+if grep -q deadlock "$TEST_OUTPUT_DIR"/restore-*; then
+  echo "restore race deadlocked:" >&2
+  grep -l deadlock "$TEST_OUTPUT_DIR"/restore-* >&2
+  exit 1
+fi
+# Refusals from the gate are expected: the accounts change plan mid-race and
+# the paid fuse fills. Anything else, including a refused connection, is not.
+RESTORE_UNEXPECTED=$(grep -hiE 'error|fatal' "$TEST_OUTPUT_DIR"/restore-* \
+  | grep -vE 'ALLOWANCE_|RATE_LIMIT_|GLOBAL_CAPACITY|FAIR_USE|PLAN_UPGRADE|ABUSE_SUSPECTED|VERIFICATION_REQUIRED' \
+  || true)
+if [ -n "$RESTORE_UNEXPECTED" ]; then
+  echo "restore race failed unexpectedly:" >&2
+  printf '%s\n' "$RESTORE_UNEXPECTED" >&2
+  exit 1
+fi
+RESTORE_ROWS=$(db -Atq -c "select count(*) from public.subscription_transactions
+  where original_transaction_id = 'race-restore'")
+RESTORE_PRO=$(db -Atq -c "select count(*) from unnest(
+  array['${RESTORE_FROM_ID}', '${RESTORE_TO_ID}']::uuid[]) u
+  where public.effective_tier(u) = 'pro'")
+RESTORE_OWNER_PRO=$(db -Atq -c "select public.effective_tier(s.user_id)
+  from public.subscription_transactions s
+  where s.original_transaction_id = 'race-restore'")
+if [ "$RESTORE_ROWS" -ne 1 ] || [ "$RESTORE_PRO" -ne 1 ] || [ "$RESTORE_OWNER_PRO" != "pro" ]; then
+  echo "restore race failed: rows=$RESTORE_ROWS pro=$RESTORE_PRO owner=$RESTORE_OWNER_PRO" >&2
+  exit 1
+fi
+
+printf 'concurrency attacks pass: grading 1/12, AI plan 1/12, task 1/12, rubric 1/12, rubric-owner 1/12, restore 0 deadlocks\n'

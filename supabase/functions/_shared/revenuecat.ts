@@ -45,14 +45,55 @@ export function revokesImmediately(eventType: string): boolean {
   return eventType === "EXPIRATION";
 }
 
-/** A webhook integration can cover several apps; only Albus app ids may grant. */
+/**
+ * A webhook integration can cover several apps; only Albus app ids may grant.
+ *
+ * `allowMissing` is for TRANSFER, which RevenueCat can send without an app id
+ * because it moves a customer rather than a store purchase. An app id that is
+ * present must still be one of ours.
+ */
 export function revenueCatAppIsAllowed(
   appId: unknown,
   configuredIds: string,
+  { allowMissing = false }: { allowMissing?: boolean } = {},
 ): boolean {
-  if (typeof appId !== "string" || appId.length === 0) return false;
   const allowed = configuredIds.split(",").map((id) => id.trim()).filter(Boolean);
-  return allowed.length > 0 && allowed.includes(appId);
+  if (allowed.length === 0) return false;
+  if (appId === undefined || appId === null) return allowMissing;
+  return typeof appId === "string" && allowed.includes(appId);
+}
+
+/**
+ * Only purchases Apple processed can change a plan.
+ *
+ * RevenueCat's Test Store makes purchases that look real and cost nothing, and
+ * promotional grants have no store transaction at all. Anything that is not
+ * the App Store fails closed, including an event that names no store.
+ */
+export function storeCanGrant(store: unknown): boolean {
+  return store === "APP_STORE" || store === "MAC_APP_STORE";
+}
+
+const USER_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** A Supabase user id. The app tells RevenueCat to use it as the App User ID. */
+export function isUserID(value: unknown): value is string {
+  return typeof value === "string" && USER_ID_RE.test(value);
+}
+
+/**
+ * The Albus accounts named in a TRANSFER id list. RevenueCat also lists its
+ * own anonymous ids (`$RCAnonymousID:...`), which belong to nobody here.
+ */
+export function userIDsIn(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter(isUserID).map((id) => id.toLowerCase()))];
+}
+
+/** A finite number RevenueCat sent, or null. */
+export function finiteOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /** Verify `t=<unix>,v1=<hex>` over the exact raw JSON bytes. */

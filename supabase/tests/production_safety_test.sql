@@ -549,13 +549,18 @@ insert into public.subscription_products (product_id, tier) values
   ('albus.plus.monthly', 'plus'),
   ('albus.pro.monthly', 'pro');
 
+-- Sandbox purchases unlock a plan only while `allow_sandbox_subscriptions`
+-- is on. It is on in production, because App Review buys in the sandbox
+-- (payments_test.sql covers that side). The switch itself must still work.
+update public.app_config set int_value = 0 where key = 'allow_sandbox_subscriptions';
 select is(public.apply_subscription_state(
   'sandbox-a', '10000000-0000-4000-8000-000000000001', 'sandbox-tx',
   'albus.plus.monthly', 'Sandbox', now(), now() + interval '1 month', null,
   'event-sandbox', now()), 'sandbox_ignored',
-  'a free sandbox purchase cannot grant production access');
+  'with the switch off, a free sandbox purchase cannot grant production access');
 select is(public.effective_tier('10000000-0000-4000-8000-000000000001'), 'free',
           'the ignored sandbox event leaves the user Free');
+update public.app_config set int_value = 1 where key = 'allow_sandbox_subscriptions';
 select is(public.apply_subscription_state(
   'unknown-a', '10000000-0000-4000-8000-000000000001', 'unknown-tx',
   'attacker.pro.forever', 'Production', now(), now() + interval '10 years', null,
