@@ -1,0 +1,41 @@
+$ scripts/prove_retire_ib_local.sh   # 17 Sep 2026, local Supabase, CLI 2.98.2
+Migration under test: 20260917120000. Starting point: 20260916120000.
+
+1. Converts every retired type and keeps every row
+PASS the new pgTAP file fails against the old schema (6 assertions before it stops)
+PASS the migration applied
+     NOTICE (00000): retire_ib_schema: converted 6 assignment(s) from an IB task type
+     before:
+       1390d838-5bde-4408-9281-38113ddf8fc1 essay active
+       23633b3a-4eaa-40c8-aa2e-7cacb8bb0322 tok_essay active
+       26b8c8ce-bdf4-4f2a-874e-c7fdc32d20e0 final_exam completed
+       95973155-dfc9-4793-9e42-10c0de443490 tok_exhibition active
+       d5242f2b-bb9a-41d1-90d9-ba5b734db75b mock_exam completed
+       e538eba9-d852-4f5b-a5ab-549141ce9833 extended_essay active
+       ece21565-8e54-48bf-b885-3c723c9c5ba7 internal_assessment active
+     after:
+       1390d838-5bde-4408-9281-38113ddf8fc1 essay active
+       23633b3a-4eaa-40c8-aa2e-7cacb8bb0322 essay active
+       26b8c8ce-bdf4-4f2a-874e-c7fdc32d20e0 revision completed
+       95973155-dfc9-4793-9e42-10c0de443490 project active
+       d5242f2b-bb9a-41d1-90d9-ba5b734db75b revision completed
+       e538eba9-d852-4f5b-a5ab-549141ce9833 essay active
+       ece21565-8e54-48bf-b885-3c723c9c5ba7 project active
+PASS all 7 rows kept, each converted as documented
+PASS history records 20260917120000
+
+2. Refuses, and changes nothing, while IB context holds a value
+PASS the migration refused
+     IB_CONTEXT_HAS_DATA: 1 profile(s) and 1 course(s) still hold IB context; nothing was changed (SQLSTATE P0001)
+PASS schema, rows, profile values and history are byte-for-byte unchanged
+
+3. Fails at its last check, after every change has run, and keeps none of them
+PASS the migration failed at its final check
+     a routine still refers to a retired IB name
+PASS no conversion, drop or rewrite survived: all byte-for-byte unchanged
+
+4. Back to every migration
+PASS a full reset applies 20260917120000
+PASS the new pgTAP file passes (29 assertions)
+
+ALL PASS
