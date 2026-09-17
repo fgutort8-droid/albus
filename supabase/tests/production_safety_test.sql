@@ -126,7 +126,8 @@ select ok(has_function_privilege(
   'the controlled course RPC remains callable');
 
 -- The task-type list is written in three places: this constraint, TASK_TYPES
--- in the breakdown Edge Function, and TaskType in the iOS app. They have
+-- in supabase/functions/_shared/task_type.ts (used by breakdown), and TaskType
+-- in the iOS app. They have
 -- drifted before. This is the only one of the three that can be checked
 -- against the real database, so it is where the expected set is pinned. What
 -- the column actually accepts is tested row by row in

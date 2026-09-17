@@ -23,8 +23,9 @@ cd "$(dirname "$0")/.."
 
 TARGET=20260917120000
 TEST_FILE=supabase/tests/courses_and_task_types_test.sql
-BEFORE=$(ls supabase/migrations | sed -n 's/^\([0-9]*\)_.*\.sql$/\1/p' | sort \
-         | awk -v t="$TARGET" '$1 < t' | tail -1)
+VERSIONS=$(ls supabase/migrations | sed -n 's/^\([0-9]*\)_.*\.sql$/\1/p' | sort)
+BEFORE=$(awk -v t="$TARGET" '$1 < t' <<<"$VERSIONS" | tail -1)
+LATEST=$(tail -1 <<<"$VERSIONS")
 DB="supabase_db_$(sed -n 's/^project_id *= *"\(.*\)"/\1/p' supabase/config.toml)"
 USER_ID=20000000-0000-4000-8000-000000000001
 COURSE_ID=20000000-0000-4000-8000-0000000000c1
@@ -38,11 +39,42 @@ sql()  { docker exec -i "$DB" psql -U postgres -X -A -t -q -v ON_ERROR_STOP=1 "$
 # The pgTAP file, run to the end whatever happens; prints its TAP lines.
 tap()  { docker exec -i "$DB" psql -U postgres -X -A -t -q <"$TEST_FILE" 2>&1 || true; }
 
-reset_to_before() {
-  supabase db reset --local --no-seed --yes --version "$BEFORE" >"$WORK/reset.log" 2>&1 \
-    || { cat "$WORK/reset.log"; exit 1; }
-  [ "$(sql -c "select max(version) from supabase_migrations.schema_migrations")" = "$BEFORE" ] \
-    || { echo "reset did not stop at $BEFORE"; exit 1; }
+# Rebuilds the database up to version $1, then checks it got there. `db reset`
+# restarts the other local services after rebuilding, and it fails if one of
+# them is slow to report healthy. On a busy machine that is usually storage,
+# and the database is already complete by then. That one failure is tolerated.
+# The version check is what this proof relies on. Anything else stops here.
+db_reset() {
+  local want=$1; shift
+  if ! supabase db reset --local --no-seed --yes "$@" >"$WORK/reset.log" 2>&1; then
+    if grep -q "^Restarting containers" "$WORK/reset.log" \
+       && grep -q "container is not ready" "$WORK/reset.log"; then
+      echo "     (a local service was slow to restart after the rebuild; checking the database itself)"
+    else
+      tail -40 "$WORK/reset.log"; exit 1
+    fi
+  fi
+  local got
+  got=$(sql -c "select max(version) from supabase_migrations.schema_migrations" 2>&1) || got="unreadable: $got"
+  [ "$got" = "$want" ] || { tail -40 "$WORK/reset.log"; echo "reset reached '$got', not $want"; exit 1; }
+}
+
+reset_to_before() { db_reset "$BEFORE" --version "$BEFORE"; }
+
+# `supabase migration up`, logged to $1, returning its status. Two steps below
+# expect it to fail, so a CLI that cannot reach the database at all would pass
+# them for the wrong reason. That case stops the whole proof instead: it says
+# nothing about the migration either way.
+migrate_up() {
+  local status=0
+  supabase migration up --local >"$1" 2>&1 || status=$?
+  if grep -q "failed to connect to postgres" "$1"; then
+    tail -5 "$1"
+    echo "ABORTED: the CLI could not reach the local database, so this run proves nothing."
+    echo "Rerun it when the machine is less busy."
+    exit 2
+  fi
+  return "$status"
 }
 
 # One student, one course, and one task of each retired type plus a generic
@@ -99,7 +131,7 @@ sed -e 's/ internal_assessment / project /' -e 's/ extended_essay / essay /' \
     -e 's/ tok_essay / essay /' -e 's/ tok_exhibition / project /' \
     -e 's/ mock_exam / revision /' -e 's/ final_exam / revision /' \
     "$WORK/before.txt" >"$WORK/expected.txt"
-if supabase migration up --local >"$WORK/up.log" 2>&1; then
+if migrate_up "$WORK/up.log"; then
   pass "the migration applied"
 else
   bad "the migration failed on convertible data"; cat "$WORK/up.log"
@@ -123,7 +155,7 @@ seed
 sql -c "update public.profiles set exam_session = '2027-05' where id = '$USER_ID'"
 sql -c "update public.courses set level = 'HL' where id = '$COURSE_ID'"
 before_fp=$(fingerprint)
-if supabase migration up --local >"$WORK/refuse.log" 2>&1; then
+if migrate_up "$WORK/refuse.log"; then
   bad "the migration applied over IB context it should have refused to drop"
 else
   pass "the migration refused"
@@ -142,7 +174,7 @@ seed
 # exists to catch, and it runs only after every drop and conversion.
 sql -c "create function public.zz_reads_exam_session() returns text language sql as \$\$ select 'exam_session' \$\$"
 before_fp=$(fingerprint)
-if supabase migration up --local >"$WORK/late.log" 2>&1; then
+if migrate_up "$WORK/late.log"; then
   bad "the migration applied despite a routine naming a retired column"
 else
   pass "the migration failed at its final check"
@@ -155,8 +187,7 @@ grep -o "a routine still refers to a retired IB name" "$WORK/late.log" | head -1
 
 echo
 echo "4. Back to every migration"
-supabase db reset --local --no-seed --yes >"$WORK/reset.log" 2>&1 \
-  || { cat "$WORK/reset.log"; exit 1; }
+db_reset "$LATEST"
 [ "$(sql -c "select count(*) from supabase_migrations.schema_migrations where version = '$TARGET'")" = 1 ] \
   && pass "a full reset applies $TARGET" \
   || bad "a full reset did not apply $TARGET"

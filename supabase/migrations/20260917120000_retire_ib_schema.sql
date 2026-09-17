@@ -20,10 +20,11 @@
 --   * set_ib_context and dp_year_for_session: nothing.
 --   * update_course: only `ProfileService.updateCourse`, which nothing called.
 --     It is deleted in the same change.
---   * create_course: the app, which sent null for p_level and p_target_grade.
---     It now sends only the three arguments kept here. PostgREST matches an RPC
---     by the names it is given, so the new app also works against the old
---     five-argument function, whichever of the two ships first.
+--   * create_course: the app. It never sent p_level or p_target_grade. Swift
+--     leaves a nil optional out of the JSON, so every build, before this change
+--     and after it, sends {p_display_name, p_color_key}. PostgREST matches an
+--     RPC by the names it is given, and those two resolve to the old function
+--     and to this one. `ProfileServiceTests` pins that body.
 --   * The six task types: the app offered them, and `breakdown` accepted them.
 --     The app no longer offers them. `breakdown` now converts them to a
 --     generic type for any build older than that, and it must be deployed
@@ -71,8 +72,12 @@ end $$;
 --   mock_exam           -> revision  practice and review, nothing to hand in
 --   final_exam          -> revision  the same work at higher stakes
 --
--- These match `TaskType(storedValue:)` in the app and `LEGACY_TASK_TYPES` in
--- `breakdown`, so a task has the same type wherever it is read.
+-- `breakdown` converts a request with the same table (`RETIRED_TASK_TYPES` in
+-- `supabase/functions/_shared/task_type.ts`), so a plan an old build asks for
+-- is stored the way this stores an existing one. The app keeps its own copy of
+-- each task and never reads the server's back. A task saved on a device before
+-- this change keeps its old value there, which `TaskType(storedValue:)` reads
+-- as `other`.
 --
 -- Only `assignments_set_updated_at` fires on this update: the owner, course,
 -- rubric and plan-limit triggers watch other columns. `updated_at` moving is
@@ -110,7 +115,7 @@ alter table public.assignments
   ));
 
 comment on column public.assignments.task_type is
-  'What kind of work this is: one of eight generic shapes. Drives how the planner breaks the task down. Must match TaskType in the iOS app and TASK_TYPES in the breakdown Edge Function.';
+  'What kind of work this is: one of eight generic shapes. Drives how the planner breaks the task down. Must match TaskType in the iOS app and TASK_TYPES in supabase/functions/_shared/task_type.ts.';
 
 -- 4. The IB routines. `if exists`, so the result does not depend on how an
 --    environment got here. The checks at the end are the guarantee.

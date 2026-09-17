@@ -156,10 +156,26 @@ select results_eq(
   'and links nothing'
 );
 
--- What an app built before this change would send. PostgREST matches an RPC by
--- argument names, so this is the call that no longer resolves.
+-- The call PostgREST makes for the app, by name. Swift leaves the nil template
+-- out, so every build, before this change and after it, sends exactly these two.
+select lives_ok(
+  $$select set_config('test.app_id',
+                      public.create_course(p_display_name => 'From the app',
+                                           p_color_key => 'amber')::text, true)$$,
+  'the call every build of the app makes still resolves'
+);
+select results_eq(
+  $$select display_name, color_key, course_template_id from public.courses
+     where id = current_setting('test.app_id')::uuid$$,
+  $$values ('From the app'::text, 'amber'::text, null::uuid)$$,
+  'and creates the subject it names'
+);
+
+-- A caller that names a retired argument. No build of the app ever did, but
+-- anything that does now fails to resolve, rather than having the value
+-- silently ignored.
 select throws_ok(
-  $$select public.create_course(p_display_name => 'Old app', p_color_key => 'violet',
+  $$select public.create_course(p_display_name => 'Old caller', p_color_key => 'violet',
                                 p_template_code => null, p_level => null,
                                 p_target_grade => null::smallint)$$,
   '42883'::character(5), null,
@@ -167,11 +183,11 @@ select throws_ok(
 );
 
 -- The ceiling moved into the rewritten function with everything else. The
--- caller already has four subjects, so 46 more reach the limit of 50.
+-- caller already has five subjects, so 45 more reach the limit of 50.
 select lives_ok($$
   do $body$
   begin
-    for i in 1..46 loop
+    for i in 1..45 loop
       perform public.create_course('Subject ' || i, 'violet');
     end loop;
   end

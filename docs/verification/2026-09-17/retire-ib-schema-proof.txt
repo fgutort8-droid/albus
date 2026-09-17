@@ -6,21 +6,21 @@ PASS the new pgTAP file fails against the old schema (6 assertions before it sto
 PASS the migration applied
      NOTICE (00000): retire_ib_schema: converted 6 assignment(s) from an IB task type
      before:
-       1390d838-5bde-4408-9281-38113ddf8fc1 essay active
-       23633b3a-4eaa-40c8-aa2e-7cacb8bb0322 tok_essay active
-       26b8c8ce-bdf4-4f2a-874e-c7fdc32d20e0 final_exam completed
-       95973155-dfc9-4793-9e42-10c0de443490 tok_exhibition active
-       d5242f2b-bb9a-41d1-90d9-ba5b734db75b mock_exam completed
-       e538eba9-d852-4f5b-a5ab-549141ce9833 extended_essay active
-       ece21565-8e54-48bf-b885-3c723c9c5ba7 internal_assessment active
+       1ef7876f-e219-45af-a9f2-f84168d0a7ce tok_essay active
+       465c9484-3213-49ea-af60-9a2203851aab extended_essay active
+       6f343ac1-cb31-4e0a-85fb-9cefd8f71447 mock_exam completed
+       ad2b6a35-f219-49d2-9195-62db2295ce34 tok_exhibition active
+       c0882d5e-484f-45bf-a9ec-586172bc7eb2 internal_assessment active
+       da296b31-6899-4f89-87cd-d2d11b656541 essay active
+       e61af3a7-9344-4377-be4b-5a81c27966d6 final_exam completed
      after:
-       1390d838-5bde-4408-9281-38113ddf8fc1 essay active
-       23633b3a-4eaa-40c8-aa2e-7cacb8bb0322 essay active
-       26b8c8ce-bdf4-4f2a-874e-c7fdc32d20e0 revision completed
-       95973155-dfc9-4793-9e42-10c0de443490 project active
-       d5242f2b-bb9a-41d1-90d9-ba5b734db75b revision completed
-       e538eba9-d852-4f5b-a5ab-549141ce9833 essay active
-       ece21565-8e54-48bf-b885-3c723c9c5ba7 project active
+       1ef7876f-e219-45af-a9f2-f84168d0a7ce essay active
+       465c9484-3213-49ea-af60-9a2203851aab essay active
+       6f343ac1-cb31-4e0a-85fb-9cefd8f71447 revision completed
+       ad2b6a35-f219-49d2-9195-62db2295ce34 project active
+       c0882d5e-484f-45bf-a9ec-586172bc7eb2 project active
+       da296b31-6899-4f89-87cd-d2d11b656541 essay active
+       e61af3a7-9344-4377-be4b-5a81c27966d6 revision completed
 PASS all 7 rows kept, each converted as documented
 PASS history records 20260917120000
 
@@ -36,6 +36,6 @@ PASS no conversion, drop or rewrite survived: all byte-for-byte unchanged
 
 4. Back to every migration
 PASS a full reset applies 20260917120000
-PASS the new pgTAP file passes (29 assertions)
+PASS the new pgTAP file passes (31 assertions)
 
 ALL PASS

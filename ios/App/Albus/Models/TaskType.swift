@@ -11,9 +11,10 @@ import Foundation
 ///
 /// **The raw values are a wire contract**, not display strings. They are
 /// checked by `assignments_task_type_check` in Postgres and by `TASK_TYPES` in
-/// the breakdown Edge Function. All three lists have to agree; a value here
-/// that the server does not know is a 422 the student cannot do anything
-/// about. Change one, change all three.
+/// `supabase/functions/_shared/task_type.ts`, which the breakdown Edge Function
+/// uses. All three lists have to agree; a value here that the server does not
+/// know is a 422 the student cannot do anything about. Change one, change all
+/// three.
 enum TaskType: String, CaseIterable, Identifiable, Sendable, Codable {
 
     case essay
