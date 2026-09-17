@@ -24,6 +24,12 @@ packages:
   Supabase:
     url: https://github.com/supabase/supabase-swift.git
     from: 2.55.1
+  # Purchases. The SPM mirror carries only what a package build needs, not the
+  # full repository's history and test fixtures. 5.43 is the first version
+  # with RevenueCat's Test Store; this is the release current in Sep 2026.
+  RevenueCat:
+    url: https://github.com/RevenueCat/purchases-ios-spm.git
+    from: 5.89.0
 
 settings:
   base:
@@ -58,6 +64,8 @@ targets:
       - package: AlbusCore
       - package: Supabase
         product: Supabase
+      - package: RevenueCat
+        product: RevenueCat
     configFiles:
       Debug: App/Config.xcconfig
       Release: App/Config.xcconfig
@@ -72,6 +80,9 @@ targets:
         TURNSTILE_SITE_KEY: $(TURNSTILE_SITE_KEY)
         TURNSTILE_ORIGIN: $(TURNSTILE_ORIGIN)
         ALBUS_SIGNED_BUILD: $(ALBUS_SIGNED_BUILD)
+        # RevenueCat's public SDK keys. Empty means this build cannot buy.
+        REVENUECAT_API_KEY: $(REVENUECAT_API_KEY)
+        REVENUECAT_TEST_API_KEY: $(REVENUECAT_TEST_API_KEY)
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         # The app talks only to Supabase over HTTPS; no cleartext exceptions.
@@ -87,6 +98,12 @@ targets:
         # Ad-hoc is enough for the simulator and carries the entitlement.
         # Applied automatically once DEVELOPMENT_TEAM is set; see ios/README.md.
         CODE_SIGN_ENTITLEMENTS: App/Albus/Albus.entitlements
+      configs:
+        Release:
+          # Target settings outrank Config.xcconfig. A Release build therefore
+          # never carries the Test Store key, even when a developer's
+          # Config.xcconfig has one: an app submitted with it sells nothing.
+          REVENUECAT_TEST_API_KEY: ""
 
   AlbusTests:
     type: bundle.unit-test

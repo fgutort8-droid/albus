@@ -11,22 +11,31 @@ struct RootView: View {
     @Environment(SessionService.self) private var session
     @Environment(AccountDeletion.self) private var deletion
     @Environment(Preferences.self) private var preferences
+    @Environment(PurchaseService.self) private var purchases
 
     var body: some View {
-        if deletion.requiresCleanup {
-            AccountDeletionScreen(recovering: true)
-        } else {
-            switch session.state {
-            case .starting:
-                LaunchPlaceholder()
-            case .signedIn where preferences.hasOnboarded:
-                AppShell()
-            case .signedIn, .needsAccount, .failed:
-                // `.failed` lands here too: onboarding is where the retry lives,
-                // and a student with no connection on first launch should see the
-                // questions rather than a dead end.
-                OnboardingFlow()
+        Group {
+            if deletion.requiresCleanup {
+                AccountDeletionScreen(recovering: true)
+            } else {
+                switch session.state {
+                case .starting:
+                    LaunchPlaceholder()
+                case .signedIn where preferences.hasOnboarded:
+                    AppShell()
+                case .signedIn, .needsAccount, .failed:
+                    // `.failed` lands here too: onboarding is where the retry
+                    // lives, and a student with no connection on first launch
+                    // should see the questions rather than a dead end.
+                    OnboardingFlow()
+                }
             }
+        }
+        // Purchases belong to the Supabase account, so the store learns who
+        // is buying whenever that changes: a restored session at launch, or
+        // the account onboarding creates.
+        .task(id: session.userID) {
+            await purchases.start(userID: session.userID)
         }
     }
 }

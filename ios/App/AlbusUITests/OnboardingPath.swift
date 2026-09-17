@@ -20,8 +20,12 @@ enum OnboardingPath {
     /// XCUITest keeps that system prompt from presenting, so on a freshly
     /// erased device the request never returns and onboarding never finishes.
     /// A student sees the prompt and answers it; a test skips it.
+    ///
+    /// Purchases are off too: prices come from the display copy, so a test
+    /// about the paywall's layout does not depend on RevenueCat's servers.
     static func launch(_ app: XCUIApplication) {
-        app.launchArguments += ["-albus.debug.skipNotificationPrompt"]
+        app.launchArguments += ["-albus.debug.skipNotificationPrompt",
+                                "-albus.debug.noPurchases"]
         app.launch()
     }
 
