@@ -28,8 +28,8 @@ struct PaywallScreen: View {
     var autoplay: Bool = true
 
     @State private var phase: Phase
-    @State private var plan: Plan = .plus
-    @State private var period: PurchaseService.Period = .monthly
+    @State private var plan: Plan
+    @State private var period: PurchaseService.Period
     /// One sentence about the last thing the student tried: a failure, an
     /// approval still pending, a plan on its way.
     @State private var notice: String?
@@ -37,9 +37,13 @@ struct PaywallScreen: View {
     @State private var isConfirming = false
     @State private var runID = 0
 
-    init(autoplay: Bool = true) {
+    /// `plan` and `period` are only where the screen starts; the student
+    /// changes both. Snapshots use them to render each state.
+    init(autoplay: Bool = true, plan: Plan = .plus, period: PurchaseService.Period = .monthly) {
         self.autoplay = autoplay
         _phase = State(initialValue: autoplay ? .flight : .done)
+        _plan = State(initialValue: plan)
+        _period = State(initialValue: period)
     }
 
     // Geometry from the design, in points.
@@ -186,6 +190,11 @@ struct PaywallScreen: View {
         }
         .background(Palette.page)
         .task(id: runID) { await runIntro() }
+        // Prices that failed to load at launch get another try when the
+        // student comes to look at them.
+        .task {
+            if case .failed = purchases.availability { await purchases.load() }
+        }
         .onChange(of: plan) { _, _ in notice = nil }
         .onChange(of: period) { _, _ in notice = nil }
     }

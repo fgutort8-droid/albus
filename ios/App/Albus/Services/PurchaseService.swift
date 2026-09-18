@@ -75,6 +75,9 @@ final class PurchaseService {
     private(set) var isWorking = false
 
     private let store: (any PurchaseStore)?
+    /// The account purchases belong to, and the one the store last accepted.
+    /// They differ after a failed identify, which `load()` retries.
+    private var accountID: String?
     private var identifiedAs: String?
 
     init(store: (any PurchaseStore)? = RevenueCatStore.fromBundle()) {
@@ -83,6 +86,11 @@ final class PurchaseService {
     }
 
     var isReady: Bool { availability == .ready }
+
+    /// Whether the store knows the account that is signed in now. After an
+    /// account change whose identify failed, the store still holds the old
+    /// one, and a purchase then would land on the wrong account.
+    private var isIdentified: Bool { accountID != nil && identifiedAs == accountID }
 
     func option(_ tier: EntitlementService.Tier, _ period: Period) -> Option? {
         options.first { $0.tier == tier && $0.period == period }
@@ -110,23 +118,26 @@ final class PurchaseService {
     /// grants a plan only to an id it finds in `auth.users`; a purchase made
     /// under RevenueCat's own anonymous id would reach nobody.
     func start(userID: UUID?) async {
-        guard let store, let userID else { return }
-        let appUserID = userID.uuidString.lowercased()
-        if identifiedAs != appUserID {
+        guard store != nil, let userID else { return }
+        accountID = userID.uuidString.lowercased()
+        await load()
+    }
+
+    /// Identifies the account if the store hasn't accepted it yet, then loads
+    /// the prices. Safe to call again after any failure: offline at launch
+    /// must not mean no purchases until the app is relaunched.
+    func load() async {
+        guard let store, let accountID else { return }
+        availability = .loading
+        if identifiedAs != accountID {
             do {
-                try await store.identify(appUserID)
-                identifiedAs = appUserID
+                try await store.identify(accountID)
+                identifiedAs = accountID
             } catch {
                 availability = .failed(Self.message(for: error))
                 return
             }
         }
-        await load()
-    }
-
-    func load() async {
-        guard let store, identifiedAs != nil else { return }
-        availability = .loading
         do {
             options = try await store.offers().compactMap(Self.option(from:))
             availability = options.isEmpty
@@ -138,7 +149,7 @@ final class PurchaseService {
     }
 
     func purchase(_ option: Option) async -> Outcome {
-        guard let store, identifiedAs != nil, !isWorking else {
+        guard let store, isIdentified, !isWorking else {
             return .failed("Purchases aren't available right now.")
         }
         isWorking = true
@@ -155,7 +166,7 @@ final class PurchaseService {
     }
 
     func restore() async -> RestoreOutcome {
-        guard let store, identifiedAs != nil, !isWorking else {
+        guard let store, isIdentified, !isWorking else {
             return .failed("Restoring isn't available right now.")
         }
         isWorking = true
@@ -170,7 +181,7 @@ final class PurchaseService {
     /// Apple's own subscription sheet. False when it could not be shown, so
     /// the caller can open the Settings page instead.
     func manageSubscriptions() async -> Bool {
-        guard let store, identifiedAs != nil else { return false }
+        guard let store, isIdentified else { return false }
         do {
             try await store.manageSubscriptions()
             return true

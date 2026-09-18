@@ -166,6 +166,32 @@ struct PurchaseServiceTests {
         #expect(service.availability == .failed(PurchaseService.message(for: PurchaseError.offline)))
     }
 
+    @Test("after an account change the store hasn't accepted, nothing is bought for the old account")
+    func noPurchaseForThePreviousAccount() async {
+        let (service, store) = await started()
+        let plus = service.option(.plus, .monthly)!
+        store.identifyError = .offline
+
+        await service.start(userID: UUID())
+
+        if case .failed = await service.purchase(plus) {} else { Issue.record("purchase went through") }
+        if case .failed = await service.restore() {} else { Issue.record("restore went through") }
+        #expect(store.purchased.isEmpty)
+    }
+
+    @Test("offline at launch is retried, identify included")
+    func identifyRetries() async {
+        let store = FakeStore()
+        store.identifyError = .offline
+        let (service, _) = await started(store)
+        store.identifyError = nil
+
+        await service.load()
+
+        #expect(store.identified == ["6f9619ff-8b86-d011-b42d-00c04fc964ff"])
+        #expect(service.availability == .ready)
+    }
+
     @Test("an empty offering is a failure, not a paywall with nothing to buy")
     func emptyOffering() async {
         let store = FakeStore()
