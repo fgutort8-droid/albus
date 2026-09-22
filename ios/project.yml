@@ -65,6 +65,8 @@ targets:
       path: App/Albus/Info.plist
       properties:
         CFBundleDisplayName: Albus
+        # Transport uses system TLS; authentication uses system security APIs.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         SUPABASE_URL: $(SUPABASE_URL)
         SUPABASE_PUBLISHABLE_KEY: $(SUPABASE_PUBLISHABLE_KEY)
