@@ -1,24 +1,14 @@
 # albus-app.netlify.app
 
-The public pages the App Store requires: a privacy policy (`/privacy/`) and a
-support page (`/support/`). The app links to both from `AppLinks.swift`.
-Static files, no build step; the Netlify project is `albus-app`.
+Static privacy (`/privacy/`) and support (`/support/`) pages. No build step.
+The app links to these paths from `AppLinks.swift`.
 
-**Not published yet.** Two things have to be true first:
+**Not published yet.** The support address is approved: fgutort8@gmail.com.
+Before publishing, account deletion must be finished and merged. The pages also
+require the payments app and backend changes, because they describe subscriptions,
+Restore purchases and Manage subscription. Do not publish these promises while
+those features are only on an unmerged branch. The owner deploys the backend.
 
-1. `CONTACT_EMAIL` is replaced everywhere with the address Felipe chooses to
-   publish. The privacy policy has to name a way to reach the developer.
-2. The app has **Settings → Delete account**. Both pages promise it, and App
-   Store guideline 5.1.1(v) expects account deletion in apps that create
-   accounts.
-
-Before publishing, this must print nothing:
-
-```bash
-grep -rn "CONTACT_EMAIL" website; grep -q '"Delete account"' ios/App/Albus/Screens/SettingsScreen.swift || echo "no Delete account in Settings"
-```
-
-Keep the privacy policy in step with the code. It makes specific promises:
-marking sends text, never the photo; the submitted text is not stored; the
-device identifier and IP address are hashed before storage; retention periods
-match `prune-security-data`; no analytics or push service.
+The privacy audit is recorded in `privacy-audit.md`. Keep it current when changing
+marking, authentication, retention or billing. In particular, saved marking
+feedback includes short excerpts: do not promise that no submitted text is stored.
