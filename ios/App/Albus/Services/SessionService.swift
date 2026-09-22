@@ -103,6 +103,15 @@ final class SessionService {
 
     func deleteRemoteAccount() async throws {
         guard let client else { throw Backend.ConfigError.missing("Supabase") }
+        try await Self.requestDeletion(client)
+    }
+
+    /// The request, outside the main actor for the reason `PlanReader` gives:
+    /// `PostgrestResponse` is not Sendable, so awaiting `execute()` from this
+    /// actor-isolated class sends it across an isolation boundary, which
+    /// Xcode 16.4 rejects and Xcode 26 allows. Here the response is consumed
+    /// where it is produced, and only success or an error comes back.
+    private nonisolated static func requestDeletion(_ client: SupabaseClient) async throws {
         try await client.rpc("delete_my_account").execute()
     }
 
