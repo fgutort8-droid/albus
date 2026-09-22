@@ -12,7 +12,7 @@
   <header><a class="brand" href="/">Albus</a></header>
 
   <h1>Privacy policy</h1>
-  <p class="updated">Last updated 17 September 2026</p>
+  <p class="updated">Last updated 22 September 2026</p>
 
   <p>Albus is an iPhone app that plans study time. This page explains what information it
      handles, why, who helps us run it, and the choices you have.</p>
@@ -20,12 +20,12 @@
   <div class="summary">
     <h2>The short version</h2>
     <ul>
-      <li>You don't give us your name, email address or phone number to use Albus. Your account is anonymous.</li>
-      <li>What you type into Albus is stored so it can plan with it and so you don't lose it.</li>
+      <li>No name, email address or phone number is required to use Albus. Your account is anonymous; a display name is optional.</li>
+      <li>Albus stores your assignments, plans, saved rubrics and marking results to provide the app's features.</li>
       <li>When you ask for an AI plan or for marking, the text that request needs is sent to Anthropic,
-          which runs the AI. Anthropic does not train its models on it.</li>
-      <li>We don't keep the work you send for marking. We keep the mark and the feedback.</li>
-      <li>No ads, no advertising identifier, no third-party analytics, no tracking.</li>
+          which runs the AI. Anthropic does not use API content for model training by default under its commercial terms.</li>
+      <li>We don't save the full submission in our database. Saved feedback can include short excerpts from your work.</li>
+      <li>No ads, no advertising identifier and no tracking across apps or websites.</li>
       <li>Apple handles payments. We never see your card or your Apple ID.</li>
     </ul>
   </div>
@@ -33,7 +33,7 @@
   <h2>1. Who is responsible</h2>
   <p>Albus is published by the developer named as the seller on its App Store page
      ("we", "us"). We are the controller of the personal data described here.
-     Contact: <a href="mailto:CONTACT_EMAIL">CONTACT_EMAIL</a>.</p>
+     Contact: <a href="mailto:fgutort8@gmail.com">fgutort8@gmail.com</a>.</p>
 
   <h2>2. What we collect, and why</h2>
 
@@ -60,10 +60,10 @@
     <li>For an AI plan, Albus sends the assignment's details, such as its title, the kind of work, its
         deadline and the time you expect it to take, to Anthropic, which writes the steps.</li>
     <li>For marking, Albus first turns your file or photo into text <strong>on your phone</strong>.
-        Only that text and the rubric you chose are sent to Anthropic. The file or photo itself never
+        The extracted text, relevant title and instructions, and the rubric you chose are sent to Anthropic. The file or photo itself never
         leaves your phone.</li>
     <li>We store the mark and the feedback, and a fingerprint (a one-way hash) of the text, which lets us
-        recognise the same work sent twice without keeping it. We don't store the text you sent.</li>
+        recognise the same work sent twice. We do not save the full submission in our database, but saved feedback can include short excerpts (up to 400 characters per criterion), as well as your work's title. Our AI provider also processes the submission under its own retention terms.</li>
     <li>For every AI request we record its kind, the AI model used, its size in tokens and what it cost.
         These records contain none of your work. We use them to apply your plan's limits and to keep the
         cost of running Albus under control.</li>
@@ -80,9 +80,8 @@
   <h3>Keeping Albus fair and safe</h3>
   <p>To stop people creating many accounts to get around the free limits, Albus sends an identifier that
      Apple gives to apps from the same developer (not an advertising identifier). Our server also sees
-     your IP address when the app connects. Before anything is stored, the IP address is shortened to its
-     network part, and both values are replaced with a keyed one-way code. The identifier and the IP
-     address themselves are not stored. We also keep short security records, such as which feature was
+     your IP address when the app connects. In our abuse-detection tables, the IP address is shortened to its
+     network part, and both values are replaced with a keyed one-way code. These tables do not store the raw identifier or IP address. Our hosting and authentication providers may separately keep network information in operational and security logs. We also keep short security records, such as which feature was
      used and an error code, never anything you wrote.
      <em>Why: our legitimate interest in preventing abuse and keeping Albus affordable, including free.</em></p>
 
@@ -94,14 +93,14 @@
 
   <h2>3. What we don't do</h2>
   <p>We don't show ads. We don't sell or share personal data for advertising. We don't use third-party
-     analytics or tracking, and we don't track you across other apps or websites.</p>
+     analytics for study activity, and we don't track you across other apps or websites. RevenueCat processes subscription activity as described above.</p>
 
   <h2>4. Who helps us run Albus</h2>
   <table>
     <tr><th>Provider</th><th>What it does</th></tr>
-    <tr><td>Supabase</td><td>Accounts, database and server functions. Your data is stored in the EU (Ireland).</td></tr>
+    <tr><td>Supabase</td><td>Accounts, database and server functions. Our primary database is hosted in the EU (Ireland).</td></tr>
     <tr><td>Anthropic</td><td>Runs the AI models behind plans and marking, on the text described above.
-        Under its commercial terms it does not train models on this data.</td></tr>
+        Under its commercial terms, API content is not used for training by default. Provider retention is governed by its <a href="https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data">commercial data-retention policy</a>; deleting your Albus account does not immediately erase provider logs.</td></tr>
     <tr><td>RevenueCat</td><td>Confirms and tracks subscription purchases.</td></tr>
     <tr><td>Apple</td><td>The App Store, payments and subscriptions, under Apple's own privacy policy.</td></tr>
     <tr><td>Netlify</td><td>Hosts this website.</td></tr>
@@ -116,18 +115,18 @@
     <li>Records of AI requests that failed or were abandoned: 30 days. Records of completed requests,
         which contain no content, are kept for cost accounting.</li>
     <li>Rate-limit counters: about two hours.</li>
-    <li>The one-way codes made from device identifiers and IP addresses: 90 days. Security records: 180 days.</li>
+    <li>The one-way codes made from device identifiers and IP addresses: removed by scheduled cleanup after 90 days without another observation. Security records: 180 days.</li>
     <li>Subscription records: as long as accounting and tax law require.</li>
   </ul>
 
   <h2>6. Your choices and rights</h2>
   <ul>
     <li><strong>Delete your account</strong> in the app: Settings → Delete account. This removes your
-        account and everything you put into Albus from our server. Deleting your account does not cancel
+        account, student content on our server and the local cache on this phone. Financial and security records described above survive under their existing retention rules; financial records no longer link to your account. Deleting your account does not cancel
         a subscription; cancel it first in your iPhone's Settings → your name → Subscriptions.</li>
     <li><strong>Remove Albus from your phone</strong> by deleting the app, which removes the copy stored there.</li>
     <li>You can ask us for a copy of your data, to correct it, to delete it, to restrict how we use it,
-        or object to how we use it, by writing to <a href="mailto:CONTACT_EMAIL">CONTACT_EMAIL</a>.</li>
+        or object to how we use it, by writing to <a href="mailto:fgutort8@gmail.com">fgutort8@gmail.com</a>.</li>
     <li>If you think we have handled your data wrongly, you can complain to the data protection
         authority where you live.</li>
   </ul>
