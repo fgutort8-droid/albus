@@ -101,6 +101,24 @@ final class SessionService {
         }
     }
 
+    func deleteRemoteAccount() async throws {
+        guard let client else { throw Backend.ConfigError.missing("Supabase") }
+        try await client.rpc("delete_my_account").execute()
+    }
+
+    func signOutDeletedAccount() async throws {
+        if let client {
+            do {
+                try await client.auth.signOut(scope: .local)
+            } catch {
+                // The SDK clears local credentials before its logout request.
+                // A deleted account needs no successful second server round trip.
+                guard client.auth.currentSession == nil else { throw error }
+            }
+        }
+        state = .needsAccount
+    }
+
     private static func describe(_ error: Error) -> String {
         if let urlError = error as? URLError, urlError.code == .notConnectedToInternet {
             return "No connection."

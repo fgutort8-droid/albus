@@ -129,6 +129,18 @@ final class Preferences {
         defaults.set(true, forKey: Key.onboarded)
     }
 
+    func resetAfterAccountDeletion() {
+        name = ""
+        program = .other
+        examBoard = Self.defaultExamBoard
+        load = .standard
+        windowStartHour = Availability.default.windowStartHour
+        windowEndHour = Availability.default.windowEndHour
+        daysOff = []
+        hasOnboarded = false
+        defaults.removeObject(forKey: Key.onboarded)
+    }
+
     /// When the student is willing to work.
     ///
     /// These existed on `Availability` from the start and were never set, so

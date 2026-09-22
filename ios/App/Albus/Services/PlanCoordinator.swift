@@ -59,6 +59,13 @@ final class PlanCoordinator {
     /// exist, and its tests would otherwise need one.
     var onScheduleChanged: (@MainActor () -> Void)?
 
+    private var accountWasDeleted = false
+
+    func invalidateForAccountDeletion() {
+        accountWasDeleted = true
+        onScheduleChanged = nil
+    }
+
     private let plans: PlanService
     private let scheduler = Scheduler()
     private let estimator = Estimator()
@@ -77,6 +84,7 @@ final class PlanCoordinator {
                        availability: Availability = .default,
                        taskLimit: Int? = nil,
                        now: Date = .now) async {
+        guard !accountWasDeleted else { return }
         // The open-task cap, checked on the device first. The server trigger is
         // the authority, but it only sees assignments that reach it -- without
         // this, an offline student could plan past the cap on the phone.
@@ -110,6 +118,7 @@ final class PlanCoordinator {
                 dailyCapacityMinutes: availability.dailyCapacityMinutes
             )
 
+            guard !accountWasDeleted else { return }
             // Server-assigned id, so a later sync can match rows rather than
             // guessing by title.
             assignment.remoteID = result.assignmentID
@@ -130,10 +139,12 @@ final class PlanCoordinator {
             status = .idle
 
         } catch let failure as PlanService.Failure where failure.plansLocally {
+            guard !accountWasDeleted else { return }
             planLocally(assignment, context: context, availability: availability, now: now)
             status = .plannedLocally(note: failure.localPlanNote,
                                      suggestsUpgrade: failure.suggestsUpgrade)
         } catch let failure as PlanService.Failure {
+            guard !accountWasDeleted else { return }
             // Over the open-task cap: the server refused the assignment itself,
             // so keeping it here would leave an unplanned copy nobody can act on.
             if failure == .quotaReached {
@@ -142,6 +153,7 @@ final class PlanCoordinator {
             }
             status = .failed(failure.errorDescription ?? "Couldn't plan that.")
         } catch {
+            guard !accountWasDeleted else { return }
             planLocally(assignment, context: context, availability: availability, now: now)
             status = .plannedLocally(note: PlanService.Failure.unavailable.localPlanNote,
                                      suggestsUpgrade: false)
@@ -200,7 +212,7 @@ final class PlanCoordinator {
         // device the moment the student asks, and the server catches up.
         if let remoteID = assignment.remoteID {
             Task {
-                if await !AssignmentService().delete(remoteID: remoteID) {
+                if await !AssignmentService().delete(remoteID: remoteID), !accountWasDeleted {
                     PendingDeletions.record(remoteID)
                 }
             }
