@@ -144,7 +144,8 @@ jobs:
           if [ -z "$UDID" ]; then echo "::error::no iPhone simulator on this runner"; exit 1; fi
           echo "using simulator $UDID"
           xcodebuild test -project Albus.xcodeproj -scheme Albus -destination "id=$UDID" \
-            -skip-testing:AlbusUITests
+            -skip-testing:AlbusUITests -derivedDataPath "$RUNNER_TEMP/albus-build"
+          python3 ../scripts/verify-app-privacy.py "$RUNNER_TEMP/albus-build/Build/Products/Debug-iphonesimulator/Albus.app"
 
   backend-tests:
     name: Edge function tests
