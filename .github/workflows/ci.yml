@@ -16,6 +16,11 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  # Runs the same checks on demand, from the Actions tab or
+  # `gh workflow run ci.yml --ref <branch>`, without pushing a commit.
+  # The append-only migration check needs a pull request to compare
+  # against, so it skips itself here.
+  workflow_dispatch:
 
 jobs:
   secrets-scan:
