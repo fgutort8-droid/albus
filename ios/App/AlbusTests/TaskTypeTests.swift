@@ -9,7 +9,8 @@ import Foundation
 /// nothing was checking.
 ///
 /// These tests pin the shape. The cross-system agreement itself is asserted in
-/// `supabase/tests/production_safety_test.sql`, which can see the real
+/// `supabase/tests/production_safety_test.sql` and
+/// `supabase/tests/courses_and_task_types_test.sql`, which can see the real
 /// constraint; what can be checked here is that the client's own list is
 /// complete, stable, and degrades safely.
 @Suite("Task types")
@@ -21,7 +22,12 @@ struct TaskTypeTests {
     /// this array until it goes green.
     private static let serverAccepted: Set<String> = [
         "essay", "problem_set", "lab_report", "reading",
-        "revision", "project", "presentation", "other",
+        "revision", "project", "presentation", "other"
+    ]
+
+    /// The IB assessment types the app offered until September 2026. The
+    /// server no longer stores them, so the app must never send one again.
+    private static let retired: Set<String> = [
         "internal_assessment", "extended_essay",
         "tok_essay", "tok_exhibition",
         "mock_exam", "final_exam"
@@ -43,6 +49,13 @@ struct TaskTypeTests {
                 "the server would accept these but nothing can send them: \(unofferedByClient.sorted())")
     }
 
+    @Test("no retired IB type can be picked")
+    func retiredTypesAreNotOffered() {
+        let offered = Set(TaskType.offered.map(\.rawValue))
+        #expect(offered.isDisjoint(with: Self.retired),
+                "the server refuses these: \(offered.intersection(Self.retired).sorted())")
+    }
+
     @Test("both entry points offer the same list")
     func onboardingAndTaskCreationAgree() {
         // The original bug: OnboardingFlow had six, AddTaskSheet had eight.
@@ -51,42 +64,6 @@ struct TaskTypeTests {
         #expect(Set(TaskType.offered) == Set(TaskType.allCases))
         #expect(TaskType.offered.count == TaskType.allCases.count,
                 "offered must not drop or duplicate a type")
-    }
-
-    // MARK: - Classification
-
-    @Test("exactly the six IB assessments are marked as such")
-    func ibAssessmentsAreTheSix() {
-        let flagged = Set(TaskType.allCases.filter(\.isIBAssessment).map(\.rawValue))
-        #expect(flagged == [
-            "internal_assessment", "extended_essay",
-            "tok_essay", "tok_exhibition",
-            "mock_exam", "final_exam"
-        ])
-    }
-
-    @Test("only mocks and finals count as exam preparation")
-    func examPreparationIsRevisionOnly() {
-        // The distinction the planner needs: these produce no deliverable, so
-        // they are planned as practice and recall, not as drafting.
-        let flagged = Set(TaskType.allCases.filter(\.isExamPreparation).map(\.rawValue))
-        #expect(flagged == ["mock_exam", "final_exam"])
-
-        // An IA is an IB assessment but is emphatically *not* exam prep — it
-        // has a deliverable. Getting this backwards would plan months of
-        // coursework as revision.
-        #expect(TaskType.internalAssessment.isIBAssessment)
-        #expect(!TaskType.internalAssessment.isExamPreparation)
-    }
-
-    @Test("the two TOK assessments are distinct types")
-    func tokEssayAndExhibitionAreSeparate() {
-        // They have different criteria and different work: three objects and a
-        // commentary versus one prescribed title. Collapsing them would give a
-        // student the wrong plan for whichever one they are actually doing.
-        #expect(TaskType.tokEssay != TaskType.tokExhibition)
-        #expect(TaskType.tokEssay.isIBAssessment)
-        #expect(TaskType.tokExhibition.isIBAssessment)
     }
 
     // MARK: - Degrading safely
@@ -99,6 +76,15 @@ struct TaskTypeTests {
         #expect(TaskType(storedValue: "some_future_type") == .other)
         #expect(TaskType(storedValue: nil) == .other)
         #expect(TaskType(storedValue: "") == .other)
+    }
+
+    @Test("a task saved with a retired IB type still opens")
+    func retiredValueFallsBack() {
+        // A task created on this device before September 2026 keeps its old
+        // type locally. It must still decode.
+        for value in Self.retired {
+            #expect(TaskType(storedValue: value) == .other, "\(value) did not fall back")
+        }
     }
 
     @Test("known values still round-trip exactly")
@@ -131,12 +117,12 @@ struct TaskTypeTests {
         }
     }
 
-    @Test("the long IB pieces default longer than ordinary homework")
-    func ibPiecesDefaultLonger() {
+    @Test("long pieces default longer than reading")
+    func longPiecesDefaultLonger() {
         // Not a claim about total effort — the scheduler places sessions, not
-        // whole projects. Just that a session on an extended essay should not
-        // default shorter than a session of reading.
-        #expect(TaskType.extendedEssay.defaultMinutes > TaskType.reading.defaultMinutes)
-        #expect(TaskType.internalAssessment.defaultMinutes > TaskType.reading.defaultMinutes)
+        // whole projects. Just that a session on a project or an essay should
+        // not default shorter than a session of reading.
+        #expect(TaskType.project.defaultMinutes > TaskType.reading.defaultMinutes)
+        #expect(TaskType.essay.defaultMinutes > TaskType.reading.defaultMinutes)
     }
 }

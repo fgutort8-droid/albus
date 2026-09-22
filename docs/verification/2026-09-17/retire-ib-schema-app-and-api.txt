@@ -1,0 +1,52 @@
+Retire the IB schema: what the app and the API see. 17 Sep 2026.
+
+1. A store written by main opens on this branch with nothing lost
+
+   Course.targetGrade is gone from the SwiftData model. A throwaway unit test
+   on main wrote an on-disk store on the iPhone 17 simulator (Xcode 26.6). A
+   throwaway test on this branch then opened it. Neither test is committed.
+   Both suites passed, with 157 tests each: the 156 committed tests plus the probe.
+
+   Written by main (a copy taken before the branch ran):
+     ZCOURSE: Z_PK,Z_ENT,Z_OPT,ZTARGETGRADE,ZCREATEDAT,ZCOLORKEY,ZDISPLAYNAME,ZCOURSETEMPLATEID,ZID,ZREMOTEID
+     Biology HL targetGrade=7
+     TOK targetGrade=nil
+     assignments: 7
+
+   The same store after this branch opened it:
+     ZCOURSE: Z_PK,Z_ENT,Z_OPT,ZCREATEDAT,ZCOLORKEY,ZDISPLAYNAME,ZCOURSETEMPLATEID,ZID,ZREMOTEID
+     PROBE_READ courses=["Biology HL/red", "TOK/violet"]
+     PROBE_READ assignment=Probe essay type=essay decoded=essay course=Biology HL
+     PROBE_READ assignment=Probe extended_essay type=extended_essay decoded=other course=TOK
+     PROBE_READ assignment=Probe final_exam type=final_exam decoded=other course=TOK
+     PROBE_READ assignment=Probe internal_assessment type=internal_assessment decoded=other course=Biology HL
+     PROBE_READ assignment=Probe mock_exam type=mock_exam decoded=other course=Biology HL
+     PROBE_READ assignment=Probe tok_essay type=tok_essay decoded=other course=Biology HL
+     PROBE_READ assignment=Probe tok_exhibition type=tok_exhibition decoded=other course=TOK
+     PROBE_READ support=["default.store", "default.store-shm", "default.store-wal", "migration-probe"]
+
+   No *.corrupt-* file appeared beside default.store, so the app's own store
+   opened too. A task saved with a retired type keeps its value on the device
+   and reads as "other".
+
+2. What create_course receives from the app
+
+   Swift leaves a nil optional out of the JSON. main's own Params struct
+   (template, level and target grade all nil) encodes as:
+     {"p_color_key":"red","p_display_name":"Biology"}
+   ProfileServiceTests pins the branch's body to those two names, using the
+   Supabase client's own encoder.
+
+3. Live calls through local PostgREST, after the migration, as an anonymous student
+
+   create_course, the body every app build sends              200  "3bffac4b-f4b4-4b5b-adbb-d6ce353208cf"
+   create_course, naming the retired arguments                404  {"code":"PGRST202","details":"Searched for the function public.create_course with parameters p_color_key, p_di
+   update_course                                              404  {"code":"PGRST202","details":"Searched for the function public.update_course with parameters p_course_id, p_ta
+   set_ib_context                                             404  {"code":"PGRST202","details":"Searched for the function public.set_ib_context with parameter p_exam_session or
+   dp_year_for_session                                        404  {"code":"PGRST202","details":"Searched for the function public.dp_year_for_session with parameter p_exam_sessi
+   profiles?select=*                                          200  [{"id":"5840b4fe-7c0b-48dc-a918-7f99367d5ac4","display_name":null,"curriculum_code":null,"daily_study_minutes"
+   courses?select=*                                           200  [{"id":"3bffac4b-f4b4-4b5b-adbb-d6ce353208cf","user_id":"5840b4fe-7c0b-48dc-a918-7f99367d5ac4","course_templat
+   courses?select=level (a dropped column)                    400  {"code":"42703","details":null,"hint":null,"message":"column courses.level does not exist"}
+
+   Nothing in ios/ or supabase/functions/ selects courses.level, and the
+   400 above is what a caller that did would get.

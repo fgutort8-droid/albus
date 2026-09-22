@@ -1,5 +1,8 @@
 -- Align production's migration bookkeeping with the files in this repo.
 --
+-- SUPERSEDED. `deploy-2026-09-05.sql` carried out this repair in production on
+-- 16 Sep 2026. Kept for its explanation; do not run it.
+--
 -- WHAT THIS IS NOT: this applies no DDL. It changes only
 -- `supabase_migrations.schema_migrations`, the table the Supabase CLI reads to
 -- decide what still needs applying. The schema is already correct — a

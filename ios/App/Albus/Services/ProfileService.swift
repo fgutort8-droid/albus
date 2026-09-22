@@ -2,14 +2,11 @@ import Foundation
 import Supabase
 import AlbusCore
 
-/// The two things the server needs to know about the student: what they are
-/// studying, and which subjects.
+/// Creates the student's subjects on the server.
 ///
-/// Both were collected and then kept on the device. Onboarding asked "IB or AP?"
-/// and stored the answer in `UserDefaults`, where nothing could read it — so Ask
-/// Albus answered "is this enough for HL?" without knowing whether the student
-/// had ever heard of HL. Two short lines in a prompt change most of the answers
-/// in this app, and they were three round trips away the whole time.
+/// A subject exists on the device first. The server copy is what lets
+/// `breakdown` attach an assignment to it, so it is created as soon as the
+/// student adds the subject.
 struct ProfileService {
 
     private let client: SupabaseClient?
@@ -18,36 +15,37 @@ struct ProfileService {
         self.client = client
     }
 
+    /// The arguments of `create_course(p_display_name, p_color_key,
+    /// p_template_code)`.
+    ///
+    /// PostgREST chooses the function by the names in the request body, so a
+    /// name the function does not declare makes the call fail, and this sync
+    /// swallows that failure. `ProfileServiceTests` pins these names. A nil
+    /// value is left out of the body entirely, and the function's default
+    /// applies.
+    struct CreateCourseParams: Encodable {
+        let p_display_name: String
+        let p_color_key: String
+        /// Nothing on the device chooses a template, so this is always nil.
+        let p_template_code: String?
+    }
+
     /// Creates a subject server-side and returns its id.
     ///
-    /// Through an RPC rather than a plain insert. The template and level
-    /// arguments are sent as null: the RPC still declares them, because it
-    /// belongs to a migration that has not been deployed yet and changing its
-    /// signature would change what production is waiting to receive.
-    ///
-    /// `user_id` is set from the verified session inside the function rather
-    /// than passed in, and RLS would reject anything else regardless — the row
-    /// cannot be attributed to another student even if this code were wrong.
-    func createCourse(displayName: String, colorKey: String,
-                      targetGrade: Int? = nil) async -> UUID? {
+    /// Through an RPC rather than a plain insert. `user_id` is set from the
+    /// verified session inside the function rather than passed in, and RLS
+    /// would reject anything else regardless — the row cannot be attributed to
+    /// another student even if this code were wrong. The function also holds
+    /// the per-student subject limit.
+    func createCourse(displayName: String, colorKey: String) async -> UUID? {
         guard let client else { return nil }
-
-        struct Params: Encodable {
-            let p_display_name: String
-            let p_color_key: String
-            let p_template_code: String?
-            let p_level: String?
-            let p_target_grade: Int?
-        }
 
         do {
             return try await client.rpc(
                 "create_course",
-                params: Params(p_display_name: displayName,
-                               p_color_key: colorKey,
-                               p_template_code: nil,
-                               p_level: nil,
-                               p_target_grade: targetGrade)
+                params: CreateCourseParams(p_display_name: displayName,
+                                           p_color_key: colorKey,
+                                           p_template_code: nil)
             )
             .execute()
             .value
@@ -56,43 +54,4 @@ struct ProfileService {
             return nil
         }
     }
-
-    /// Change a subject's level or target grade without deleting and re-adding
-    /// it — moving from HL to SL in the first term is common, and the subject's
-    /// assignments must survive it.
-    ///
-    /// `security invoker` on the server, so the owner policy on `courses` is
-    /// what decides this is writable. Clearing is explicit rather than "pass
-    /// nil": a partial update must not silently erase the field it omits.
-    @discardableResult
-    func updateCourse(remoteID: UUID,
-                      targetGrade: Int? = nil,
-                      clearTargetGrade: Bool = false) async -> Bool {
-        guard let client else { return false }
-
-        struct Params: Encodable {
-            let p_course_id: UUID
-            let p_level: String?
-            let p_target_grade: Int?
-            let p_clear_level: Bool
-            let p_clear_target_grade: Bool
-        }
-
-        do {
-            return try await client.rpc(
-                "update_course",
-                params: Params(p_course_id: remoteID,
-                               p_level: nil,
-                               p_target_grade: targetGrade,
-                               p_clear_level: false,
-                               p_clear_target_grade: clearTargetGrade)
-            )
-            .execute()
-            .value
-        } catch {
-            print("[Albus] course update failed: \(error)")
-            return false
-        }
-    }
-
 }

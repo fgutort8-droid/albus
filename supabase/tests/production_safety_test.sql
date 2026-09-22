@@ -122,27 +122,40 @@ select ok(has_function_privilege(
   'authenticated', 'public.upsert_rubric(uuid,text,text,text,integer,jsonb)', 'EXECUTE'),
   'the controlled rubric RPC remains callable');
 select ok(has_function_privilege(
-  'authenticated', 'public.create_course(text,text,text,text,smallint)', 'EXECUTE'),
+  'authenticated', 'public.create_course(text,text,text)', 'EXECUTE'),
   'the controlled course RPC remains callable');
 
 -- The task-type list is written in three places: this constraint, TASK_TYPES
--- in the breakdown Edge Function, and TaskType in the iOS app. They have
+-- in supabase/functions/_shared/task_type.ts (used by breakdown), and TaskType
+-- in the iOS app. They have
 -- drifted before. This is the only one of the three that can be checked
--- against the real database, so it is where the full expected set is pinned.
+-- against the real database, so it is where the expected set is pinned. What
+-- the column actually accepts is tested row by row in
+-- courses_and_task_types_test.sql.
 select ok(
-  (select bool_and(pg_get_constraintdef(con.oid) like '%' || t.name || '%')
+  (select bool_and(strpos(pg_get_constraintdef(con.oid), '''' || t.name || '''') > 0)
      from pg_constraint con
      join pg_class c on c.oid = con.conrelid
      cross join (values
        ('essay'),('problem_set'),('lab_report'),('reading'),
-       ('revision'),('project'),('presentation'),('other'),
+       ('revision'),('project'),('presentation'),('other')
+     ) as t(name)
+    where c.relname = 'assignments'
+      and con.conname = 'assignments_task_type_check'),
+  'assignments.task_type names all eight generic types'
+);
+select ok(
+  (select not bool_or(strpos(pg_get_constraintdef(con.oid), '''' || t.name || '''') > 0)
+     from pg_constraint con
+     join pg_class c on c.oid = con.conrelid
+     cross join (values
        ('internal_assessment'),('extended_essay'),
        ('tok_essay'),('tok_exhibition'),
        ('mock_exam'),('final_exam')
      ) as t(name)
     where c.relname = 'assignments'
       and con.conname = 'assignments_task_type_check'),
-  'assignments.task_type accepts all fourteen known types'
+  'assignments.task_type names none of the six retired IB types'
 );
 
 select is(
