@@ -9,19 +9,24 @@ import AlbusCore
 /// one moment they are willing to spend on setup.
 struct RootView: View {
     @Environment(SessionService.self) private var session
+    @Environment(AccountDeletion.self) private var deletion
     @Environment(Preferences.self) private var preferences
 
     var body: some View {
-        switch session.state {
-        case .starting:
-            LaunchPlaceholder()
-        case .signedIn where preferences.hasOnboarded:
-            AppShell()
-        case .signedIn, .needsAccount, .failed:
-            // `.failed` lands here too: onboarding is where the retry lives,
-            // and a student with no connection on first launch should see the
-            // questions rather than a dead end.
-            OnboardingFlow()
+        if deletion.requiresCleanup {
+            AccountDeletionScreen(recovering: true)
+        } else {
+            switch session.state {
+            case .starting:
+                LaunchPlaceholder()
+            case .signedIn where preferences.hasOnboarded:
+                AppShell()
+            case .signedIn, .needsAccount, .failed:
+                // `.failed` lands here too: onboarding is where the retry lives,
+                // and a student with no connection on first launch should see the
+                // questions rather than a dead end.
+                OnboardingFlow()
+            }
         }
     }
 }

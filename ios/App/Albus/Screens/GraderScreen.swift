@@ -18,6 +18,7 @@ import AlbusCore
 /// reading that is clearly labelled as not a grade.
 struct GraderScreen: View {
     @Environment(\.modelContext) private var context
+    @Environment(AccountDeletion.self) private var accountDeletion
     @Environment(\.dismiss) private var dismiss
 
     /// Opened from an assignment rather than from Tools.
@@ -890,6 +891,7 @@ struct GraderScreen: View {
     }
 
     private func submit() async {
+        let accountGeneration = accountDeletion.generation
         stage = .marking
         failure = nil
 
@@ -901,6 +903,8 @@ struct GraderScreen: View {
                 presentation: presentation,
                 title: workTitle
             )
+
+            guard !accountDeletion.requiresCleanup, accountDeletion.generation == accountGeneration else { return }
 
             let grading = Grading(
                 remoteID: marked.id,

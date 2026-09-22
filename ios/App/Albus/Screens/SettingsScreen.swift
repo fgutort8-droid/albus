@@ -15,6 +15,7 @@ struct SettingsScreen: View {
     @Query(sort: \Course.displayName) private var courses: [Course]
 
     @State private var showingPaywall = false
+    @State private var showingAccountDeletion = false
 
     var body: some View {
         @Bindable var preferences = preferences
@@ -27,6 +28,13 @@ struct SettingsScreen: View {
                 if !courses.isEmpty { subjectsSection }
                 notificationsSection
                 aboutSection
+                Divider()
+                Button("Delete account", role: .destructive) {
+                    showingAccountDeletion = true
+                }
+                .font(Tokens.Typography.body)
+                .foregroundStyle(Tokens.Palette.danger)
+                .accessibilityIdentifier("deleteAccount")
             }
             .padding(Tokens.Spacing.xl)
         }
@@ -34,6 +42,7 @@ struct SettingsScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showingPaywall) { PaywallScreen() }
+        .sheet(isPresented: $showingAccountDeletion) { AccountDeletionScreen() }
         .task { await entitlements.refresh() }
         .refreshable { await entitlements.refresh() }
     }

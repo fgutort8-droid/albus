@@ -27,6 +27,7 @@ final class NotificationCoordinator {
     ///
     /// Reordering steps calls `reschedule` several times in a row; without this
     /// each one would round-trip to the notification daemon.
+    private var suspendedForDeletion = false
     private var pending: Task<Void, Never>?
     private static let debounce: Duration = .milliseconds(400)
 
@@ -78,7 +79,9 @@ final class NotificationCoordinator {
                  preferences: Preferences,
                  coordinator: PlanCoordinator,
                  now: Date = .now) async {
+        guard !suspendedForDeletion else { return }
         authorization = await client.authorizationStatus()
+        guard !suspendedForDeletion else { return }
 
         // A denied or unanswered app must never add anything: `add` succeeds
         // regardless and the request sits pending but unpresentable, which
@@ -108,6 +111,7 @@ final class NotificationCoordinator {
         guard digest != state.digest else { return }
 
         await apply(planned, now: now)
+        guard !suspendedForDeletion else { return }
 
         state.digest = digest
         state.unfitSignature = StableHash.signature(coordinator.unplacedStepIDs)
@@ -143,10 +147,20 @@ final class NotificationCoordinator {
         scheduledCount = 0
     }
 
+    func clearForAccountDeletion() async {
+        suspendedForDeletion = true
+        pending?.cancel()
+        pending = nil
+        await clearAll()
+        state.reset()
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+    }
+
     // MARK: - The diff
 
     private func apply(_ planned: [PlannedNotification], now: Date) async {
         let existing = await client.pendingIdentifiers()
+        guard !suspendedForDeletion else { return }
         let desired = Dictionary(planned.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
 
         // The prefix check is deliberately repeated here even though the client
@@ -159,6 +173,7 @@ final class NotificationCoordinator {
         await client.remove(identifiers: Array(stale))
 
         for notification in planned {
+            guard !suspendedForDeletion else { return }
             // `add` with an existing identifier replaces in place, so unchanged
             // requests are skipped rather than torn down and rebuilt — which
             // would open a window where nothing is pending.
@@ -168,6 +183,10 @@ final class NotificationCoordinator {
             // `request` a plain file URL is what keeps it `nonisolated`.
             let artwork = CactusAttachment.shared.masterURL(for: notification.mood)
             await client.add(notification, artwork: artwork)
+            if suspendedForDeletion {
+                await client.remove(identifiers: [notification.id])
+                return
+            }
         }
     }
 

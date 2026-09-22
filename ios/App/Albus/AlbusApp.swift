@@ -71,6 +71,7 @@ struct AlbusApp: App {
         }
     }
 
+    @State private var deletion = AccountDeletion()
     @State private var session = SessionService()
     @State private var coordinator = PlanCoordinator()
     @State private var preferences = Preferences()
@@ -88,13 +89,25 @@ struct AlbusApp: App {
                 // one looks worse than none. Locked until dark is designed.
                 .preferredColorScheme(.light)
                 .environment(session)
+                .environment(deletion)
                 .environment(coordinator)
                 .environment(preferences)
                 .environment(entitlements)
                 .environment(focusSession)
                 .environment(notifications)
                 .environment(router)
+                .onChange(of: deletion.requiresCleanup) { _, pending in
+                    if !pending {
+                        coordinator = PlanCoordinator()
+                        entitlements = EntitlementService()
+                        focusSession = FocusSession()
+                        notifications = NotificationCoordinator()
+                        router = NotificationRouter()
+                        wireNotifications()
+                    }
+                }
                 .task {
+                    guard !deletion.requiresCleanup else { return }
                     // Before anything async, so the plan is already correct by
                     // the time the first screen draws.
                     catchUp()
@@ -114,6 +127,7 @@ struct AlbusApp: App {
                     await rebuildNotifications()
                 }
                 .onChange(of: scenePhase) { _, phase in
+                    guard !deletion.requiresCleanup, session.userID != nil else { return }
                     switch phase {
                     case .active:
                         notifications.appDidBecomeActive()

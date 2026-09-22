@@ -49,12 +49,18 @@ struct AssignmentService {
 @MainActor
 enum PendingDeletions {
     private static let key = "albus.pendingAssignmentDeletions"
+    private static var generation = 0
 
     static func record(_ id: UUID) {
         var ids = all()
         guard !ids.contains(id) else { return }
         ids.append(id)
         save(ids)
+    }
+
+    static func clear(defaults: UserDefaults = .standard) {
+        generation += 1
+        defaults.removeObject(forKey: key)
     }
 
     static func all() -> [UUID] {
@@ -68,6 +74,7 @@ enum PendingDeletions {
     /// Retries everything outstanding, dropping whatever succeeds. Safe to call
     /// on every launch: with nothing pending it does no work and no network.
     static func flush(using service: AssignmentService = AssignmentService()) async {
+        let startedGeneration = generation
         let pending = all()
         guard !pending.isEmpty else { return }
 
@@ -75,6 +82,7 @@ enum PendingDeletions {
         for id in pending where await !service.delete(remoteID: id) {
             stillPending.append(id)
         }
+        guard generation == startedGeneration else { return }
         save(stillPending)
     }
 }
