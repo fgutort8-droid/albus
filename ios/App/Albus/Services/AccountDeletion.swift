@@ -16,9 +16,9 @@ final class AccountDeletion {
         requiresCleanup = defaults.bool(forKey: Self.receiptKey)
     }
 
-    func perform(deleteRemote: () async throws -> Void,
-                 clearLocal: () async throws -> Void,
-                 signOut: () async throws -> Void) async -> Bool {
+    func perform(deleteRemote: @MainActor () async throws -> Void,
+                 clearLocal: @MainActor () async throws -> Void,
+                 signOut: @MainActor () async throws -> Void) async -> Bool {
         guard !isBusy else { return false }
         isBusy = true
         errorMessage = nil
