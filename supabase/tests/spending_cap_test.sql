@@ -8,6 +8,10 @@
 -- Earlier calls belong to a second account, so the caller's own allowance,
 -- rate limits and fair-use budget never come into it: a refusal below can
 -- only be the cap.
+--
+-- Free and paying accounts spend from separate fuses (payments_test.sql
+-- asserts the split). Earlier calls land in the pool of the caller being
+-- tested, so each assertion measures that caller's own fuse.
 
 begin;
 
@@ -28,13 +32,14 @@ $$;
 -- N earlier calls by everyone else: what each reserved, what each really cost.
 create function pg_temp.spent(
   p_kind text, p_n integer, p_state text, p_reserved integer, p_actual integer,
-  p_ago interval default interval '10 minutes'
+  p_ago interval default interval '10 minutes', p_pool text default 'free'
 ) returns void language sql as $$
   insert into public.ai_usage (user_id, kind, model, attempt_state,
-                               reserved_cost_microusd, actual_cost_microusd, created_at)
+                               reserved_cost_microusd, actual_cost_microusd,
+                               budget_pool, created_at)
   select 'b1000000-0000-4000-8000-000000000009', p_kind,
          case p_kind when 'grade' then 'claude-opus-5' else 'claude-haiku-4-5' end,
-         p_state, p_reserved, p_actual, now() - p_ago
+         p_state, p_reserved, p_actual, p_pool, now() - p_ago
     from generate_series(1, p_n);
 $$;
 
@@ -85,10 +90,11 @@ select lives_ok(
   'cheap finished calls do not fill the cap with their worst cases');
 
 delete from public.ai_usage;
--- An ordinary day: a hundred AI plans and two markings, US$0.41 of money and
--- US$3.90 of worst cases. A marking reserves US$0.45 and still fits.
-select pg_temp.spent('breakdown', 100, 'completed', 30000, 2600, interval '3 hours');
-select pg_temp.spent('grade', 2, 'completed', 450000, 76000, interval '3 hours');
+-- An ordinary day for paying students: a hundred AI plans and two markings,
+-- US$0.41 of money and US$3.90 of worst cases. A marking reserves US$0.45 and
+-- still fits.
+select pg_temp.spent('breakdown', 100, 'completed', 30000, 2600, interval '3 hours', 'paid');
+select pg_temp.spent('grade', 2, 'completed', 450000, 76000, interval '3 hours', 'paid');
 select lives_ok(
   $$select public.check_and_record_ai_usage(
       'b1000000-0000-4000-8000-000000000002', 'grade', 'claude-opus-5')$$,

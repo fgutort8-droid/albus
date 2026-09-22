@@ -2,10 +2,14 @@ import { assertEquals } from "jsr:@std/assert@1";
 import {
   classifySubscriptionResult,
   constantTimeEqual,
+  finiteOrNull,
   isoFromMilliseconds,
+  isUserID,
   normaliseRevenueCatEnvironment,
   revenueCatAppIsAllowed,
   revokesImmediately,
+  storeCanGrant,
+  userIDsIn,
   verifyRevenueCatSignature,
 } from "../_shared/revenuecat.ts";
 
@@ -105,6 +109,48 @@ Deno.test("RevenueCat events must belong to an explicitly allowed app", () => {
   assertEquals(revenueCatAppIsAllowed("app_other", "app_albus_ios"), false);
   assertEquals(revenueCatAppIsAllowed("app_albus_ios", ""), false);
   assertEquals(revenueCatAppIsAllowed(null, "app_albus_ios"), false);
+});
+
+Deno.test("only a TRANSFER may omit its app id, and a named app must still be ours", () => {
+  const allowMissing = { allowMissing: true };
+  assertEquals(revenueCatAppIsAllowed(undefined, "app_albus_ios", allowMissing), true);
+  assertEquals(revenueCatAppIsAllowed(null, "app_albus_ios", allowMissing), true);
+  assertEquals(revenueCatAppIsAllowed("app_other", "app_albus_ios", allowMissing), false);
+  assertEquals(revenueCatAppIsAllowed("", "app_albus_ios", allowMissing), false);
+  // An unconfigured webhook refuses even a transfer.
+  assertEquals(revenueCatAppIsAllowed(undefined, "", allowMissing), false);
+  assertEquals(revenueCatAppIsAllowed(undefined, "app_albus_ios"), false);
+});
+
+Deno.test("only App Store purchases can change a plan", () => {
+  assertEquals(storeCanGrant("APP_STORE"), true);
+  assertEquals(storeCanGrant("MAC_APP_STORE"), true);
+  // The Test Store makes purchases that cost nothing.
+  for (const store of ["TEST_STORE", "PROMOTIONAL", "PLAY_STORE", "STRIPE", "app_store", "", null, undefined]) {
+    assertEquals(storeCanGrant(store), false, String(store));
+  }
+});
+
+Deno.test("a transfer names Albus accounts only, once each", () => {
+  const id = "3f2c1b7e-9a4d-4c5e-8f1a-2b3c4d5e6f70";
+  assertEquals(isUserID(id), true);
+  assertEquals(isUserID("$RCAnonymousID:8b1f0f2e8f6a4c1e"), false);
+  assertEquals(
+    userIDsIn(["$RCAnonymousID:8b1f0f2e8f6a4c1e", id, id.toUpperCase(), 42, null]),
+    [id],
+  );
+  assertEquals(userIDsIn("not a list"), []);
+  assertEquals(userIDsIn(undefined), []);
+});
+
+Deno.test("prices are numbers or nothing", () => {
+  assertEquals(finiteOrNull(9.99), 9.99);
+  assertEquals(finiteOrNull(-9.99), -9.99);
+  assertEquals(finiteOrNull(0), 0);
+  assertEquals(finiteOrNull("9.99"), null);
+  assertEquals(finiteOrNull(Number.POSITIVE_INFINITY), null);
+  assertEquals(finiteOrNull(Number.NaN), null);
+  assertEquals(finiteOrNull(null), null);
 });
 
 Deno.test("an unmapped product is loud and retryable, not a silent 200", () => {

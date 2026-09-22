@@ -228,22 +228,28 @@ The database independently enforces the important facts:
 
 ### What still needs an account
 
-The client cannot purchase yet. Do not populate the production product map
-until all of these are complete together:
+The four products are mapped (`20260917130000_payments_backend`). The rest
+lives outside the repo:
 
-1. App Store Connect: create the subscription products.
-2. RevenueCat: connect the app, set **`app_user_id` to the Supabase user id**
-   and add the SDK/public app key. Set restore behaviour to **Transfer if there
-   are no active subscriptions**; Albus deliberately refuses to rebind an
-   active original transaction to another user.
+1. App Store Connect: create the four subscriptions with exactly the mapped
+   product ids, in one group with Pro above Plus, and Billing Grace Period off.
+2. RevenueCat: connect the app. The client logs in with the Supabase user id,
+   lowercased. Leave restore behaviour on the default, **Transfer to new App
+   User ID**: accounts are anonymous, so a new phone is a new account, and
+   `transfer_subscriptions` moves the plan and its usage history.
 3. RevenueCat → Integrations → Webhooks: point at
    `https://<project>.functions.supabase.co/revenuecat-webhook`; configure both
-   `REVENUECAT_WEBHOOK_SECRET` and the signing secret, then set the exact
-   RevenueCat app id in `REVENUECAT_APP_IDS`.
-4. Insert the exact real product ids into `subscription_products` with their
-   Plus/Pro mapping.
-5. Verify purchase, renewal, cancellation, expiry, refund, replay, conflict, and
-   Sandbox rejection before enabling Production products.
+   `REVENUECAT_WEBHOOK_SECRET` (the Authorization header) and
+   `REVENUECAT_WEBHOOK_SIGNING_SECRET`, and set the App Store app's RevenueCat
+   id in `REVENUECAT_APP_IDS`. Until that is set the function answers 503 and
+   RevenueCat retries.
+4. Verify purchase, renewal, cancellation, expiry, refund, replay, restore and
+   a sandbox purchase before release.
+
+`app_config.allow_sandbox_subscriptions` is 1 because App Review and TestFlight
+buy with sandbox accounts against this backend. Sandbox proceeds never raise
+the paid fuse. Setting it to 0 stops sandbox purchases granting anything from
+the next event on.
 
 The superseded direct Apple receipt and notification functions were removed.
 They must not be redeployed.
@@ -280,9 +286,16 @@ The Anthropic client does not retry automatically: without provider-enforced
 idempotency, retrying a timed-out request could turn one reserved call into
 several billed generations. An explicit app retry receives a fresh reservation
 and therefore re-enters every entitlement, rate, risk, and monetary check.
-Launch ceilings are US$1 Free, US$5.50 Plus and US$12 Pro per rolling 30 days;
-the client cannot read or write them. Project-wide fuses remain US$2/hour and
-US$10/day of conservative reservations, plus an immediate emergency stop.
+Launch ceilings are US$1 Free, US$3 Plus and US$6 Pro per rolling 30 days;
+the client cannot read or write them. A restore moves the last 30 days of usage
+with the subscription, so a fresh account does not bring fresh ceilings.
+
+Above them sit two project-wide fuses, one for free accounts and one for paying
+accounts, each allowing 100 calls/hour and counting finished calls at their
+measured cost and unfinished ones at their reservation. Free is US$1/hour and
+US$1/day. Paid starts at the same floor and its day grows to 25% of the last 30
+days of production proceeds, divided by 30 (`private.ai_pool_budget`). An
+emergency stop halts both.
 
 ### Account risk
 

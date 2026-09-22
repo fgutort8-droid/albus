@@ -83,9 +83,10 @@ The order is intentional:
 3. parse and validate bounded input;
 4. load only caller-owned context;
 5. acquire the global then per-user database locks;
-6. check emergency stop, global calls, and conservative USD budgets;
-7. evaluate account risk and server-side plan entitlement;
-8. check delivered-result allowance and all-attempt rate limits;
+6. check the emergency stop, read the plan, and check the call count and USD
+   budgets of that plan's pool (free or paid);
+7. evaluate account risk;
+8. check the plan's delivered-result allowance and all-attempt rate limits;
 9. reserve a worst-case cost row;
 10. call Anthropic;
 11. finalize the reservation once with server-derived token cost.
@@ -104,19 +105,25 @@ Allowance and financial exposure are deliberately different counters:
   purchased allowance;
 - failed work gives the allowance back;
 - every attempt, including failures, consumes the rate window;
-- every reservation, including an abandoned one, consumes conservative global
-  cost capacity for its hour/day.
+- every reservation, including an abandoned one, consumes cost capacity in
+  its pool for its hour/day: its measured cost once finished, its worst case
+  until then.
 
 This prevents both failure farming and a runtime crash erasing cost evidence.
 Finalization is a one-way `reserved -> completed|failed` transition; replaying
 it cannot alter outcome, model, owner, or cost.
 
-Launch circuit breakers live in server-only `app_config`: 100 AI calls/hour,
-US$2/hour and US$10/day of worst-case reservations, plus an immediate emergency
-stop. These are intentionally low until real traffic establishes safe capacity.
+Launch circuit breakers live in server-only `app_config`, one set per pool, so
+accounts that cost nothing to create cannot use up what paying students need.
+Each pool allows 100 AI calls/hour. Free accounts share US$1/hour and US$1/day.
+Paying accounts start at the same floor, and their day grows to 25% of the last
+30 days of production proceeds divided by 30, with a quarter of the day
+available in any hour (`private.ai_pool_budget`). An emergency stop halts both
+at once. The floors are intentionally low until real traffic establishes safe
+capacity.
 
 Each account also has a private rolling 30-day loss ceiling: US$1 Free,
-US$5.50 Plus and US$12 Pro. Completed calls count measured server-priced tokens;
+US$3 Plus and US$6 Pro. Completed calls count measured server-priced tokens;
 unfinished or unknown calls retain their worst-case reservation. A crashed Edge
 isolate therefore cannot erase cost, and one manipulated account cannot consume
 an unbounded share of the project budget. This backstop is separate from, and
@@ -166,28 +173,48 @@ which requires:
    replay window.
 
 The signed event id and event time are persisted. Replays and out-of-order
-events are ignored, and a subscription already linked to one user cannot move
-to another. Products grant nothing until explicitly mapped in the server-only
-`subscription_products` allowlist. A second allowlist restricts signed events
-to configured Albus RevenueCat app ids, because one RevenueCat project can
-deliver events for several apps. Unknown apps/products, null expiry, and
-Sandbox events fail closed. Sandbox is rejected independently in the Edge
-Function and the database.
+events are ignored. A subscription belongs to the first account an event names
+until a signed `TRANSFER` moves it; an event naming a different account is kept
+as a fact for the current owner and grants the other account nothing. Products
+grant nothing until explicitly mapped in the server-only
+`subscription_products` allowlist. A second allowlist, `REVENUECAT_APP_IDS`, is
+required and restricts signed events to Albus's RevenueCat app ids, because one
+RevenueCat project can deliver events for several apps. Only App Store events
+can grant; RevenueCat Test Store purchases are acknowledged and ignored.
+Unknown apps/products and null expiry fail closed.
+
+Sandbox purchases grant while `app_config.allow_sandbox_subscriptions` is 1,
+because App Review and TestFlight buy with sandbox accounts against the
+production backend. The switch exists only in the database. Sandbox money never
+raises the paid fuse, each sandbox account keeps its 30-day ceiling, and
+Apple's sandbox subscriptions lapse within hours.
 
 Cancellation keeps access until paid expiry. A `SUBSCRIPTION_PAUSED` event also
 keeps access until paid expiry because it schedules a pause; only the later
 `EXPIRATION` event revokes immediately. `PRODUCT_CHANGE` is informational and
 does not change entitlement before the provider reports the actual transaction
-state. A `TRANSFER` event never moves Albus entitlement state by itself: the
-database refuses to bind an existing original transaction to a different user.
-Production RevenueCat setup must use **Transfer if there are no active
-subscriptions**, so an active paid period cannot be walked through fresh Free
-accounts. This is verified again during the purchase launch checklist.
+state.
 
-The RevenueCat SDK, App Store products, webhook secrets, and real product map
-are not configured yet. Consequently the payment path is secure-by-closed but
-not commercially usable. The removed direct Apple receipt endpoints must not be
-redeployed.
+Accounts are anonymous, so a new phone is a new account, and Restore has to be
+able to move an active subscription. RevenueCat's restore behaviour therefore
+stays on **Transfer to new App User ID**; "only if there are no active
+subscriptions" would refuse exactly the restore a student with a new phone
+needs. A signed `TRANSFER` runs `transfer_subscriptions`: the transactions
+move, both accounts are recomputed, and the last 30 days of AI usage move with
+the plan. Every per-account AI limit counts that history, so walking one
+subscription through fresh accounts does not multiply the weekly markings, the
+rate limits or the 30-day ceiling. The transfer takes the AI gate's locks in
+the gate's order; `scripts/security-concurrency-local.sh` races restores,
+renewals and AI calls on the same accounts and fails on any deadlock.
+
+Purchase, renewal and refund events record their proceeds in the server-only
+`subscription_revenue` ledger: RevenueCat's price less its tax and commission
+estimates (25% and 30% when missing), with the gross capped at US$1,000 so a
+malformed event cannot open the fuse. Refunds count against.
+
+App Store products, the webhook secrets and `REVENUECAT_APP_IDS` are not
+configured yet, so the webhook answers 503 and nothing can be bought. The
+removed direct Apple receipt endpoints must not be redeployed.
 
 ## 7. Retention and operations
 
