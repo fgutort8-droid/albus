@@ -14,7 +14,9 @@ import AlbusCore
 /// the system for less movement.
 struct PaywallScreen: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @Environment(EntitlementService.self) private var entitlements
+    @Environment(PurchaseService.self) private var purchases
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Where the intro has got to. `flight` is full-bleed, `hero` is the zoom
@@ -26,12 +28,22 @@ struct PaywallScreen: View {
     var autoplay: Bool = true
 
     @State private var phase: Phase
-    @State private var plan: Plan = .plus
+    @State private var plan: Plan
+    @State private var period: PurchaseService.Period
+    /// One sentence about the last thing the student tried: a failure, an
+    /// approval still pending, a plan on its way.
+    @State private var notice: String?
+    /// Between tapping buy or restore and the server reporting the plan.
+    @State private var isConfirming = false
     @State private var runID = 0
 
-    init(autoplay: Bool = true) {
+    /// `plan` and `period` are only where the screen starts; the student
+    /// changes both. Snapshots use them to render each state.
+    init(autoplay: Bool = true, plan: Plan = .plus, period: PurchaseService.Period = .monthly) {
         self.autoplay = autoplay
         _phase = State(initialValue: autoplay ? .flight : .done)
+        _plan = State(initialValue: plan)
+        _period = State(initialValue: period)
     }
 
     // Geometry from the design, in points.
@@ -63,7 +75,17 @@ struct PaywallScreen: View {
             }
         }
 
-        /// Cents, matching `public.plans.price_cents`.
+        var tier: EntitlementService.Tier {
+            switch self {
+            case .free: .free
+            case .plus: .plus
+            case .pro:  .pro
+            }
+        }
+
+        /// Cents, matching `public.plans.price_cents`. The fallback price: once
+        /// the App Store has priced a plan for this storefront, that is what
+        /// the card shows.
         var priceCents: Int {
             switch self {
             case .free: 0
@@ -152,9 +174,13 @@ struct PaywallScreen: View {
                     // perfectly well where nobody could see them.
                     headline.padding(.top, 20)
                     planPicker.padding(.top, 20)
+                    // Below the cards, not above: the cards have to clear the
+                    // purchase bar on a 667pt phone, and the picker only
+                    // changes what they say, not which one to pick.
+                    if offersYearly { periodPicker.padding(.top, 12) }
                     valueList.padding(.top, 22)
                 }
-                .padding(.bottom, 200)
+                .padding(.bottom, 230)
             }
             .scrollDisabled(phase != .done)
 
@@ -164,6 +190,13 @@ struct PaywallScreen: View {
         }
         .background(Palette.page)
         .task(id: runID) { await runIntro() }
+        // Prices that failed to load at launch get another try when the
+        // student comes to look at them.
+        .task {
+            if case .failed = purchases.availability { await purchases.load() }
+        }
+        .onChange(of: plan) { _, _ in notice = nil }
+        .onChange(of: period) { _, _ in notice = nil }
     }
 
     // MARK: - Intro
@@ -293,13 +326,54 @@ struct PaywallScreen: View {
     private var planPicker: some View {
         HStack(alignment: .top, spacing: 8) {
             ForEach(Plan.allCases) { option in
+                let shown = price(of: option)
                 PlanCard(plan: option,
+                         price: shown.amount,
+                         period: shown.period,
                          isSelected: plan == option,
                          isCurrent: current == option) { plan = option }
             }
         }
         .padding(.horizontal, heroInset)
         .rise(showsContent, delay: 0.26)
+    }
+
+    /// Monthly or yearly. Two labelled segments rather than a switch: the
+    /// choice changes what is billed, and a switch reads as on or off.
+    private var periodPicker: some View {
+        HStack(spacing: 4) {
+            ForEach(PurchaseService.Period.allCases) { option in
+                let isSelected = selectedPeriod == option
+                Button { period = option } label: {
+                    HStack(spacing: 6) {
+                        Text(option.title)
+                        if option == .yearly, let saving = yearlySaving {
+                            Text("Save \(saving)%")
+                                .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                                .foregroundStyle(isSelected ? Palette.violet : .white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(isSelected ? Color.white : Palette.violet, in: Capsule())
+                        }
+                    }
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(isSelected ? .white : Palette.ink)
+                    .frame(maxWidth: .infinity, minHeight: 36)
+                    .background(isSelected ? Palette.violet : .clear, in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(option == .yearly && yearlySaving != nil
+                                    ? "\(option.title), save \(yearlySaving ?? 0) percent"
+                                    : option.title)
+                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+            }
+        }
+        .padding(3)
+        .background(Color(hex: 0xF3F1EC), in: Capsule())
+        .overlay { Capsule().strokeBorder(Palette.border, lineWidth: 1) }
+        .padding(.horizontal, heroInset)
+        .rise(showsContent, delay: 0.30)
     }
 
     private var purchaseBar: some View {
@@ -310,35 +384,47 @@ struct PaywallScreen: View {
 
             VStack(spacing: 9) {
                 Button(action: purchase) {
-                    Text(callToAction)
-                        .font(.system(size: 16.5, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(isCurrentPlan ? Color(hex: 0x9CA3AF) : Palette.violet,
-                                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .shadow(color: Palette.violet.opacity(isCurrentPlan ? 0 : 0.45),
-                                radius: 14, x: 0, y: 10)
+                    ZStack {
+                        Text(callToAction).opacity(isBusy ? 0 : 1)
+                        if isBusy { ProgressView().tint(.white) }
+                    }
+                    .font(.system(size: 16.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .background(isCurrentPlan ? Color(hex: 0x9CA3AF) : Palette.violet,
+                                in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: Palette.violet.opacity(isCurrentPlan ? 0 : 0.45),
+                            radius: 14, x: 0, y: 10)
                 }
                 .buttonStyle(.plain)
-                .disabled(isCurrentPlan)
+                .disabled(isCurrentPlan || isBusy)
+                .accessibilityLabel(isBusy ? "Working" : callToAction)
 
                 Text(subCaption)
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.gray)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let notice {
+                    Text(notice)
+                        .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                        .foregroundStyle(Palette.ink)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .transition(.opacity)
+                }
 
                 HStack(spacing: 8) {
-                    ForEach(Array(["Restore", "Terms", "Privacy"].enumerated()), id: \.offset) { index, label in
-                        if index > 0 {
-                            Circle().fill(Color(hex: 0xCFC8BC)).frame(width: 2.5, height: 2.5)
-                        }
-                        Button(label) {}
-                            .font(.system(size: 11.5, design: .rounded))
-                            .foregroundStyle(Palette.gray)
-                            .underline()
-                    }
+                    footerLink("Restore", action: restore)
+                        .disabled(isBusy)
+                    footerDot
+                    footerLink("Terms") { openURL(AppLinks.terms) }
+                    footerDot
+                    footerLink("Privacy") { openURL(AppLinks.privacy) }
                 }
             }
+            .animation(.easeInOut(duration: 0.2), value: notice)
             .padding(.horizontal, heroInset)
             .padding(.top, 6)
             .padding(.bottom, 24)
@@ -356,22 +442,92 @@ struct PaywallScreen: View {
 
     private var isCurrentPlan: Bool { plan == current }
 
-    private var callToAction: String {
-        if isCurrentPlan { return "Your plan" }
-        if plan == .free { return "Free is included" }
-        return current == .free ? "Start 3 days free" : "Switch to \(plan.title)"
+    private var isBusy: Bool { isConfirming || purchases.isWorking }
+
+    /// Yearly is offered only once the App Store has priced it for every paid
+    /// plan. A build that cannot buy shows monthly display prices.
+    private var offersYearly: Bool {
+        Plan.allCases.allSatisfy { $0 == .free || purchases.option($0.tier, .yearly) != nil }
     }
 
+    private var selectedPeriod: PurchaseService.Period { offersYearly ? period : .monthly }
+
+    /// What the button would buy, once the App Store has priced it.
+    private var selectedOffer: PurchaseService.Option? {
+        plan == .free ? nil : purchases.option(plan.tier, selectedPeriod)
+    }
+
+    private var yearlySaving: Int? {
+        purchases.yearlySaving(plan == .free ? .plus : plan.tier)
+    }
+
+    /// What a card says a plan costs: the App Store's price in this
+    /// storefront once it has loaded, and until then, or in a build that
+    /// cannot buy, the display copy `PricingTests` pins to the server.
+    private func price(of option: Plan) -> (amount: String, period: String) {
+        if option != .free, let offer = purchases.option(option.tier, selectedPeriod) {
+            return (offer.price, selectedPeriod.unit)
+        }
+        return (option.price, option.period)
+    }
+
+    /// The billed price of the selected plan, as it will be charged.
+    private var billed: String {
+        let shown = price(of: plan)
+        var line = "\(shown.amount) \(shown.period)"
+        if selectedPeriod == .yearly, let perWeek = selectedOffer?.pricePerWeek {
+            line += " (\(perWeek) a week)"
+        }
+        return line
+    }
+
+    /// Only an offer the App Store says this Apple ID can still take is
+    /// called free. Apple gives one trial per subscription group, and a
+    /// button that promises a trial the sheet then doesn't show is a
+    /// rejection.
+    private var callToAction: String {
+        if isCurrentPlan { return "Your plan" }
+        if plan == .free { return current == .free ? "Free is included" : "Manage subscription" }
+        if current == .free {
+            if let trial = selectedOffer?.freeTrial { return "Start \(trial) free" }
+            return "Subscribe to \(plan.title)"
+        }
+        return "Switch to \(plan.title)"
+    }
+
+    /// The terms under the button. The billed amount is always here in full,
+    /// and the trial, when there is one, is described as what comes before it.
     private var subCaption: String {
         if isCurrentPlan {
             return plan == .free
                 ? "You're on Free. Pick a plan above to see what it adds."
                 : "You're on \(plan.title). Thank you."
         }
-        if plan == .free { return "Free needs no subscription." }
-        return current == .free
-            ? "Then \(plan.price) \(plan.period) · Cancel anytime"
-            : "\(plan.price) \(plan.period) · Changes at your next renewal"
+        if plan == .free {
+            return current == .free
+                ? "Free needs no subscription."
+                : "Cancel in your Apple subscriptions. \(current.title) stays until the time you paid for runs out."
+        }
+        if current == .free {
+            if let trial = selectedOffer?.freeTrial {
+                return "\(trial) free, then \(billed). Renews automatically. Cancel anytime."
+            }
+            return "\(billed). Renews automatically. Cancel anytime."
+        }
+        return plan.tier > current.tier
+            ? "\(billed). Starts now."
+            : "\(billed). Starts at your next renewal."
+    }
+
+    private func footerLink(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(label, action: action)
+            .font(.system(size: 11.5, design: .rounded))
+            .foregroundStyle(Palette.gray)
+            .underline()
+    }
+
+    private var footerDot: some View {
+        Circle().fill(Color(hex: 0xCFC8BC)).frame(width: 2.5, height: 2.5)
     }
 
     private var closeButton: some View {
@@ -391,19 +547,64 @@ struct PaywallScreen: View {
         .accessibilityLabel("Close")
     }
 
-    /// Hands off to the store.
+    /// Hands off to the App Store, then waits for the server.
     ///
-    /// Still unimplemented until RevenueCat is configured, and it says so rather
-    /// than pretending: a button that silently does nothing is worse than one
-    /// that admits it cannot yet. Wiring it up is `Purchases.shared.purchase(...)`
-    /// here and nothing else in the app — entitlement still arrives from the
-    /// server, via the webhook.
-    private func purchase() {}
+    /// The plan never comes from the phone: the server hears about the
+    /// purchase from RevenueCat and `PurchaseFlow` waits until it says so.
+    /// Choosing Free while paying opens Apple's subscription page, which is
+    /// the only place a subscription can be cancelled.
+    private func purchase() {
+        guard !isCurrentPlan, !isBusy else { return }
+        notice = nil
+        if plan == .free {
+            Task { await PurchaseFlow.manageSubscription(purchases: purchases) { openURL($0) } }
+            return
+        }
+        Task {
+            isConfirming = true
+            defer { isConfirming = false }
+            // A load that failed (offline when the screen opened) gets one
+            // more try before the student is told anything.
+            if selectedOffer == nil, case .failed = purchases.availability {
+                await purchases.load()
+            }
+            guard let offer = selectedOffer else {
+                notice = unavailableReason
+                return
+            }
+            switch await PurchaseFlow.buy(offer, purchases: purchases, entitlements: entitlements) {
+            case .unlocked: dismiss()
+            case .message(let text): notice = text
+            case .nothing: break
+            }
+        }
+    }
+
+    private func restore() {
+        guard !isBusy else { return }
+        notice = nil
+        Task {
+            isConfirming = true
+            defer { isConfirming = false }
+            notice = await PurchaseFlow.restore(purchases: purchases, entitlements: entitlements)
+        }
+    }
+
+    private var unavailableReason: String {
+        switch purchases.availability {
+        case .failed(let reason): reason
+        case .loading: "Still loading prices. Try again in a moment."
+        case .unavailable: "Purchases aren't available in this version of Albus."
+        case .ready: "That plan isn't on sale right now."
+        }
+    }
 
     // MARK: - Plan card
 
     private struct PlanCard: View {
         let plan: Plan
+        let price: String
+        let period: String
         let isSelected: Bool
         /// Whether this is the plan the student is already on. Marked rather
         /// than hidden — "you are here" is the most useful thing a price list
@@ -428,13 +629,13 @@ struct PaywallScreen: View {
                             .foregroundStyle(Palette.ink)
                             .lineLimit(1)
                     }
-                    Text(plan.price)
+                    Text(price)
                         .font(.system(size: 19, weight: .bold, design: .rounded))
                         .foregroundStyle(Palette.ink)
-                        .minimumScaleFactor(0.7)
+                        .minimumScaleFactor(0.6)
                         .lineLimit(1)
                         .padding(.top, 8)
-                    Text(plan.period)
+                    Text(period)
                         .font(.system(size: 10.5))
                         .foregroundStyle(Palette.gray)
                         .padding(.top, 1)
@@ -470,7 +671,7 @@ struct PaywallScreen: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(
-                "\(plan.title), \(plan.price) \(plan.period)"
+                "\(plan.title), \(price) \(period)"
                 + (isCurrent ? ", your current plan" : ""))
             .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         }

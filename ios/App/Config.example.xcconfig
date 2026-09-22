@@ -23,6 +23,19 @@ SUPABASE_PUBLISHABLE_KEY = sb_publishable_xxxxxxxxxxxxxxxxxxxx
 TURNSTILE_SITE_KEY =
 TURNSTILE_ORIGIN = https:/$()/albus.app
 
+// ── RevenueCat ───────────────────────────────────────────────────────────
+// Public SDK keys from RevenueCat → Apps & providers. Both are designed to
+// ship inside an app; neither is a secret. Leave both EMPTY and the app runs
+// with purchases off, showing display prices.
+//
+//   REVENUECAT_API_KEY       the App Store app's key (appl_...). The only key
+//                            a Release build reads.
+//   REVENUECAT_TEST_API_KEY  the Test Store key (test_...). Debug builds
+//                            prefer it: purchases need no Apple account and
+//                            cost nothing. project.yml blanks it in Release.
+REVENUECAT_API_KEY =
+REVENUECAT_TEST_API_KEY =
+
 // ── Signed build ─────────────────────────────────────────────────────────
 // YES only once DEVELOPMENT_TEAM is set in project.yml and the app is signed
 // — see ios/README.md § "Signing is deliberately unset".

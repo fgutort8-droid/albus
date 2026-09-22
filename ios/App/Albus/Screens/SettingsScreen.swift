@@ -12,10 +12,14 @@ struct SettingsScreen: View {
     @Environment(EntitlementService.self) private var entitlements
     @Environment(Preferences.self) private var preferences
     @Environment(SessionService.self) private var session
+    @Environment(PurchaseService.self) private var purchases
+    @Environment(\.openURL) private var openURL
     @Query(sort: \Course.displayName) private var courses: [Course]
 
     @State private var showingPaywall = false
     @State private var showingAccountDeletion = false
+    @State private var isRestoring = false
+    @State private var purchaseNotice: String?
 
     var body: some View {
         @Bindable var preferences = preferences
@@ -106,8 +110,52 @@ struct SettingsScreen: View {
                     PrimaryButton(title: entitlements.isPaid ? "Change plan" : "See the plans") {
                         showingPaywall = true
                     }
+
+                    // Cancelling lives in Apple's subscription settings; this
+                    // is the shortest honest way there. Restore is for a new
+                    // phone, which Albus sees as a new account.
+                    HStack(spacing: Tokens.Spacing.l) {
+                        if entitlements.isPaid {
+                            textButton("Manage subscription") {
+                                Task {
+                                    await PurchaseFlow.manageSubscription(purchases: purchases) {
+                                        openURL($0)
+                                    }
+                                }
+                            }
+                        }
+                        textButton(isRestoring ? "Restoring…" : "Restore purchases") {
+                            restorePurchases()
+                        }
+                        .disabled(isRestoring)
+                    }
+
+                    if let purchaseNotice {
+                        Text(purchaseNotice)
+                            .font(Tokens.Typography.caption)
+                            .foregroundStyle(Tokens.Palette.inkSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
+        }
+    }
+
+    private func textButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .font(Tokens.Typography.label)
+            .foregroundStyle(Tokens.Palette.accent)
+            .buttonStyle(.plain)
+    }
+
+    private func restorePurchases() {
+        guard !isRestoring else { return }
+        purchaseNotice = nil
+        Task {
+            isRestoring = true
+            defer { isRestoring = false }
+            purchaseNotice = await PurchaseFlow.restore(purchases: purchases,
+                                                        entitlements: entitlements)
         }
     }
 
@@ -243,9 +291,28 @@ struct SettingsScreen: View {
                 VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
                     aboutRow("Version", Self.version)
                     aboutRow("Account", accountLabel)
+                    linkRow("Help and support", AppLinks.support)
+                    linkRow("Privacy policy", AppLinks.privacy)
+                    linkRow("Terms of use", AppLinks.terms)
                 }
             }
         }
+    }
+
+    private func linkRow(_ label: String, _ url: URL) -> some View {
+        Link(destination: url) {
+            HStack {
+                Text(label)
+                    .font(Tokens.Typography.body)
+                    .foregroundStyle(Tokens.Palette.ink)
+                Spacer(minLength: Tokens.Spacing.m)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Tokens.Palette.inkMuted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func aboutRow(_ label: String, _ value: String) -> some View {

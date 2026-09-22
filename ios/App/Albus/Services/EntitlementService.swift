@@ -171,6 +171,26 @@ final class EntitlementService {
         }
     }
 
+    /// Waits for the server to report a paid plan at least `tier`, after the
+    /// App Store has sold one. The plan arrives through RevenueCat's webhook,
+    /// usually within seconds; asking the server, not the phone, is the point.
+    ///
+    /// False when it has not arrived in time, which is not a failed purchase:
+    /// the webhook keeps retrying, and a later refresh shows the plan.
+    func waitForPaidPlan(atLeast tier: Tier = .plus,
+                         attempts: Int = 10,
+                         interval: Duration = .seconds(2)) async -> Bool {
+        for attempt in 0..<max(1, attempts) {
+            if attempt > 0 {
+                try? await Task.sleep(for: interval)
+                if Task.isCancelled { return false }
+            }
+            await refresh()
+            if isPaid && self.tier >= tier { return true }
+        }
+        return false
+    }
+
     /// Hides the stale-data notice until another refresh fails. This never
     /// changes the plan or any entitlement; it dismisses presentation only.
     func dismissRefreshFailure() {
