@@ -82,6 +82,64 @@ struct AccountDeletionTests {
         #expect(calls == 1)
     }
 
+    @Test("an account that can no longer be reached is treated as deleted")
+    func unreachableAccountFinishes() async {
+        let store = defaults()
+        let deletion = AccountDeletion(defaults: store)
+        var cleared = false
+        var signedOut = false
+        let result = await deletion.perform(
+            deleteRemote: { throw AccountUnreachable() },
+            clearLocal: { cleared = true }, signOut: { signedOut = true })
+        #expect(result && cleared && signedOut)
+        #expect(deletion.errorMessage == nil)
+        #expect(!AccountDeletion(defaults: store).requiresCleanup)
+    }
+
+    /// The whole point of the request mark: the server committed, the answer
+    /// was lost, and the student force-quit rather than tapping Try again.
+    @Test("a lost answer plus a refused credential finishes the deletion on the next launch")
+    func lostAnswerIsAdoptedAtLaunch() async {
+        let store = defaults()
+        let attempt = AccountDeletion(defaults: store)
+        #expect(await !attempt.perform(
+            deleteRemote: { throw URLError(.networkConnectionLost) },
+            clearLocal: {}, signOut: {}))
+        #expect(!attempt.requiresCleanup)
+
+        let relaunched = AccountDeletion(defaults: store)
+        relaunched.adoptLostDeletion(credentialRejected: true)
+        #expect(relaunched.requiresCleanup)
+
+        var removals = 0
+        var cleared = false
+        #expect(await relaunched.perform(
+            deleteRemote: { removals += 1 }, clearLocal: { cleared = true }, signOut: {}))
+        // The account is already gone; asking again would fail and strand them.
+        #expect(removals == 0 && cleared)
+        #expect(!AccountDeletion(defaults: store).requiresCleanup)
+    }
+
+    @Test("a phone with no signal never has its work erased")
+    func offlineIsNotEvidence() async {
+        let store = defaults()
+        let attempt = AccountDeletion(defaults: store)
+        #expect(await !attempt.perform(
+            deleteRemote: { throw URLError(.notConnectedToInternet) },
+            clearLocal: {}, signOut: {}))
+
+        let relaunched = AccountDeletion(defaults: store)
+        relaunched.adoptLostDeletion(credentialRejected: false)
+        #expect(!relaunched.requiresCleanup)
+    }
+
+    @Test("a refused credential erases nothing when no deletion was ever asked for")
+    func expiredSessionAloneErasesNothing() {
+        let deletion = AccountDeletion(defaults: defaults())
+        deletion.adoptLostDeletion(credentialRejected: true)
+        #expect(!deletion.requiresCleanup)
+    }
+
     @Test("local cleanup removes saved and unsaved work and restarts onboarding")
     func localCleanup() throws {
         let container = try ModelContainer(for: AlbusSchema.schema,
