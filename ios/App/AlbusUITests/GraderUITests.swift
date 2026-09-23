@@ -15,6 +15,15 @@ import XCTest
 ///
 /// Nothing here spends a grading. Marking is an Opus call and it is now a paid
 /// feature, so a free account is refused before any model runs.
+///
+/// **This file costs money to run, and CI skips it by name.** "A fresh
+/// account" means a real row in the production `auth.users` table, and
+/// reaching the app means a real Claude call to build the first plan. Some of
+/// the accounts on the live project are leftovers from earlier runs. Run it
+/// deliberately, against a backend you meant to touch — never to reproduce a
+/// UI failure. Anything that does not genuinely need the server belongs in
+/// `PaywallUITests`, which launches signed-in with the plan forced and costs
+/// nothing.
 @MainActor
 final class GraderUITests: XCTestCase {
 
@@ -81,65 +90,10 @@ final class GraderUITests: XCTestCase {
                        "the grader is offering to mark work the plan does not cover")
     }
 
-    /// The paywall itself. The only test that renders it.
-    func testThePaywallShowsThreePlansAndMarksTheCurrentOne() throws {
-        OnboardingPath.launch(app)
-        OnboardingPath.reachApp(app)
-
-        app.buttons["Tools"].tap()
-        // Same twenty seconds as the test above: Tools ranks the whole catalogue
-        // the first time it is drawn, and tapping into a screen that has not
-        // finished laying out fails for a reason unrelated to the paywall.
-        let grader = app.staticTexts["Albus Grader"]
-        XCTAssertTrue(grader.waitForExistence(timeout: 20),
-                      "the pinned Albus Grader card is not on Tools")
-        grader.tap()
-
-        let seePlans = app.buttons["See the plans"]
-        guard seePlans.waitForExistence(timeout: 15) else {
-            throw XCTSkip("this account can mark — the plans are not being offered")
-        }
-        seePlans.tap()
-
-        // The intro animation runs first; a tap skips it.
-        let skip = app.otherElements["Skip the introduction"]
-        if skip.waitForExistence(timeout: 3) { skip.tap() }
-
-        // **Visible, not merely present.** This is the assertion that matters
-        // and the one that was missing: the three cards sat below the fold
-        // behind the purchase bar for the first version of this screen, and
-        // `waitForExistence` was perfectly happy — an element that exists
-        // somewhere nobody can see it still exists. A student could not compare
-        // three prices on the screen whose only job is comparing three prices.
-        let window = app.windows.element(boundBy: 0).frame
-        for plan in ["Free", "Plus", "Pro"] {
-            let card = app.buttons.containing(
-                NSPredicate(format: "label BEGINSWITH %@", plan + ",")).firstMatch
-            XCTAssertTrue(card.waitForExistence(timeout: 10),
-                          "\(plan) is missing from the paywall")
-            XCTAssertTrue(card.isHittable,
-                          "\(plan) is on the paywall but not reachable — it is "
-                          + "off-screen or behind something")
-            XCTAssertTrue(window.contains(card.frame),
-                          "\(plan)'s card is outside the visible window "
-                          + "(\(card.frame) vs \(window)) — the student has to "
-                          + "scroll to find out what the plans cost")
-        }
-
-        attach(app.screenshot(), named: "paywall-three-plans")
-
-        // Prices, as a student reads them. A card with no price is not a plan.
-        XCTAssertTrue(app.staticTexts.containing(
-            NSPredicate(format: "label CONTAINS '9.99'")).element.waitForExistence(timeout: 5),
-                      "Plus has no price on the paywall")
-        XCTAssertTrue(app.staticTexts.containing(
-            NSPredicate(format: "label CONTAINS '17.99'")).element.exists,
-                      "Pro has no price on the paywall")
-
-        // "You are here". The most useful thing a price list can tell somebody.
-        XCTAssertTrue(app.staticTexts["CURRENT"].exists,
-                      "the paywall does not say which plan the student is on")
-    }
+    // The paywall's own test moved to `PaywallUITests`. It never needed a
+    // server — the screen carries its own copy — so it was paying for an
+    // account and an AI call to check a layout, and CI skipped it for that
+    // reason. It now runs on every change, for nothing.
 
     /// The other way in.
     ///

@@ -143,8 +143,22 @@ jobs:
           UDID=$(xcrun simctl list devices available | grep -m1 "iPhone" | sed -E "s/.*\(([0-9A-F-]{36})\).*/\1/")
           if [ -z "$UDID" ]; then echo "::error::no iPhone simulator on this runner"; exit 1; fi
           echo "using simulator $UDID"
+          # Skipped by class, not by whole target. These four walk real
+          # onboarding, which creates an account on the production project and
+          # spends a real Claude call. The rest launch already signed in with
+          # the plan forced, so they cost nothing and belong in every run.
+          #
+          # The retry is for the simulator, not for the app: a UI test on a
+          # shared runner can fail with "Timed out while launching
+          # application", which says nothing about the code. A test that is
+          # genuinely broken fails both attempts and still turns the run red.
           xcodebuild test -project Albus.xcodeproj -scheme Albus -destination "id=$UDID" \
-            -skip-testing:AlbusUITests -derivedDataPath "$RUNNER_TEMP/albus-build"
+            -skip-testing:AlbusUITests/GraderUITests \
+            -skip-testing:AlbusUITests/CoreLoopUITests \
+            -skip-testing:AlbusUITests/PopupChromeUITests \
+            -skip-testing:AlbusUITests/SettingsUITests \
+            -retry-tests-on-failure -test-iterations 2 \
+            -derivedDataPath "$RUNNER_TEMP/albus-build"
           python3 ../scripts/verify-app-privacy.py "$RUNNER_TEMP/albus-build/Build/Products/Debug-iphonesimulator/Albus.app"
 
   backend-tests:

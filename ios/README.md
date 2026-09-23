@@ -343,3 +343,46 @@ cold launch the session could not be restored, so the app offered onboarding
 while every assignment, rubric and mark they had asked Albus to delete was
 still in the store, ready to be adopted by the new account. Four tests in
 `AccountDeletionTests` cover exactly these branches.
+
+
+## UI tests — two kinds, and only one is free
+
+`AlbusUITests` is split by what a test costs, not by what it covers.
+
+**Free, and in CI.** `PaywallUITests` and `EntitlementRefreshUITests` launch
+already signed in, with the plan forced:
+
+```
+-albus.debug.assumeSignedIn          a presentation-only session, no credential
+-albus.profile.onboarded YES         skip onboarding
+-albus.debug.forcePlan free|plus|pro synthesise the plan `my_plan()` would return
+-albus.debug.noPurchases             no RevenueCat
+-albus.debug.openSettings            start on Settings
+-albus.debug.skipNotificationPrompt  XCUITest suppresses the system prompt,
+                                     so the request would never return
+```
+
+All of them are `#if DEBUG` and grant nothing: every limit is enforced again in
+the database, in the same transaction as the write. A forced plan buys a nicer
+paywall and nothing else.
+
+**Costly, and skipped by name in CI.** `GraderUITests`, `CoreLoopUITests`,
+`PopupChromeUITests` and `SettingsUITests` call `OnboardingPath.reachApp`,
+which creates a real account on the production project and spends a real Claude
+call. Run them deliberately, against a backend you meant to touch. Never run
+one to reproduce a UI failure — reach the screen with the flags above and read
+`app.debugDescription` instead.
+
+### The trap that made the paywall untestable
+
+The moon scene's twinkle and bob are `repeatForever`, and they used to start
+even on the settled panel and with Reduce Motion on. A view that never stops
+animating means **the app never reports itself idle**, so XCUITest waits out
+its idle timeout before every interaction: one paywall test took 123 seconds
+and its five-second waits expired against a screen that was already correct.
+Starting them only when motion is wanted fixed both — the accessibility
+promise, and the test — and the same three tests now run in about 20 seconds
+each.
+
+If a UI test on an animated screen fails on a wait rather than on an
+assertion, suspect a `repeatForever` before you suspect the screen.
