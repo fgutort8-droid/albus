@@ -313,15 +313,19 @@ struct PlanReader: PlanReading, Sendable {
         if let forced = Self.forcedTier() {
             return EntitlementService.Plan.fixture(forced)
         }
-#endif
-        guard let client else { return nil }
-#if DEBUG
         // Simulator-only proof hook. Release builds cannot force this path,
         // and the server remains the source of truth either way.
+        //
+        // Ahead of the client check, like the one above, and for the same
+        // reason: a build with no backend configured returned `nil` here
+        // instead of throwing, so the test that proves a failed refresh is
+        // visible passed only on a machine with real credentials and failed on
+        // CI, where the config is a copied example.
         if ProcessInfo.processInfo.arguments.contains("-albus.debug.failEntitlementRefresh") {
             throw URLError(.cannotConnectToHost)
         }
 #endif
+        guard let client else { return nil }
         let rows: [Row] = try await client.rpc("my_plan").execute().value
         guard let row = rows.first else { return nil }
 
