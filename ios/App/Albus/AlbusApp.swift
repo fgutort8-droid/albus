@@ -118,6 +118,12 @@ struct AlbusApp: App {
                     // account creation moved into onboarding, which is the only
                     // place a CAPTCHA challenge can be presented.
                     await session.start()
+                    // A deletion this phone asked for, never heard back about,
+                    // and whose credential has since been refused, happened.
+                    // Settle it before anything else reads the old account's
+                    // data or tries to sync on its behalf.
+                    deletion.adoptLostDeletion(credentialRejected: session.credentialRejected)
+                    guard !deletion.requiresCleanup else { return }
                     // Only meaningful once signed in; refresh reads the
                     // caller's own row and no-ops otherwise.
                     await entitlements.refresh()

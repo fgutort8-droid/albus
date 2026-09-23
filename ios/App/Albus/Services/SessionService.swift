@@ -1,6 +1,13 @@
 import Foundation
 import Supabase
 
+/// The account cannot be reached from this device any more.
+///
+/// Thrown instead of the underlying rejection so the deletion flow can stay
+/// free of SDK error types, and so the one case that means "already gone"
+/// cannot be confused with the several that mean "try again later".
+struct AccountUnreachable: Error {}
+
 /// Gets the user signed in, silently, before anything else runs.
 ///
 /// Albus has no sign-up screen: every user is anonymous from first launch.
@@ -22,6 +29,16 @@ final class SessionService {
     }
 
     private(set) var state: State = .starting
+
+    /// Set when restoring the session failed because the credential was
+    /// refused, rather than because the phone could not reach the server.
+    ///
+    /// The difference decides whether a deletion whose answer was lost may be
+    /// treated as done. An anonymous account has no second way in: once its
+    /// refresh token is refused, nothing on this device can reach it again. A
+    /// phone in a tunnel proves nothing and must never be read that way, so a
+    /// network failure deliberately leaves this false.
+    private(set) var credentialRejected = false
 
     var userID: UUID? {
         if case .signedIn(let id, _) = state { return id }
@@ -69,7 +86,11 @@ final class SessionService {
             state = .signedIn(userID: session.user.id,
                               isAnonymous: session.user.isAnonymous)
         } catch {
-            // No stored session, or it could not be refreshed.
+            // No stored session, or it could not be refreshed. Which of those
+            // it was matters to `AccountDeletion`: a refused credential is the
+            // only evidence a phone has that a deletion it never heard back
+            // about actually happened.
+            credentialRejected = !(error is URLError)
             state = .needsAccount
         }
     }
@@ -112,7 +133,37 @@ final class SessionService {
     /// Xcode 16.4 rejects and Xcode 26 allows. Here the response is consumed
     /// where it is produced, and only success or an error comes back.
     private nonisolated static func requestDeletion(_ client: SupabaseClient) async throws {
-        try await client.rpc("delete_my_account").execute()
+        do {
+            try await client.rpc("delete_my_account").execute()
+        } catch {
+            guard isUnreachable(error, client: client) else { throw error }
+            throw AccountUnreachable()
+        }
+    }
+
+    /// Whether this failure means the account can no longer be reached from
+    /// this device.
+    ///
+    /// The case this exists for: the delete committed on the server and the
+    /// answer was lost. The student retries an hour later, by which time the
+    /// access token has expired and the refresh token died with the account,
+    /// so every attempt from here on is refused — and without this, the app
+    /// asks them to try again forever while their work stays on the phone.
+    ///
+    /// A network failure is never evidence: it is the ordinary way a phone
+    /// fails, and reading it as "deleted" would erase the work of anyone who
+    /// tapped Delete in a lift and changed their mind.
+    private nonisolated static func isUnreachable(_ error: Error, client: SupabaseClient) -> Bool {
+        if error is URLError { return false }
+        // Strongest signal: the SDK abandons a stored session only once the
+        // server has definitively refused it.
+        if client.auth.currentSession == nil { return true }
+        if let postgrest = error as? PostgrestError {
+            // 28000 is `delete_my_account`'s own NOT_SIGNED_IN; PostgREST's
+            // PGRST3xx group is every JWT rejection.
+            return postgrest.code == "28000" || postgrest.code?.hasPrefix("PGRST3") == true
+        }
+        return error is AuthError
     }
 
     func signOutDeletedAccount() async throws {

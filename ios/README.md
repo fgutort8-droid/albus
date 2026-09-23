@@ -312,3 +312,34 @@ The one thing neither can check is concurrency — a single connection cannot
 demonstrate a race, and will happily report a race-prone gate as clean. That
 check uses twelve independent Postgres connections and requires exactly one
 winner at the final grading, active-task, and rubric slot.
+
+## Deleting an account — the answer that never arrives
+
+`delete_my_account()` takes no arguments and reads `auth.uid()`, so a student
+can only ever delete themselves. It is idempotent: asked twice, the second call
+deletes nothing and still succeeds.
+
+The hard case is not the server. It is a request that **commits and whose
+answer is lost**, because from the phone that is indistinguishable from a
+request that never arrived. Three rules settle it:
+
+1. **Ask before erasing anything.** `albus.accountDeletion.requested` is
+   written *before* the call, and `albus.accountDeletion.pendingCleanup` only
+   after the server confirms. The first says a question is outstanding; only
+   the second erases work.
+2. **A refused credential is the answer.** An anonymous account has no password
+   and no second way in, so once its refresh token is refused, nothing on this
+   device can reach it again. A refusal plus an outstanding request means the
+   deletion happened, and `adoptLostDeletion` finishes it at launch.
+3. **No signal is never evidence.** `SessionService.credentialRejected` stays
+   false for a `URLError`, so a phone in a tunnel erases nothing. Reading a
+   dropped connection as "deleted" would destroy the work of anyone who tapped
+   Delete underground and changed their mind.
+
+**What this prevents.** Without rule 2 the student was asked to try again
+forever — the access token expires after about an hour and the refresh token
+died with the account, so every later attempt is refused. Worse, on the next
+cold launch the session could not be restored, so the app offered onboarding
+while every assignment, rubric and mark they had asked Albus to delete was
+still in the store, ready to be adopted by the new account. Four tests in
+`AccountDeletionTests` cover exactly these branches.
