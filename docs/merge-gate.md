@@ -43,6 +43,33 @@ because people trust it.
 It waits up to 10 minutes for a review to appear, because Greptile takes about
 1–3 minutes after a push.
 
+## The gate does not run its own pull request's code
+
+This is the part that makes it an enforceable control rather than a courtesy.
+
+The first version used `pull_request` and checked out the pull request. That
+runs both the workflow *and* `greptile-gate.sh` as the pull request defines
+them, so any pull request could rewrite the script to `exit 0` and award itself
+the required check with no 5/5 anywhere. Greptile caught it on the gate's own
+pull request, rated P1. It was right.
+
+It now runs on **`pull_request_target`**, where GitHub takes the workflow from
+the base branch and the checkout is pinned to `github.event.pull_request.base.sha`.
+Neither can be altered except by a merge into `main`, and a merge needs the
+gate.
+
+`pull_request_target` is normally the dangerous trigger, because it runs with a
+privileged token — a workflow that checks out and executes pull request content
+hands that token to a stranger. This one never touches pull request content: it
+checks out the base commit, reads the GitHub API, and the only pull-request
+value it uses is the number. Its permissions are read-only, and the checkout
+does not persist credentials.
+
+**One consequence:** a change to the gate is validated by the version already on
+`main`, not by its own. That is the point, and it means the very first
+introduction of the gate cannot be enforced by itself. Bootstrapping is
+manual — check the score by hand for that one pull request.
+
 ## 5/5 is required, never sufficient
 
 This enforces a floor, not a verdict. On this repo Greptile gave **5/5 "safe to
@@ -72,6 +99,11 @@ and the owner is an admin. Without it, an admin merge slips straight past.
 
 That file also makes the six CI checks required, not just this gate — merging
 red CI was possible until now — and forbids force-pushing or deleting `main`.
+
+It deliberately does **not** require an approving review. GitHub does not let
+anyone approve their own pull request, and Albus has one human, so requiring a
+review would mean nothing could ever merge. The gate is the control here;
+review-count rules are for teams.
 `strict` is `false`, so a pull request does not have to be rebased every time
 `main` moves; the gate is about review quality, not branch freshness.
 

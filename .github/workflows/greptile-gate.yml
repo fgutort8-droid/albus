@@ -9,8 +9,22 @@ name: Greptile gate
 #
 # This only blocks merges once it is a *required* status check on `main`.
 # See `docs/merge-gate.md` for the one command that switches that on.
+# `pull_request_target`, not `pull_request`, and that is the whole security of
+# this file. Under `pull_request` GitHub runs the workflow *and* the script as
+# they exist on the pull request's own branch, so a pull request could rewrite
+# `scripts/greptile-gate.sh` to exit 0 and award itself the required check
+# without a 5/5 anywhere. A gate that guards everything except itself is not a
+# gate. Under `pull_request_target` both the workflow and the checkout come
+# from the base branch, which only a merge can change — and a merge needs the
+# gate.
+#
+# The standard danger of `pull_request_target` is that it runs trusted code
+# with a privileged token, so a workflow that checks out and executes pull
+# request content hands that token away. This one never touches pull request
+# content: it checks out the base commit explicitly, reads the GitHub API, and
+# the only value derived from the pull request is its number.
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
 
@@ -28,7 +42,14 @@ jobs:
     name: Greptile 5/5 before merge
     runs-on: ubuntu-latest
     steps:
+      # The base commit, stated rather than relied upon. `pull_request_target`
+      # already defaults to the base ref, but this is the line that decides
+      # whether the gate can be replaced by the thing it is gating, so it says
+      # so out loud.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
       - name: Require 5/5 on the latest commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
