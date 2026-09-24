@@ -756,8 +756,15 @@ private struct MoonScene: View {
     }
 
     private func start() {
-        twinkle = true
-        bob = true
+        // Both drive `repeatForever` animations, so they start only where
+        // motion is wanted. They used to start always — including on the
+        // settled panel and with Reduce Motion on — so the twinkle and the bob
+        // never stopped: perpetual motion for a student who asked the system
+        // for none, and an app that never reports itself idle. Every UI
+        // interaction on this screen then waited out the automation idle
+        // timeout, which is why the paywall could only be checked by hand.
+        twinkle = animated
+        bob = animated
         guard animated else { landed = true; return }
         landed = false
         withAnimation(.timingCurve(0.3, 0.9, 0.3, 1, duration: 1.06).delay(0.5)) { landed = true }

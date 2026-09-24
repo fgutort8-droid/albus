@@ -125,6 +125,36 @@ final class EntitlementService {
             tasks: Allowance(limit: 5), aiPlans: Allowance(limit: 5),
             grader: Allowance(limit: 0), rubrics: Allowance(limit: 3),
             toolsAccess: .basic, curriculumIntelligence: false, advancedModels: false)
+
+#if DEBUG
+        /// What each tier looks like, for a UI test that must render a paid
+        /// screen without buying anything.
+        ///
+        /// Compiled out of Release, and it grants nothing: every limit is
+        /// enforced again inside the database, in the same transaction as the
+        /// write. A forced plan buys a nicer paywall and nothing else — which
+        /// is the same thing this whole class is worth, by design.
+        ///
+        /// The numbers match `public.plans` and the table in `ios/README.md`;
+        /// `PricingTests` is what stops them drifting.
+        static func fixture(_ tier: Tier) -> Plan {
+            switch tier {
+            case .free: freeFallback
+            case .plus:
+                Plan(tier: .plus, displayName: "Plus", priceCents: 999, currency: "EUR",
+                     expiresAt: .now.addingTimeInterval(30 * 24 * 60 * 60),
+                     tasks: Allowance(limit: 10), aiPlans: Allowance(limit: nil),
+                     grader: Allowance(limit: 2), rubrics: Allowance(limit: 5),
+                     toolsAccess: .expanded, curriculumIntelligence: false, advancedModels: false)
+            case .pro:
+                Plan(tier: .pro, displayName: "Pro", priceCents: 1799, currency: "EUR",
+                     expiresAt: .now.addingTimeInterval(30 * 24 * 60 * 60),
+                     tasks: Allowance(limit: nil), aiPlans: Allowance(limit: nil),
+                     grader: Allowance(limit: 5), rubrics: Allowance(limit: nil),
+                     toolsAccess: .all, curriculumIntelligence: true, advancedModels: true)
+            }
+        }
+#endif
     }
 
     private(set) var plan: Plan = .freeFallback
@@ -276,19 +306,47 @@ struct PlanReader: PlanReading, Sendable {
     /// nothing to filter by. That is what makes asking about somebody else
     /// impossible here rather than merely unauthorised.
     func fetch() async throws -> EntitlementService.Plan? {
-        guard let client else { return nil }
 #if DEBUG
+        // Ahead of the client check on purpose: a UI test must be able to
+        // render a paid screen on a build with no backend configured, which is
+        // what CI has. Compiled out of Release.
+        if let forced = Self.forcedTier() {
+            return EntitlementService.Plan.fixture(forced)
+        }
         // Simulator-only proof hook. Release builds cannot force this path,
         // and the server remains the source of truth either way.
+        //
+        // Ahead of the client check, like the one above, and for the same
+        // reason: a build with no backend configured returned `nil` here
+        // instead of throwing, so the test that proves a failed refresh is
+        // visible passed only on a machine with real credentials and failed on
+        // CI, where the config is a copied example.
         if ProcessInfo.processInfo.arguments.contains("-albus.debug.failEntitlementRefresh") {
             throw URLError(.cannotConnectToHost)
         }
 #endif
+        guard let client else { return nil }
         let rows: [Row] = try await client.rpc("my_plan").execute().value
         guard let row = rows.first else { return nil }
 
         return Self.plan(from: row)
     }
+
+#if DEBUG
+    /// `-albus.debug.forcePlan free|plus|pro`, for UI tests.
+    ///
+    /// The paywall's own copy is written into the screen, so the only thing it
+    /// needs a server for is knowing which plan the student is on — which is
+    /// the one thing a test cannot buy. Without this, the only way to see the
+    /// paid paywall was to make a real account and a real purchase.
+    private static func forcedTier() -> EntitlementService.Tier? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: "-albus.debug.forcePlan"),
+              arguments.index(after: flag) < arguments.endIndex
+        else { return nil }
+        return EntitlementService.Tier(rawValue: arguments[arguments.index(after: flag)])
+    }
+#endif
 
     static func plan(from row: Row) -> EntitlementService.Plan {
         EntitlementService.Plan(
