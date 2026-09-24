@@ -362,9 +362,15 @@ already signed in, with the plan forced:
                                      so the request would never return
 ```
 
-All of them are `#if DEBUG` and grant nothing: every limit is enforced again in
-the database, in the same transaction as the write. A forced plan buys a nicer
-paywall and nothing else.
+The five `-albus.debug.*` switches are compiled out of Release: four sit inside
+`#if DEBUG`, and `noPurchases` is read only when `isDebug`, which `#if DEBUG`
+sets. **`-albus.profile.onboarded` is not a switch at all** — it is the ordinary
+`UserDefaults` key `Preferences` reads, set through the launch-argument domain,
+so it works in any build. That is harmless: App Store users cannot pass launch
+arguments, and it only skips the onboarding screens. None of them grants
+anything either way — every limit is enforced again in the database, in the
+same transaction as the write. A forced plan buys a nicer paywall and nothing
+else.
 
 **Costly, and skipped by name in CI.** `GraderUITests`, `CoreLoopUITests`,
 `PopupChromeUITests` and `SettingsUITests` call `OnboardingPath.reachApp`,
