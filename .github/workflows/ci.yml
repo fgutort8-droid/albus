@@ -123,9 +123,10 @@ jobs:
       - if: steps.probe.outputs.found == 'true'
         working-directory: ios
         # Config.xcconfig holds the real Supabase values and is gitignored, so
-        # CI has none. The placeholders build fine; the only test needing a live
-        # backend (AlbusUITests) is skipped below because it costs a real
-        # Anthropic call.
+        # CI has none. The placeholders build fine, and the UI tests that run
+        # here are the ones that need no backend at all. The four that walk
+        # real onboarding — each costing a production account and a real
+        # Anthropic call — are skipped by name below.
         #
         # The project is generated rather than committed, so regenerating here
         # also catches a spec that no longer produces a valid project.
