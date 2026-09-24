@@ -1,0 +1,38 @@
+name: Greptile gate
+
+# Enforces the owner's rule of 24 Sep 2026: nothing merges below 5/5.
+#
+# Greptile's own "Greptile Review" check cannot do this — it reports success at
+# 4/5 because it means "I finished reading", not "this is good". Verified on
+# this repo: commit 278b49f scored 4/5 with two findings and its check was
+# still green.
+#
+# This only blocks merges once it is a *required* status check on `main`.
+# See `docs/merge-gate.md` for the one command that switches that on.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# Read-only. The gate reads a score; it never writes to the pull request.
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  greptile-score:
+    # Changing this name breaks branch protection silently — protection matches
+    # required checks by name, and a rule naming a check that no longer exists
+    # is not enforced. Rename here and in the protection rule together.
+    name: Greptile 5/5 before merge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require 5/5 on the latest commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        # The number is a number — nothing a pull request author writes is
+        # interpolated into this shell.
+        run: scripts/greptile-gate.sh "${{ github.event.pull_request.number }}"

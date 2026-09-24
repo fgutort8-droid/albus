@@ -1,0 +1,19 @@
+{
+  "required_status_checks": {
+    "strict": false,
+    "contexts": [
+      "Greptile 5/5 before merge",
+      "No secrets committed",
+      "Every table has RLS",
+      "Migrations are append-only",
+      "Core logic tests",
+      "iOS build and tests",
+      "Edge function tests"
+    ]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
