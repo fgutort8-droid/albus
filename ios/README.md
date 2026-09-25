@@ -29,13 +29,16 @@ cd ios/AlbusCore && swift test
 `App/Albus/Albus.entitlements` declares the Keychain access group the auth
 session needs. It only takes effect on a **signed** build.
 
-**On the simulator (unsigned)** the session falls back to `UserDefaults`
-(`ResilientAuthStorage`). It survives relaunches — verified, 4 launches produce
-1 account — but not app deletion, so a reinstall signs in as a new anonymous
-user.
+Credentials are stored only in Keychain in all configurations. Existing legacy
+copies migrate into Keychain when it is available and are then removed from
+UserDefaults. A failed migration keeps the existing copy solely for retry; it
+cannot authenticate the student until it has been secured. If secure storage is unavailable, sign-in reports an error and
+can be retried after unlocking the device or correcting the build's signing.
+Unit tests inject isolated storage and never need a production account.
 
-**On a signed device build** Keychain is used, and its items survive app
-deletion, so a reinstall cannot reset the free-tier quota.
+Keychain uses `kSecAttrAccessibleAfterFirstUnlock`, preserving background token
+refresh and the existing service identifier. Items on a signed device survive
+app deletion; server-side spending controls remain authoritative.
 
 Enabling ad-hoc signing to get the entitlement on the simulator was tried and
 reverted: it produced an `application-identifier` the simulator container did

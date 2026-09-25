@@ -46,9 +46,11 @@ final class SessionService {
     }
 
     private let client: SupabaseClient?
+    private let storage: ResilientAuthStorage
 
-    init(client: SupabaseClient? = Backend.shared) {
+    init(client: SupabaseClient? = Backend.shared, storage: ResilientAuthStorage = Backend.authStorage) {
         self.client = client
+        self.storage = storage
     }
 
     /// Restores an existing session. Does **not** create one.
@@ -81,8 +83,11 @@ final class SessionService {
             state = .failed("Not configured")
             return
         }
+        credentialRejected = false
         do {
+            try storage.beginAttempt()
             let session = try await client.auth.session
+            try storage.checkHealth()
             state = .signedIn(userID: session.user.id,
                               isAnonymous: session.user.isAnonymous)
         } catch {
@@ -90,6 +95,10 @@ final class SessionService {
             // it was matters to `AccountDeletion`: a refused credential is the
             // only evidence a phone has that a deletion it never heard back
             // about actually happened.
+            guard (try? storage.checkHealth()) != nil else {
+                state = .failed(SessionStorageUnavailable().localizedDescription)
+                return
+            }
             credentialRejected = !(error is URLError)
             state = .needsAccount
         }
@@ -112,7 +121,21 @@ final class SessionService {
         if case .signedIn = state { return true }
 
         do {
+            try storage.beginAttempt()
+            try storage.checkWritable()
+            // A retry after temporarily unavailable storage must restore first.
+            if let existing = client.auth.currentSession {
+                try storage.checkHealth()
+                state = .signedIn(userID: existing.user.id, isAnonymous: existing.user.isAnonymous)
+                return true
+            }
+            try storage.checkHealth()
             let session = try await client.auth.signInAnonymously(captchaToken: captchaToken)
+            try storage.checkHealth()
+            guard client.auth.currentSession?.user.id == session.user.id else {
+                throw SessionStorageUnavailable()
+            }
+            try storage.checkHealth()
             state = .signedIn(userID: session.user.id,
                               isAnonymous: session.user.isAnonymous)
             return true
@@ -124,7 +147,8 @@ final class SessionService {
 
     func deleteRemoteAccount() async throws {
         guard let client else { throw Backend.ConfigError.missing("Supabase") }
-        try await Self.requestDeletion(client)
+        try storage.checkHealth()
+        try await Self.requestDeletion(client, storage: storage)
     }
 
     /// The request, outside the main actor for the reason `PlanReader` gives:
@@ -132,11 +156,13 @@ final class SessionService {
     /// actor-isolated class sends it across an isolation boundary, which
     /// Xcode 16.4 rejects and Xcode 26 allows. Here the response is consumed
     /// where it is produced, and only success or an error comes back.
-    private nonisolated static func requestDeletion(_ client: SupabaseClient) async throws {
+    private nonisolated static func requestDeletion(_ client: SupabaseClient, storage: ResilientAuthStorage) async throws {
         do {
             try await client.rpc("delete_my_account").execute()
         } catch {
-            guard isUnreachable(error, client: client) else { throw error }
+            let unreachable = isUnreachable(error, client: client)
+            try storage.checkHealth()
+            guard unreachable else { throw error }
             throw AccountUnreachable()
         }
     }
@@ -167,6 +193,7 @@ final class SessionService {
     }
 
     func signOutDeletedAccount() async throws {
+        try storage.beginAttempt()
         if let client {
             do {
                 try await client.auth.signOut(scope: .local)
@@ -176,6 +203,7 @@ final class SessionService {
                 guard client.auth.currentSession == nil else { throw error }
             }
         }
+        try storage.checkHealth()
         state = .needsAccount
     }
 
