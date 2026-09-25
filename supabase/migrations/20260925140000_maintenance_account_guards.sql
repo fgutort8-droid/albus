@@ -206,4 +206,59 @@ grant execute on function public.transfer_subscriptions(uuid[], uuid, text, time
   to service_role;
 
 
+create or replace function public.record_identity_link(
+  p_user_id uuid,
+  p_kind text,
+  p_hash text
+) returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_limit integer;
+begin
+  if p_user_id is null or p_kind not in ('device', 'ip_prefix')
+     or p_hash is null or p_hash !~ '^[0-9a-f]{64}$' then
+    return;
+  end if;
+
+  -- Preserve the account while its observation is written. Historical hashes
+  -- remain independent of auth.users so deletion does not reset abuse limits.
+  perform 1 from auth.users u where u.id = p_user_id for key share;
+  if not found then return; end if;
+
+  -- Existing observations are cheap and useful. Do this before taking the lock
+  -- so the normal path does not serialize every request from one student.
+  update public.identity_links l
+     set last_seen_at = now(),
+         hit_count = least(2147483647, l.hit_count + 1)
+   where l.user_id = p_user_id and l.kind = p_kind and l.hash = p_hash;
+  if found then return; end if;
+
+  perform pg_advisory_xact_lock(
+    hashtextextended('albus:identity:' || p_user_id::text || ':' || p_kind, 0));
+
+  -- A modified client can send a fresh, UUID-shaped device header each time.
+  -- Eight devices and sixteen network prefixes cover real travel/reinstalls;
+  -- the seventeenth random value is storage amplification, not identity.
+  v_limit := case when p_kind = 'device' then 8 else 16 end;
+  if (select count(*) from public.identity_links l
+       where l.user_id = p_user_id and l.kind = p_kind) >= v_limit then
+    return;
+  end if;
+
+  insert into public.identity_links (user_id, kind, hash)
+  values (p_user_id, p_kind, p_hash)
+  on conflict (user_id, kind, hash) do update
+    set last_seen_at = now(),
+        hit_count = least(2147483647, public.identity_links.hit_count + 1);
+end;
+$$;
+
+revoke all on function public.record_identity_link(uuid, text, text)
+  from public, anon, authenticated;
+grant execute on function public.record_identity_link(uuid, text, text)
+  to service_role;
+
 commit;
