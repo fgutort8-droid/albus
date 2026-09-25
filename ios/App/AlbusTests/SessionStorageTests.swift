@@ -156,6 +156,8 @@ struct SessionStorageTests {
         let deletion = AccountDeletion(defaults: defaults)
         deletion.adoptLostDeletion(credentialRejected: session.credentialRejected)
         #expect(deletion.requiresCleanup)
+        #expect(await session.createAccount() == false)
+        #expect(session.userID == nil)
     }
 
     @MainActor @Test("normal creation and restore keep the same account")
@@ -182,6 +184,31 @@ struct SessionStorageTests {
         #expect(session.userID != nil)
     }
 
+    @MainActor @Test("deletion retries after transient storage failure")
+    func deletionRetry() async throws {
+        let keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: SessionTestTransport.sessionData)
+        let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+        let session = SessionService(client: Self.client(storage), storage: storage)
+        await session.start()
+        keychain.setFailure(.read)
+        _ = try? storage.retrieve(key: "sb-session-unit-auth-token")
+        keychain.setFailure(.none)
+        try await session.deleteRemoteAccount()
+    }
+
+    @MainActor @Test("creation retries validate an expired stored session")
+    func expiredCreationRetry() async throws {
+        let keychain = MemoryKeychain()
+        var payload = try #require(JSONSerialization.jsonObject(with: SessionTestTransport.sessionData) as? [String: Any])
+        payload["expires_at"] = Date().timeIntervalSince1970 - 3600
+        try keychain.store(key: "sb-session-unit-auth-token", value: JSONSerialization.data(withJSONObject: payload))
+        let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: RejectedRefreshTransport.self), storage: storage)
+        #expect(await session.createAccount() == false)
+        #expect(session.userID == nil)
+    }
+
     private static func client(_ storage: ResilientAuthStorage, transport: URLProtocol.Type = SessionTestTransport.self) -> SupabaseClient {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [transport]
@@ -194,7 +221,11 @@ final class MemoryKeychain: AuthLocalStorage, @unchecked Sendable {
     enum Failure: Sendable { case none, read, write, remove, authWrite }
     private let lock = NSLock()
     private var values: [String: Data] = [:]
-    private let failure: Failure
+    private var failure: Failure
+    func setFailure(_ value: Failure) {
+        lock.lock(); defer { lock.unlock() }
+        failure = value
+    }
     init(failure: Failure = .none) { self.failure = failure }
     func store(key: String, value: Data) throws {
         lock.lock(); defer { lock.unlock() }

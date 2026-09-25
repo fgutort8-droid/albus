@@ -124,7 +124,9 @@ final class SessionService {
             try storage.beginAttempt()
             try storage.checkWritable()
             // A retry after temporarily unavailable storage must restore first.
-            if let existing = client.auth.currentSession {
+            if client.auth.currentSession != nil {
+                try storage.checkHealth()
+                let existing = try await client.auth.session
                 try storage.checkHealth()
                 state = .signedIn(userID: existing.user.id, isAnonymous: existing.user.isAnonymous)
                 return true
@@ -147,6 +149,10 @@ final class SessionService {
 
     func deleteRemoteAccount() async throws {
         guard let client else { throw Backend.ConfigError.missing("Supabase") }
+        try storage.beginAttempt()
+        // The SDK may turn a failed storage read into an absent session. Probe
+        // it before entering the request so that absence cannot confirm deletion.
+        _ = client.auth.currentSession
         try storage.checkHealth()
         try await Self.requestDeletion(client, storage: storage)
     }
