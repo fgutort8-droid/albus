@@ -6,7 +6,7 @@ set -euo pipefail
 REF=ssvehwhblgqtvqkfbkbj
 EXPECTED=20260925140000
 MIGRATION=20260925140000_maintenance_account_guards.sql
-DIGEST=e40cb3951bde22572d726066290980e96056be896e21e346041400b655c50e3f
+DIGEST=a99339ee0e77f2f5026cc2fbdce3902fe5d66226d7c2a7482291be004c601ca7
 DRY_RUN=${DRY_RUN:-1}
 case "$DRY_RUN" in 0|1) ;; *) echo 'DRY_RUN must be 0 or 1'; exit 1;; esac
 stop() { echo "STOPPED: $*; no later step ran." >&2; exit 1; }
@@ -56,6 +56,7 @@ fi
 
 cat > "$STAGE/verify.sql" <<'SQL'
 select
+  md5(pg_get_functiondef('public.record_identity_link(uuid,text,text)'::regprocedure)) = '06318c33c2107284a3c4a159dcf5c375' as identity_matches,
   md5(pg_get_functiondef('public.reap_abandoned_anonymous_users(integer)'::regprocedure)) = '217ecaa512edba2cfc1e08b35f84c5ef' as cleanup_matches,
   md5(pg_get_functiondef('public.transfer_subscriptions(uuid[],uuid,text,timestamptz)'::regprocedure)) = '14abf53c159905dbc5e3ffa418ff9dfd' as transfer_matches,
   md5(pg_get_functiondef('public.prune_security_data(integer,integer)'::regprocedure)) = '3a504da1c10fbefb9f1764f721e8f0e5' as prune_unchanged,
@@ -72,7 +73,7 @@ else
   python3 - "$STAGE/verification.json" <<'PY'
 import json,sys
 j=json.load(open(sys.argv[1])); rows=j.get('rows',[]) if isinstance(j,dict) else j
-assert len(rows)==1 and len(rows[0])==8 and all(v is True for v in rows[0].values()), 'Post-deploy verification failed'
+assert len(rows)==1 and len(rows[0])==9 and all(v is True for v in rows[0].values()), 'Post-deploy verification failed'
 for key,value in rows[0].items(): print(key+': '+str(value))
 PY
 fi

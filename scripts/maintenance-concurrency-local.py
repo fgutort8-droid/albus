@@ -39,6 +39,7 @@ cases = {
     'sign-in update': f"update auth.users set last_sign_in_at=now() where id='{uid}'",
     'explicit deletion': f"delete from auth.users where id='{uid}'",
     'content insert': f"insert into public.rubrics(user_id,name,source,total_marks) values('{uid}','Study','custom',10)",
+    'identity observation': f"do $$ begin perform public.record_identity_link('{uid}','device',repeat('a',64)); end $$",
     'subscription owner operation': f"do $$ begin perform pg_advisory_xact_lock(hashtextextended('albus:subscription-owner:{uid}',0)); end $$",
 }
 for name, statement in cases.items():
@@ -59,6 +60,7 @@ for name, statement in cases.items():
         if p is not None:
             p.kill(); p.wait()
         sql(f"delete from auth.users where id='{uid}'")
+        sql(f"delete from public.identity_links where user_id='{uid}'")
 # Hold a transaction lock before the transfer reaches its owner locks.
 seed()
 source = 'a9300000-0000-4000-8000-000000000002'
@@ -90,4 +92,34 @@ finally:
             process.kill(); process.wait()
     sql("delete from public.subscription_transactions where original_transaction_id='maintenance-race-transfer'")
     sql(f"delete from auth.users where id in ('{uid}','{source}')")
+# If deletion wins first, an observation must wait and then see no account.
+seed()
+deleter = observer = None
+try:
+    deleter = held(f"delete from auth.users where id='{uid}'")
+    observer = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    observer.stdin.write(f"set application_name='albus-maintenance-observation-test'; set statement_timeout='10s'; select public.record_identity_link('{uid}','device',repeat('b',64));\n")
+    observer.stdin.close()
+    for _ in range(50):
+        if sql("select count(*) from pg_stat_activity where application_name='albus-maintenance-observation-test' and wait_event_type='Lock'") == '1':
+            break
+        if observer.poll() is not None:
+            raise AssertionError('observation did not wait for deletion')
+        time.sleep(.05)
+    else:
+        raise AssertionError('observation did not reach the account lock')
+    deleter.stdin.write('commit;\n'); deleter.stdin.close(); deleter.wait(timeout=12)
+    assert deleter.returncode == 0, deleter.stderr.read()
+    deleter = None
+    observer.wait(timeout=12)
+    assert observer.returncode == 0, observer.stderr.read()
+    observer = None
+    assert sql(f"select count(*) from public.identity_links where user_id='{uid}'") == '0'
+    print('deletion before observation: waits and creates no orphan')
+finally:
+    for process in (observer, deleter):
+        if process is not None:
+            process.kill(); process.wait()
+    sql(f"delete from auth.users where id='{uid}'")
+    sql(f"delete from public.identity_links where user_id='{uid}'")
 print('maintenance concurrency checks passed')
