@@ -1,0 +1,54 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path = extensions, public;
+select no_plan();
+create function pg_temp.student(p_n integer, p_days integer default 31) returns uuid language plpgsql as $$
+declare v_id uuid := ('a9200000-0000-4000-8000-' || lpad(p_n::text,12,'0'))::uuid;
+begin
+ insert into auth.users(id,instance_id,aud,role,encrypted_password,raw_app_meta_data,raw_user_meta_data,created_at,updated_at,is_anonymous)
+ values(v_id,'00000000-0000-0000-0000-000000000000','authenticated','authenticated','','{}','{}',now()-make_interval(days=>p_days),now()-make_interval(days=>p_days),true);
+ return v_id;
+end $$;
+select pg_temp.student(i) from generate_series(1,11) i;
+select pg_temp.student(12,2);
+select public.apply_subscription_state('maintenance-pro','a9200000-0000-4000-8000-000000000001','maintenance-tx','com.felipegutierrez.albus.pro.monthly','Production',now(),now()+interval '1 month',null,'maintenance-buy',now());
+insert into public.rubrics(user_id,name,source,total_marks) values('a9200000-0000-4000-8000-000000000001','Study rubric','custom',20);
+update auth.users set last_sign_in_at=now() where id='a9200000-0000-4000-8000-000000000002';
+insert into public.entitlements(user_id,tier) values('a9200000-0000-4000-8000-000000000003','free');
+insert into public.subscription_transactions(original_transaction_id,user_id,environment) values('maintenance-history','a9200000-0000-4000-8000-000000000004','Production');
+insert into public.subscription_revenue(event_id,event_type,user_id,environment,net_microusd,occurred_at) values('maintenance-income','RENEWAL','a9200000-0000-4000-8000-000000000005','Production',1,now()-interval '100 days');
+insert into public.rubrics(user_id,name,source,total_marks) values('a9200000-0000-4000-8000-000000000006','Free rubric','custom',10);
+update public.profiles set onboarding_completed_at=now()-interval '31 days' where id='a9200000-0000-4000-8000-000000000007';
+insert into auth.sessions(id,user_id,created_at,updated_at) values(gen_random_uuid(),'a9200000-0000-4000-8000-000000000008',now()-interval '31 days',now());
+create table public.maintenance_owned_fixture(owner_id uuid references auth.users(id) on delete cascade, value text);
+alter table public.maintenance_owned_fixture enable row level security;
+revoke all on public.maintenance_owned_fixture from public,anon,authenticated;
+insert into public.maintenance_owned_fixture values('a9200000-0000-4000-8000-000000000009','owned data');
+insert into public.identity_links(user_id,kind,hash,last_seen_at) values('a9200000-0000-4000-8000-000000000010','device',repeat('d',64),now());
+create temporary table maintenance_lock_baseline as select count(*) n from pg_locks where pid=pg_backend_pid() and locktype='advisory';
+select is(public.reap_abandoned_anonymous_users(30),1,'one empty inactive account is reaped');
+select is((select count(*)::integer from auth.users where id='a9200000-0000-4000-8000-000000000011'),0,'the empty account is removed');
+select is((select count(*)::integer from auth.users where id::text like 'a9200000-%'),11,'all protected accounts remain');
+select is((select count(*)::integer from public.rubrics where user_id='a9200000-0000-4000-8000-000000000001'),1,'active Pro rubric remains');
+select is(public.effective_tier('a9200000-0000-4000-8000-000000000001'),'pro','active subscription remains');
+select ok(not has_function_privilege('anon','public.reap_abandoned_anonymous_users(integer)','EXECUTE'),'anon cannot run account maintenance');
+select ok(not has_function_privilege('authenticated','public.reap_abandoned_anonymous_users(integer)','EXECUTE'),'authenticated cannot run account maintenance');
+select throws_ok($$select public.reap_abandoned_anonymous_users(null)$$,'22023','INVALID_RETENTION_DAYS','null retention refused');
+select throws_ok($$select public.reap_abandoned_anonymous_users(0)$$,'22023','INVALID_RETENTION_DAYS','short retention refused');
+select lives_ok($$select public.prune_security_data(90,180)$$,'security pruning remains available');
+select is((select count(*)::integer from auth.users where id::text like 'a9200000-%'),11,'security pruning retains accounts');
+select is((select count(*)::integer from public.rubrics where user_id='a9200000-0000-4000-8000-000000000001'),1,'security pruning retains rubric content');
+select is((select count(*)::integer from public.subscription_revenue where event_id='maintenance-income'),1,'security pruning retains payment history');
+-- Independently exercise each content family and historical plan state.
+select pg_temp.student(i) from generate_series(20,24) i;
+insert into public.courses(user_id,display_name) values('a9200000-0000-4000-8000-000000000020','Course');
+insert into public.gradings(user_id,model,input_chars,feedback) values('a9200000-0000-4000-8000-000000000021','local-fixture',1,'Feedback');
+insert into public.completion_logs(user_id,task_type,estimated_minutes,actual_minutes) values('a9200000-0000-4000-8000-000000000022','essay',10,10);
+insert into public.entitlements(user_id,tier,expires_at) values('a9200000-0000-4000-8000-000000000023','pro',now()-interval '60 days');
+insert into auth.sessions(id,user_id,created_at,updated_at) values(gen_random_uuid(),'a9200000-0000-4000-8000-000000000024',now()-interval '31 days',now()-interval '31 days');
+select is(public.reap_abandoned_anonymous_users(30),1,'inactive empty session account remains eligible');
+select is((select count(*)::integer from auth.users where id between 'a9200000-0000-4000-8000-000000000020' and 'a9200000-0000-4000-8000-000000000023'),4,'course, grading, log and expired plan accounts remain');
+select is(public.reap_abandoned_anonymous_users(30),0,'repeated maintenance is idempotent');
+select ok((select count(*) from pg_locks where pid=pg_backend_pid() and locktype='advisory') <= (select n+2 from maintenance_lock_baseline),'retained accounts release maintenance locks');
+select * from finish();
+rollback;
