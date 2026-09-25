@@ -1,6 +1,6 @@
 // _shared/rubric.ts — fetch the rubric a breakdown or a grading is grounded in.
 
-import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.112.3";
 import type { RubricContext } from "./prompt.ts";
 
 /** The rubric the student saved and attached to this assignment, if any. */
