@@ -143,6 +143,7 @@ async function applyTransfer(
   event: RevenueCatEvent,
   eventID: string,
   eventAt: string,
+  configuredAppIDs: string,
 ): Promise<Response> {
   const to = userIDsIn(event.transferred_to);
   const from = userIDsIn(event.transferred_from).filter((id) => !to.includes(id));
@@ -156,11 +157,17 @@ async function applyTransfer(
     return jsonResponse({ ok: true, ignored: "transfer_destination" });
   }
 
-  const { data, error } = await adminClient().rpc("transfer_subscriptions", {
+  const { data, error } = await adminClient().rpc("transfer_verified_subscriptions", {
     p_from: from,
     p_to: to[0],
     p_event_id: eventID,
     p_event_at: eventAt,
+    p_allowed_app_ids: configuredAppIDs.split(",").map((id) => id.trim()).filter(Boolean),
+    p_app_id: event.app_id ?? null,
+    p_store: event.store ?? null,
+    p_environment: event.environment == null
+      ? null
+      : normaliseRevenueCatEnvironment(event.environment),
   });
   if (error) {
     console.error("transfer_subscriptions failed:", error.message);
@@ -217,6 +224,23 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: true, ignored: "app" });
     }
 
+    const eventID = asString(event.id);
+    const eventAt = isoFromMilliseconds(event.event_timestamp_ms);
+    if (!eventID || !eventAt) throw new HttpError(422, "INVALID_EVENT_IDENTITY");
+
+    // Customer transfers can omit purchase metadata. Explicit metadata still
+    // passes the same gates; absent metadata only routes purchases whose stored
+    // app and Apple-store provenance matches this configured integration.
+    if (type === "TRANSFER") {
+      if (event.store != null && !storeCanGrant(event.store)) {
+        return jsonResponse({ ok: true, ignored: "store" });
+      }
+      if (event.environment != null && !normaliseRevenueCatEnvironment(event.environment)) {
+        throw new HttpError(422, "INVALID_ENVIRONMENT");
+      }
+      return await applyTransfer(event, eventID, eventAt, configuredAppIDs);
+    }
+
     // Only the App Store takes real money. A Test Store purchase is free to
     // make and must never reach a plan.
     if (!storeCanGrant(event.store)) {
@@ -229,12 +253,6 @@ Deno.serve(async (req) => {
 
     const environment = normaliseRevenueCatEnvironment(event.environment);
     if (!environment) throw new HttpError(422, "INVALID_ENVIRONMENT");
-
-    const eventID = asString(event.id);
-    const eventAt = isoFromMilliseconds(event.event_timestamp_ms);
-    if (!eventID || !eventAt) throw new HttpError(422, "INVALID_EVENT_IDENTITY");
-
-    if (type === "TRANSFER") return await applyTransfer(event, eventID, eventAt);
 
     // The Supabase user id. RevenueCat is configured to use it as app_user_id,
     // which is what removes Apple's "notification about a user we cannot
@@ -254,7 +272,7 @@ Deno.serve(async (req) => {
     const productID = asString(event.product_id);
 
     const admin = adminClient();
-    const { data, error } = await admin.rpc("apply_subscription_state", {
+    const { data, error } = await admin.rpc("apply_verified_subscription_state", {
       p_original_transaction_id: originalID,
       p_user_id: userID,
       p_latest_transaction_id: asString(event.transaction_id),
@@ -265,6 +283,8 @@ Deno.serve(async (req) => {
       p_revoked_at: revokedAt,
       p_event_id: eventID,
       p_event_at: eventAt,
+      p_store: event.store,
+      p_app_id: event.app_id,
     });
 
     if (error) {
@@ -278,7 +298,11 @@ Deno.serve(async (req) => {
     const outcome = classifySubscriptionResult(data ?? null);
     if (outcome.severity === "error") {
       console.error("subscription event not granted", {
-        result: data, originalID, userID, type, productID,
+        result: data,
+        originalID,
+        userID,
+        type,
+        productID,
       });
     } else if (outcome.severity === "warn") {
       console.warn("subscription event needs watching", { result: data, originalID, type });
