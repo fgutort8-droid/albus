@@ -193,11 +193,10 @@ select ok(
     select 1
       from pg_proc p
       join pg_namespace n on n.oid = p.pronamespace
-      cross join lateral unnest(coalesce(p.proconfig, array[]::text[])) cfg
      where p.prosecdef and n.nspname in ('public', 'private')
-       and cfg like 'search_path=%public%'
+       and not coalesce(p.proconfig @> array['search_path=""'], false)
   ),
-  'no privileged function resolves objects through the public schema'
+  'every privileged function explicitly fixes an empty search path'
 );
 
 -- -------------------------------------------------------------------------
