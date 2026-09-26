@@ -26,6 +26,7 @@ Packages/
 node_modules/
 npm-debug.log*
 deno.lock
+!supabase/functions/deno.lock
 
 # ── misc ──────────────────────────────────────────────────────────────────
 *.log

@@ -7,7 +7,7 @@
 // requireUser() ignores the body entirely and resolves the user from the
 // Authorization header, which Supabase Auth has already signed.
 
-import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.112.3";
 import { HttpError } from "./http.ts";
 
 export interface Caller {
