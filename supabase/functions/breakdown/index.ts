@@ -15,7 +15,7 @@ import {
 } from "../_shared/quota.ts";
 import { noteRefusal, recordSignals, type Signals } from "../_shared/signals.ts";
 import { loadPersonalRubric } from "../_shared/rubric.ts";
-import { generateBreakdown } from "../_shared/anthropic.ts";
+import { generateBreakdown, providerUsage } from "../_shared/anthropic.ts";
 import {
   type BreakdownInput,
   buildSystemPrompt,
@@ -233,14 +233,15 @@ Deno.serve(async (req) => {
         steps: plan.steps,
       }, 201);
     } catch (e) {
+      const usage = generated ?? providerUsage(e);
       await finalizeAIUsage(
         usageId,
         "failed",
-        generated?.inputTokens ?? null,
-        generated?.outputTokens ?? null,
+        usage?.inputTokens ?? null,
+        usage?.outputTokens ?? null,
         usageFailureCode(e),
-        generated?.cacheWriteTokens ?? null,
-        generated?.cacheReadTokens ?? null,
+        usage?.cacheWriteTokens ?? null,
+        usage?.cacheReadTokens ?? null,
       );
       throw e;
     }

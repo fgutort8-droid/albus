@@ -14,6 +14,9 @@ options:
   deploymentTarget:
     iOS: "18.0"
   createIntermediateGroups: true
+  postGenCommand: >-
+    mkdir -p Albus.xcodeproj/project.xcworkspace/xcshareddata/swiftpm &&
+    cp Package.resolved Albus.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 packages:
   AlbusCore:
@@ -23,13 +26,13 @@ packages:
   # security-critical and easy to get subtly wrong.
   Supabase:
     url: https://github.com/supabase/supabase-swift.git
-    from: 2.55.1
+    revision: 40344fb3a7007d772218c6ddf6bca9febd8cb226 # 2.55.2
   # Purchases. The SPM mirror carries only what a package build needs, not the
   # full repository's history and test fixtures. 5.43 is the first version
   # with RevenueCat's Test Store; this is the release current in Sep 2026.
   RevenueCat:
     url: https://github.com/RevenueCat/purchases-ios-spm.git
-    from: 5.89.0
+    revision: d654b8b85143c29e5bb73d0ff92f5f5766fbbedc # 5.91.0
 
 settings:
   base:

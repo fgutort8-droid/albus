@@ -57,7 +57,7 @@ enum RubricWriter {
         do {
             try context.save()
         } catch {
-            print("[Albus] rubric save failed: \(error)")
+            print("[Albus] rubric save failed")
             onSyncFailure("Couldn't save that rubric.")
             return nil
         }
@@ -77,30 +77,48 @@ enum RubricWriter {
                                       rubric: copy))
         }
         do { try context.save() } catch {
-            print("[Albus] rubric duplicate failed: \(error)")
+            print("[Albus] rubric duplicate failed")
             onSyncFailure("Couldn't save that rubric.")
             return
         }
         sync(copy, onFailure: onSyncFailure)
     }
 
-    static func delete(_ rubric: Rubric, context: ModelContext) {
+    @discardableResult
+    static func delete(_ rubric: Rubric, context: ModelContext,
+                       defaults: UserDefaults = .standard,
+                       deleteRemote: @escaping @MainActor (UUID) async throws -> Void = {
+                           try await RubricService().delete(id: $0)
+                       },
+                       onFailure: @escaping (String) -> Void = { _ in }) -> Task<Void, Never>? {
         let id = rubric.id
+        let alreadyPending = PendingRubricDeletions.all(defaults: defaults).contains(id)
+        let receipt = PendingRubricDeletions.record(id, defaults: defaults)
         context.delete(rubric)
-        try? context.save()
-        Task {
-            // A failed remote delete is not worth telling the student about: the
-            // rubric is gone from their app, and the row is theirs alone.
-            try? await RubricService().delete(id: id)
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            if !alreadyPending { PendingRubricDeletions.acknowledge(receipt, defaults: defaults) }
+            onFailure("Couldn't delete that rubric. Please try again.")
+            return nil
         }
+        return Task { await PendingRubricDeletions.flush(context: context, defaults: defaults, deleteRemote: deleteRemote) }
     }
 
-    private static func sync(_ rubric: Rubric, onFailure: @escaping (String) -> Void) {
+    @discardableResult
+    static func sync(_ rubric: Rubric, defaults: UserDefaults = .standard,
+                     saveRemote: @escaping @MainActor (RubricService.Snapshot) async throws -> Void = {
+                         try await RubricService().save($0)
+                     }, onFailure: @escaping (String) -> Void) -> Task<Void, Never> {
         let snapshot = rubric.snapshot
-        Task {
+        let generation = RubricRemoteWrites.generation
+        PendingRubricDeletions.cancel(snapshot.id, defaults: defaults)
+        return RubricRemoteWrites.enqueue(id: snapshot.id) {
             do {
-                try await RubricService().save(snapshot)
+                try await saveRemote(snapshot)
             } catch {
+                guard !Task.isCancelled, RubricRemoteWrites.generation == generation else { return }
                 onFailure((error as? LocalizedError)?.errorDescription
                           ?? "Couldn't sync this rubric. It's saved on your phone.")
             }

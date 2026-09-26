@@ -197,7 +197,7 @@ final class EntitlementService {
             }
         } catch {
             refreshFailed = true
-            print("[Albus] plan refresh failed: \(error.localizedDescription)")
+            print("[Albus] plan refresh failed")
         }
     }
 

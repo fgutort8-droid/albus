@@ -126,3 +126,42 @@ Deno.test("normalises an empty criterion code to null", () => {
   }, 60);
   assertEquals(r.steps[0].rubric_criterion_code, null);
 });
+
+Deno.test("split allocation stays bounded for every finite provider duration", () => {
+  const original = Array.from;
+  let largestAllocation = 0;
+  Array.from = new Proxy(original, {
+    apply(target, thisArg, args) {
+      const length = args[0]?.length;
+      if (typeof length === "number") {
+        largestAllocation = Math.max(largestAllocation, length);
+        // Fail safely before allocating an adversarially large array.
+        if (length > MAX_STEPS) throw new Error("split allocation exceeded output bound");
+      }
+      return Reflect.apply(target, thisArg, args);
+    },
+  });
+  try {
+    for (const minutes of [1e9, 9e100, Number.MAX_VALUE]) {
+      const result = validateAndNormalise({
+        steps: [{ title: "Synthetic step", estimated_minutes: minutes }],
+      }, 120);
+      assertEquals(result.steps.length, MAX_STEPS);
+      assert(result.steps.every((step) => Number.isFinite(step.estimated_minutes)));
+    }
+    assertEquals(largestAllocation, MAX_STEPS);
+  } finally {
+    Array.from = original;
+  }
+});
+
+Deno.test("bounded splitting preserves the original prefix and later validation", () => {
+  const result = validateAndNormalise({
+    steps: [{ title: "Long task", estimated_minutes: 2501 }],
+  }, 3000);
+  assertEquals(result.steps.map((step) => [step.title, step.estimated_minutes]),
+    Array.from({ length: MAX_STEPS }, (_, i) => [`Long task (${i + 1} of 21)`, 119]));
+  assertThrows(() => validateAndNormalise({
+    steps: [{ title: "Long task", estimated_minutes: 2501 }, { title: "", estimated_minutes: 30 }],
+  }, 3000), InvalidPlanError);
+});

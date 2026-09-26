@@ -30,7 +30,7 @@ struct AssignmentService {
                 .execute()
             return true
         } catch {
-            print("[Albus] assignment delete failed: \(error)")
+            print("[Albus] assignment delete failed")
             return false
         }
     }
