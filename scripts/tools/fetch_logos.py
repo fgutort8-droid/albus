@@ -21,6 +21,10 @@ Usage:
 
 import concurrent.futures
 import html
+import http.client
+import ipaddress
+import socket
+import ssl
 import importlib.util
 import pathlib
 import re
@@ -57,16 +61,78 @@ def ident(name: str) -> str:
     return s
 
 
+class _PublicHTTPSConnection(http.client.HTTPSConnection):
+    """Dial only the checked numeric addresses; retain hostname TLS validation."""
+    def __init__(self, host, port, addresses):
+        super().__init__(host, port, timeout=TIMEOUT, context=ssl.create_default_context())
+        self.addresses = addresses
+
+    def connect(self):
+        for family, socktype, protocol, _, address in self.addresses:
+            raw = None
+            try:
+                raw = socket.socket(family, socktype, protocol)
+                raw.settimeout(TIMEOUT)
+                raw.connect(address)
+                self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
+                return
+            except Exception:
+                if raw is not None:
+                    raw.close()
+        raise OSError("No approved HTTPS address was reachable")
+
+
+def _destination(url):
+    if any(ord(char) <= 32 or ord(char) == 127 for char in url) or "\\" in url:
+        raise ValueError("Invalid URL")
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username is not None or parsed.password is not None:
+        raise ValueError("Public HTTPS required")
+    host = parsed.hostname.encode("idna").decode("ascii")
+    if "%" in host:
+        raise ValueError("Scoped addresses are not allowed")
+    port = parsed.port or 443
+    addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
+    if not addresses:
+        raise ValueError("No destination")
+    for family, socktype, protocol, _, address in addresses:
+        ip = ipaddress.ip_address(address[0])
+        if family not in (socket.AF_INET, socket.AF_INET6) or not ip.is_global or ip.is_multicast or ip.is_reserved:
+            raise ValueError("Nonpublic destination")
+        if isinstance(ip, ipaddress.IPv6Address) and (ip.ipv4_mapped or ip.sixtofour or ip.teredo or ip.scope_id):
+            raise ValueError("Indirect destination")
+    return parsed, host, port, addresses
+
+
 def get(url: str, limit: int = 3_000_000) -> tuple[bytes, str] | None:
     try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": UA,
-            "Accept": "text/html,image/png,image/*;q=0.9,*/*;q=0.5",
-        })
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as response:
-            return response.read(limit), response.geturl()
+        if limit < 1:
+            return None
+        for hop in range(6):
+            parsed, host, port, addresses = _destination(url)
+            connection = _PublicHTTPSConnection(host, port, addresses)
+            try:
+                path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+                connection.request("GET", path, headers={
+                    "User-Agent": UA,
+                    "Accept": "text/html,image/png,image/*;q=0.9,*/*;q=0.5",
+                })
+                response = connection.getresponse()
+                if response.status in (301, 302, 303, 307, 308):
+                    location = response.getheader("Location")
+                    if not location or hop == 5:
+                        return None
+                    url = urllib.parse.urljoin(url, location)
+                    continue
+                if not 200 <= response.status < 300:
+                    return None
+                body = response.read(limit)
+                return body, url
+            finally:
+                connection.close()
     except Exception:
         return None
+    return None
 
 
 LINK_RE = re.compile(r"<link\b[^>]*>", re.I)
