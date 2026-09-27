@@ -2,6 +2,15 @@
   "originHash" : "f4d2db5013154d0ee7e7a9a8f5a154b08a7cfb9b4ded84e020d577388081b5f6",
   "pins" : [
     {
+      "identity" : "opentelemetry-swift-core",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/open-telemetry/opentelemetry-swift-core.git",
+      "state" : {
+        "revision" : "d77f1400f4c5738f04a1aec0a1246aec5240e9fa",
+        "version" : "2.5.0"
+      }
+    },
+    {
       "identity" : "purchases-ios-spm",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RevenueCat/purchases-ios-spm.git",
