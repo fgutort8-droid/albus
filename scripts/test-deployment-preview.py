@@ -10,6 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 class DeploymentPreviewTests(unittest.TestCase):
+    script = "deploy-dependencies-2026-09-25.sh"
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -31,7 +32,7 @@ fi
         env = dict(os.environ, DRY_RUN='1', ALBUS_SOURCE=str(self.root / 'source'),
                    PATH=str(self.root / 'bin') + ':' + os.environ['PATH'],
                    PREVIEW_FORBIDDEN=str(self.root / 'forbidden'))
-        result = subprocess.run(['bash', str(ROOT / 'scripts/deploy-dependencies-2026-09-25.sh')], env=env, capture_output=True, text=True)
+        result = subprocess.run(['bash', str(ROOT / 'scripts' / self.script)], env=env, capture_output=True, text=True)
         self.assertFalse((self.root / 'forbidden').exists())
         return result
 
@@ -49,6 +50,14 @@ fi
         source = path.read_text()
         self.assertIn('verify_jwt = true', source)
         path.write_text(source.replace('verify_jwt = true', '# verify_jwt = true\nverify_jwt = false', 1))
+        self.assertNotEqual(self.run_preview().returncode, 0)
+
+class ProviderPreviewTests(DeploymentPreviewTests):
+    script = "deploy-provider-2026-09-25.sh"
+
+    def test_lock_change_rejected(self):
+        path = self.root / 'source/supabase/functions/deno.lock'
+        path.write_text(path.read_text() + '\n')
         self.assertNotEqual(self.run_preview().returncode, 0)
 
 if __name__ == '__main__':

@@ -3,7 +3,7 @@
 set -euo pipefail
 DRY_RUN=${DRY_RUN:-1}
 REF=ssvehwhblgqtvqkfbkbj
-DIGEST=776e787989686e6046db5cdffa60720cbae5aedabb71e02aac3e049932dcf087
+DIGEST=db975f0ea502b3935c4d3fe37214aec915ba0395ffd7b033c3dcaa7edda274e2
 case "$DRY_RUN" in 0|1) ;; *) echo 'DRY_RUN must be 0 or 1'; exit 1;; esac
 stop() { echo "STOPPED: $*; no later step ran." >&2; exit 1; }
 for tool in git supabase python3; do command -v "$tool" >/dev/null || stop "missing $tool"; done

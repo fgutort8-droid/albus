@@ -3,7 +3,7 @@
 set -euo pipefail
 DRY_RUN=${DRY_RUN:-1}
 REF=ssvehwhblgqtvqkfbkbj
-DIGEST=bcac5bb17e6d0ff190e9b1f97bb0e76b2d9311f2c131003088de4c95956c5d01
+DIGEST=db975f0ea502b3935c4d3fe37214aec915ba0395ffd7b033c3dcaa7edda274e2
 case "$DRY_RUN" in 0|1) ;; *) echo 'DRY_RUN must be 0 or 1'; exit 1;; esac
 stop() { echo "STOPPED: $*; no later step ran." >&2; exit 1; }
 for tool in git supabase python3; do command -v "$tool" >/dev/null || stop "missing $tool"; done
@@ -20,13 +20,10 @@ cd "$STAGE/repo"
 ACTUAL=$(python3 - <<'PY'
 from pathlib import Path
 import hashlib
-h=hashlib.sha256(); root=Path('supabase/functions')
-paths=sorted([*root.glob('_shared/*.ts'), root/'breakdown/index.ts',root/'grade/index.ts',root/'deno.json'])
+h=hashlib.sha256(); root=Path('supabase')
+paths=sorted([root/'config.toml', *[p for p in (root/'functions').rglob('*')
+    if p.is_file() and '_tests' not in p.parts and p.suffix in ('.ts','.json','.lock')]])
 for p in paths: h.update(str(p.relative_to(root)).encode()+b'\0'+p.read_bytes()+b'\0')
-config=Path('supabase/config.toml').read_text()
-for name in ['breakdown','grade']:
- block=config.split('[functions.'+name+']',1)[1].split('[',1)[0]
- assert 'verify_jwt = true' in block, 'JWT verification must remain enabled'
 print(h.hexdigest())
 PY
 )

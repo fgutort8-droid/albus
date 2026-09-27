@@ -40,11 +40,11 @@ Deno.test("provider response accounting survives unusable results without loggin
       if (url.hostname === "api.anthropic.com") {
         providerCalls++;
         if (mode === "transport") throw new Error("SENTINEL_STUDENT_CONTENT");
-        if (mode === "rejected") {
+        if (["rejected", "rate-limit", "server-error"].includes(mode)) {
           return reply({
             type: "error",
             error: { type: "invalid_request_error", message: "SENTINEL_STUDENT_CONTENT" },
-          }, 400);
+          }, mode === "rate-limit" ? 429 : mode === "server-error" ? 503 : 400);
         }
         return reply({
           id: "unit",
@@ -93,6 +93,8 @@ Deno.test("provider response accounting survives unusable results without loggin
           ...(endpoint === 1 ? ["truncated"] : []),
           "transport",
           "rejected",
+          "rate-limit",
+          "server-error",
         ]
       ) {
         await t.step(`${endpoint === 0 ? "planning" : "grading"}: ${failure}`, async () => {
@@ -116,10 +118,11 @@ Deno.test("provider response accounting survives unusable results without loggin
             }),
           );
           assertEquals(response.status >= 400, true);
+          assertEquals((await response.text()).includes("SENTINEL_STUDENT_CONTENT"), false);
           assertEquals(providerCalls, 1, "one reservation must permit only one provider request");
           const writes = calls.filter((c) => c.name === "finalize_ai_usage");
           assertEquals(writes.length, 1);
-          const known = failure !== "transport" && failure !== "rejected";
+          const known = !["transport", "rejected", "rate-limit", "server-error"].includes(failure);
           assertEquals(writes[0].args.p_state, "failed");
           assertEquals(writes[0].args.p_input_tokens, known ? 90000 : null);
           assertEquals(writes[0].args.p_output_tokens, known ? 20 : null);
