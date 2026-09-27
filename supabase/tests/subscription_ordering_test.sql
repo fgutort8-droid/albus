@@ -3,7 +3,7 @@ create extension if not exists pgtap with schema extensions;
 set local search_path=extensions,public;
 select no_plan();
 insert into auth.users(id,instance_id,aud,role,created_at,updated_at,is_anonymous)
-select ('a9500000-0000-4000-8000-'||lpad(i::text,12,'0'))::uuid,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',now(),now(),true from generate_series(1,9) i;
+select ('a9500000-0000-4000-8000-'||lpad(i::text,12,'0'))::uuid,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',now(),now(),true from generate_series(1,15) i;
 select public.apply_subscription_state('ordering-main','a9500000-0000-4000-8000-000000000001','ordering-tx','com.felipegutierrez.albus.pro.monthly','Production',now(),now()+interval '1 month',null,'ordering-purchase',now());
 select is(public.transfer_subscriptions(array['a9500000-0000-4000-8000-000000000001']::uuid[],'a9500000-0000-4000-8000-000000000002','ordering-new',now()+interval '20 seconds'),'transferred','newer transfer applies');
 select public.transfer_subscriptions(array['a9500000-0000-4000-8000-000000000002']::uuid[],'a9500000-0000-4000-8000-000000000001','ordering-old',now()+interval '10 seconds');
@@ -74,6 +74,28 @@ select is((select user_id from public.subscription_transactions where original_t
  'a9500000-0000-4000-8000-000000000009'::uuid,'late first purchase resolves ownership without reverting newer billing facts');
 select is((select latest_transaction_id from public.subscription_transactions where original_transaction_id='ordering-late-first'),
  'late-renewal','older purchase does not overwrite renewal facts');
+
+
+select public.apply_verified_subscription_state('ordering-deleted-hop','a9500000-0000-4000-8000-000000000010','hop-buy',
+ 'com.felipegutierrez.albus.pro.monthly','Production',now(),now()+interval '1 month',null,'hop-buy-event',now(),'APP_STORE','unit-app');
+select public.transfer_verified_subscriptions(array['a9500000-0000-4000-8000-000000000011']::uuid[],
+ 'a9500000-0000-4000-8000-000000000012','hop-second',now()+interval '20 seconds',array['unit-app']);
+delete from auth.users where id='a9500000-0000-4000-8000-000000000011';
+select public.transfer_verified_subscriptions(array['a9500000-0000-4000-8000-000000000010']::uuid[],
+ 'a9500000-0000-4000-8000-000000000011','hop-first',now()+interval '10 seconds',array['unit-app']);
+select is((select user_id from public.subscription_transactions where original_transaction_id='ordering-deleted-hop'),
+ 'a9500000-0000-4000-8000-000000000012'::uuid,'historical deleted intermediate does not interrupt the route to a live owner');
+select public.apply_verified_subscription_state('ordering-late-restore','a9500000-0000-4000-8000-000000000013','restore-buy',
+ 'com.felipegutierrez.albus.pro.monthly','Production',now(),now()+interval '1 month',null,'restore-buy-event',now(),'APP_STORE','unit-app');
+delete from auth.users where id='a9500000-0000-4000-8000-000000000013';
+select public.apply_verified_subscription_state('ordering-late-restore',null,'ownerless-renewal',
+ 'com.felipegutierrez.albus.pro.monthly','Production',now(),now()+interval '2 months',null,'ownerless-renewal-event',now()+interval '30 seconds','APP_STORE','unit-app');
+select public.apply_verified_subscription_state('ordering-late-restore','a9500000-0000-4000-8000-000000000014','older-restore',
+ 'com.felipegutierrez.albus.pro.monthly','Production',now(),now()+interval '1 month',null,'older-restore-event',now()+interval '20 seconds','APP_STORE','unit-app');
+select is((select user_id from public.subscription_transactions where original_transaction_id='ordering-late-restore'),
+ 'a9500000-0000-4000-8000-000000000014'::uuid,'restore ownership can advance independently of newer billing facts');
+select is((select latest_transaction_id from public.subscription_transactions where original_transaction_id='ordering-late-restore'),
+ 'ownerless-renewal','restoring ownership preserves the later billing event');
 
 select * from finish();
 rollback;

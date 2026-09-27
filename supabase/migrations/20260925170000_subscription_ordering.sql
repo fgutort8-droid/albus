@@ -162,6 +162,19 @@ begin
     perform private.reconcile_subscription_ownership(p_original_transaction_id);
   end if;
 
+  -- A later verified restore may bind a purchase whose previous account was
+  -- explicitly deleted. Older receipts cannot replace newer ownership events.
+  if v_had_existing and v_existing.user_id is null and p_user_id is not null
+     and p_event_at > coalesce(v_existing.ownership_event_at, '-infinity'::timestamptz)
+     and exists(select 1 from auth.users where id=p_user_id) then
+    update public.subscription_transactions set ownership_origin_user_id=p_user_id,
+      ownership_origin_at=p_event_at, ownership_restore_at=p_event_at, ownership_path=array[p_user_id]
+    where original_transaction_id=p_original_transaction_id;
+    perform private.reconcile_subscription_ownership(p_original_transaction_id);
+    select * into v_existing from public.subscription_transactions
+      where original_transaction_id=p_original_transaction_id;
+  end if;
+
   if v_had_existing and v_existing.last_event_at is not null
      and (p_event_at < v_existing.last_event_at
           or p_event_id = v_existing.last_event_id) then
@@ -239,14 +252,6 @@ begin
     verified_app_id = coalesce(s.verified_app_id, p_app_id)
   where s.original_transaction_id = p_original_transaction_id;
 
-  -- A later verified restore may bind a purchase whose previous account was
-  -- explicitly deleted. Older receipts cannot replace newer ownership events.
-  if v_had_existing and v_existing.user_id is null and p_user_id is not null
-     and p_event_at > coalesce(v_existing.ownership_event_at, '-infinity'::timestamptz) then
-    update public.subscription_transactions set ownership_origin_user_id=p_user_id,
-      ownership_origin_at=p_event_at, ownership_restore_at=p_event_at, ownership_path=array[p_user_id]
-    where original_transaction_id=p_original_transaction_id;
-  end if;
   perform private.reconcile_subscription_ownership(p_original_transaction_id);
   select s.user_id into v_owner from public.subscription_transactions s
     where s.original_transaction_id=p_original_transaction_id;
@@ -285,7 +290,7 @@ $function$;
 create function private.apply_subscription_transfer(p_from uuid[],p_to uuid,p_event_id text,p_event_at timestamptz,
   p_allowed_app_ids text[],p_app_id text,p_store text,p_environment text)
 returns text language plpgsql security definer set search_path='' as $$
-declare v_id text; v_moved integer:=0; v_user uuid;
+declare v_id text; v_moved integer:=0; v_user uuid; v_active_destination uuid;
 begin
   if p_to is null or p_event_at is null or p_event_id is null or length(p_event_id) not between 1 and 255
     or (p_allowed_app_ids is not null and cardinality(p_allowed_app_ids)=0)
@@ -293,14 +298,17 @@ begin
     or (p_store is not null and p_store not in ('APP_STORE','MAC_APP_STORE'))
     or (p_environment is not null and p_environment not in ('Production','Sandbox')) then return 'invalid'; end if;
   -- Protect the destination before waiting for subscription work.
-  perform 1 from auth.users where id=p_to for key share;
-  if not found then return 'invalid'; end if;
+  select id into v_active_destination from auth.users where id=p_to for key share;
+  -- Verified delivery may supply a historical hop through a deleted account.
+  -- Keep its route without granting a nonexistent account any entitlement.
+  -- The legacy service contract still rejects absent destinations.
+  if v_active_destination is null and p_allowed_app_ids is null then return 'invalid'; end if;
   perform pg_advisory_xact_lock(hashtextextended('albus:subscription:ownership',0));
   insert into public.subscription_webhook_events(event_id,event_type) values(p_event_id,'TRANSFER')
     on conflict(event_id) do nothing;
   if not found then return 'stale'; end if;
   insert into private.subscription_transfers(event_id,event_at,source_ids,destination_id,active_destination_id,allowed_app_ids,app_id,store,environment)
-    values(p_event_id,p_event_at,coalesce(p_from,'{}'::uuid[]),p_to,p_to,p_allowed_app_ids,p_app_id,p_store,p_environment);
+    values(p_event_id,p_event_at,coalesce(p_from,'{}'::uuid[]),p_to,v_active_destination,p_allowed_app_ids,p_app_id,p_store,p_environment);
   for v_id in select original_transaction_id from public.subscription_transactions
     where ownership_path && coalesce(p_from,'{}'::uuid[]) or user_id=any(p_from)
     order by original_transaction_id
