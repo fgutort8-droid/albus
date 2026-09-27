@@ -111,9 +111,21 @@ struct CaptchaSheet: UIViewRepresentable {
         }
     }
 
-    /// The widget page. The site key is the only value interpolated, and it
-    /// comes from the app's own bundle, never from user input or the network.
-    private static func html(siteKey: String) -> String {
+    /// How long the check may work on its own, without answering or asking
+    /// for the student, before the sheet gives up on it. Slow is not stalled:
+    /// on a fresh simulator a pass through this sheet took 29 s (27 Sep
+    /// 2026), and a 20 s limit, this sheet's first, would have sent that
+    /// student back to Retry 9 s before it arrived. The quiet check's
+    /// watchdog waits as long, for the same reason.
+    ///
+    /// A student solving a challenge is not on this clock. Turnstile times
+    /// them itself and reports it through `timeout-callback`.
+    static let stallAfter: TimeInterval = 60
+
+    /// The widget page. The site key is the only value interpolated from
+    /// outside this file, and it comes from the app's own bundle, never from
+    /// user input or the network.
+    static func html(siteKey: String) -> String {
         """
         <!doctype html>
         <html><head>
@@ -131,15 +143,38 @@ struct CaptchaSheet: UIViewRepresentable {
              data-callback="onOK"
              data-error-callback="onErr"
              data-timeout-callback="onErr"
+             data-before-interactive-callback="onPerson"
+             data-after-interactive-callback="onPersonDone"
              data-appearance="interaction-only"></div>
         <script>
-          function post(v){ window.webkit.messageHandlers.turnstile.postMessage(v); }
-          function onOK(t){ post(t); }
-          function onErr(){ post("error"); }
-          // If the script itself never loads, do not hang the flow forever.
-          setTimeout(function(){ if (!window.__done) { window.__done = 1; onErr(); } }, 20000);
+        \(pageScript)
         </script>
         </body></html>
+        """
+    }
+
+    /// What the page does with the widget's answers. It reports exactly once:
+    /// a pass, or "error". Kept apart from the markup so tests can run it.
+    static var pageScript: String {
+        """
+        var done = false, stall = null;
+        function post(v){
+          if (done) return;
+          done = true;
+          clearTimeout(stall);
+          window.webkit.messageHandlers.turnstile.postMessage(v);
+        }
+        function onOK(t){ post(t); }
+        function onErr(){ post("error"); }
+        // The stall clock runs only while the check works on its own. It
+        // stops while the student solves a challenge and starts afresh once
+        // they are done, so neither a slow check nor a slow student is cut off.
+        function watch(){ clearTimeout(stall); stall = setTimeout(onErr, \(Int(stallAfter * 1000))); }
+        function onPerson(){ clearTimeout(stall); stall = null; }
+        function onPersonDone(){ watch(); }
+        watch();
+        // If the Turnstile script itself never loads, nothing will answer.
+        setTimeout(function(){ if (!window.turnstile) { onErr(); } }, 20000);
         """
     }
 }

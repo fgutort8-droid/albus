@@ -32,6 +32,8 @@ struct OnboardingFlow: View {
     // Account creation
     @State private var showingCaptcha = false
     @State private var failure: String?
+    /// The CAPTCHA pass, fetched while the student answers the questions.
+    @State private var prefetch = CaptchaPrefetch()
 
     // Building step: drives the cactus's breathing pulse.
     @State private var pulsing = false
@@ -46,11 +48,26 @@ struct OnboardingFlow: View {
             case .meetAlbus:  meetAlbusStep
             }
         }
+        .background {
+            // Behind the opaque background, so nobody sees it. See
+            // `CaptchaPrefetchPage` for why it is on screen at all.
+            if prefetchRuns {
+                CaptchaPrefetchPage(prefetch: prefetch, generation: prefetch.generation)
+                    .frame(width: 320, height: 120)
+                    .opacity(0.01)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .onDisappear { prefetch.stop() }
         .animation(Tokens.Motion.sheet, value: step)
         .sheet(isPresented: $showingCaptcha) {
             CaptchaSheet { token in
                 showingCaptcha = false
-                Task { await finish(captchaToken: token, required: true) }
+                Task {
+                    if token != nil { step = .building }
+                    await proceed(await accountCreation.finishVisibleCheck(pass: token))
+                }
             }
             .presentationDetents([.height(320)])
         }
@@ -260,48 +277,62 @@ struct OnboardingFlow: View {
 
     // MARK: - Account + first plan
 
-    /// Saves the profile, then either presents the challenge or goes straight
-    /// to creating the account.
+    /// Whether the quiet check's hidden page should be running: CAPTCHA is on,
+    /// there is no account yet, and a pass is on its way. Once the account
+    /// exists, nothing needs another pass.
+    private var prefetchRuns: Bool {
+        guard Captcha.isEnabled, prefetch.state == .fetching else { return false }
+        if case .signedIn = session.state { return false }
+        return true
+    }
+
+    /// Where the account gets created. See `AccountCreation`.
+    private var accountCreation: AccountCreation {
+        AccountCreation(
+            captchaEnabled: Captcha.isEnabled,
+            isSignedIn: { [session] in
+                if case .signedIn = session.state { return true }
+                return false
+            },
+            prefetch: prefetch,
+            signUp: { [session] pass in await session.createAccount(captchaToken: pass) }
+        )
+    }
+
+    /// Saves the profile, then creates the account: with the pass the quiet
+    /// check fetched during onboarding, or through the visible challenge when
+    /// the quiet check cannot provide one.
     private func begin() {
         failure = nil
         preferences.name = name
         preferences.program = program
         preferences.load = load
 
-        if case .signedIn = session.state {
-            // Already have an account (a flow resumed after a crash, say).
-            step = .building
-            Task { await finish(captchaToken: nil, required: false) }
-        } else if Captcha.isEnabled {
-            showingCaptcha = true
-        } else {
-            step = .building
-            Task { await finish(captchaToken: nil, required: false) }
-        }
+        step = .building
+        Task { await proceed(await accountCreation.start()) }
     }
 
-    /// Creates the account if needed, then generates the first plan.
-    ///
-    /// `required` says whether a token was mandatory. When it was and none
-    /// arrived, this refuses rather than silently signing up without one —
-    /// falling back would defeat the entire point of the challenge.
-    private func finish(captchaToken: String?, required: Bool) async {
-        if required && captchaToken == nil {
+    /// Acts on how account creation went and, once there is an account,
+    /// generates the first plan.
+    private func proceed(_ outcome: AccountCreation.Outcome) async {
+        switch outcome {
+        case .created:
+            break
+        case .needsVisibleCheck:
+            step = .deadline
+            showingCaptcha = true
+            return
+        case .checkIncomplete:
             failure = "That check didn't complete. Try once more."
+            step = .deadline
+            return
+        case .signUpFailed:
+            failure = "Couldn't set up your account. Check your connection."
             step = .deadline
             return
         }
 
         step = .building
-
-        if case .signedIn = session.state {} else {
-            let ok = await session.createAccount(captchaToken: captchaToken)
-            guard ok else {
-                failure = "Couldn't set up your account. Check your connection."
-                step = .deadline
-                return
-            }
-        }
 
         // The student names their own subjects once they are in the app; the
         // first assignment does not need one.
