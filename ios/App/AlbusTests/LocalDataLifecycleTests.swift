@@ -99,6 +99,27 @@ struct LocalDataLifecycleTests {
         #expect(events == [1, 2, 3])
     }
 
+    @Test("an in-flight rubric failure cannot notify a cleared account")
+    func clearedWriteCompletion() async {
+        let defaults = UserDefaults(suiteName: "albus.write-generation.\(UUID())")!
+        var continuation: CheckedContinuation<Void, Never>?
+        var notified = false
+        let task = RubricWriter.sync(Rubric(name: "Synthetic"), defaults: defaults, saveRemote: { _ in
+            await withCheckedContinuation { continuation = $0 }
+            throw URLError(.notConnectedToInternet)
+        }, onFailure: { _ in notified = true })
+        while continuation == nil { await Task.yield() }
+        PendingRubricDeletions.clear(defaults: defaults)
+        continuation?.resume()
+        await task.value
+        #expect(!notified)
+        // Ordinary failures in the current account must still reach its UI.
+        let current = RubricWriter.sync(Rubric(name: "Synthetic current"), defaults: defaults,
+            saveRemote: { _ in throw URLError(.notConnectedToInternet) }, onFailure: { _ in notified = true })
+        await current.value
+        #expect(notified)
+    }
+
     @Test("interrupted local deletion is completed before its remote retry")
     func interruptedDeletion() async throws {
         let name = "albus.outbox.test.\(UUID())"

@@ -106,13 +106,19 @@ enum RubricWriter {
         return Task { await PendingRubricDeletions.flush(context: context, defaults: defaults, deleteRemote: deleteRemote) }
     }
 
-    private static func sync(_ rubric: Rubric, onFailure: @escaping (String) -> Void) {
+    @discardableResult
+    static func sync(_ rubric: Rubric, defaults: UserDefaults = .standard,
+                     saveRemote: @escaping @MainActor (RubricService.Snapshot) async throws -> Void = {
+                         try await RubricService().save($0)
+                     }, onFailure: @escaping (String) -> Void) -> Task<Void, Never> {
         let snapshot = rubric.snapshot
-        PendingRubricDeletions.cancel(snapshot.id)
-        RubricRemoteWrites.enqueue(id: snapshot.id) {
+        let generation = RubricRemoteWrites.generation
+        PendingRubricDeletions.cancel(snapshot.id, defaults: defaults)
+        return RubricRemoteWrites.enqueue(id: snapshot.id) {
             do {
-                try await RubricService().save(snapshot)
+                try await saveRemote(snapshot)
             } catch {
+                guard !Task.isCancelled, RubricRemoteWrites.generation == generation else { return }
                 onFailure((error as? LocalizedError)?.errorDescription
                           ?? "Couldn't sync this rubric. It's saved on your phone.")
             }

@@ -6,7 +6,7 @@ import SwiftData
 @MainActor
 enum RubricRemoteWrites {
     private static var tails: [UUID: (UUID, Task<Void, Never>)] = [:]
-    private static var generation = UUID()
+    private(set) static var generation = UUID()
 
     @discardableResult
     static func enqueue(id: UUID, operation: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
