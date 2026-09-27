@@ -32,6 +32,8 @@ struct OnboardingFlow: View {
     // Account creation
     @State private var showingCaptcha = false
     @State private var failure: String?
+    /// The CAPTCHA pass, fetched while the student answers the questions.
+    @State private var prefetch = CaptchaPrefetch()
 
     // Building step: drives the cactus's breathing pulse.
     @State private var pulsing = false
@@ -46,6 +48,18 @@ struct OnboardingFlow: View {
             case .meetAlbus:  meetAlbusStep
             }
         }
+        .background {
+            // Behind the opaque background, so nobody sees it. See
+            // `CaptchaPrefetchPage` for why it is on screen at all.
+            if prefetchRuns {
+                CaptchaPrefetchPage(prefetch: prefetch, generation: prefetch.generation)
+                    .frame(width: 320, height: 120)
+                    .opacity(0.01)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .onDisappear { prefetch.stop() }
         .animation(Tokens.Motion.sheet, value: step)
         .sheet(isPresented: $showingCaptcha) {
             CaptchaSheet { token in
@@ -260,8 +274,18 @@ struct OnboardingFlow: View {
 
     // MARK: - Account + first plan
 
-    /// Saves the profile, then either presents the challenge or goes straight
-    /// to creating the account.
+    /// Whether the quiet check's hidden page should be running: CAPTCHA is on,
+    /// there is no account yet, and a pass is on its way. Once the account
+    /// exists, nothing needs another pass.
+    private var prefetchRuns: Bool {
+        guard Captcha.isEnabled, prefetch.state == .fetching else { return false }
+        if case .signedIn = session.state { return false }
+        return true
+    }
+
+    /// Saves the profile, then creates the account: with the pass the quiet
+    /// check fetched during onboarding, or through the visible challenge when
+    /// the quiet check cannot provide one.
     private func begin() {
         failure = nil
         preferences.name = name
@@ -273,7 +297,20 @@ struct OnboardingFlow: View {
             step = .building
             Task { await finish(captchaToken: nil, required: false) }
         } else if Captcha.isEnabled {
-            showingCaptcha = true
+            // Usually the quiet check finished while the student was typing,
+            // so the account is created straight away. If it is still running,
+            // this waits for it rather than starting again.
+            step = .building
+            Task {
+                if let token = await prefetch.take(waitingUpTo: .seconds(20)) {
+                    await finish(captchaToken: token, required: true)
+                } else {
+                    // Cloudflare wants a person, or the quiet check failed:
+                    // the visible check, as before.
+                    step = .deadline
+                    showingCaptcha = true
+                }
+            }
         } else {
             step = .building
             Task { await finish(captchaToken: nil, required: false) }
@@ -299,6 +336,9 @@ struct OnboardingFlow: View {
             guard ok else {
                 failure = "Couldn't set up your account. Check your connection."
                 step = .deadline
+                // A pass is good for one attempt. Fetch the next one now, so
+                // Retry does not have to wait for it.
+                if captchaToken != nil { prefetch.renew() }
                 return
             }
         }

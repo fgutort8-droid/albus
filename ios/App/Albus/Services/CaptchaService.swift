@@ -137,7 +137,9 @@ struct CaptchaSheet: UIViewRepresentable {
           function onOK(t){ post(t); }
           function onErr(){ post("error"); }
           // If the script itself never loads, do not hang the flow forever.
-          setTimeout(function(){ if (!window.__done) { window.__done = 1; onErr(); } }, 20000);
+          // Only then: a student solving an interactive challenge can take
+          // longer than this, and Turnstile's own timeout covers that case.
+          setTimeout(function(){ if (!window.turnstile) { onErr(); } }, 20000);
         </script>
         </body></html>
         """
