@@ -131,15 +131,19 @@ struct CaptchaSheet: UIViewRepresentable {
              data-callback="onOK"
              data-error-callback="onErr"
              data-timeout-callback="onErr"
+             data-before-interactive-callback="onPerson"
              data-appearance="interaction-only"></div>
         <script>
           function post(v){ window.webkit.messageHandlers.turnstile.postMessage(v); }
           function onOK(t){ post(t); }
           function onErr(){ post("error"); }
-          // If the script itself never loads, do not hang the flow forever.
-          // Only then: a student solving an interactive challenge can take
-          // longer than this, and Turnstile's own timeout covers that case.
-          setTimeout(function(){ if (!window.turnstile) { onErr(); } }, 20000);
+          // Give up on anything that has not answered in 20 s (the script
+          // never loaded, or the widget stalled) so the sheet never spins for
+          // ever. Not a student solving an interactive challenge, though: that
+          // can take longer, and Turnstile's own timeout covers it.
+          var interactive = false;
+          function onPerson(){ interactive = true; }
+          setTimeout(function(){ if (!interactive) { onErr(); } }, 20000);
         </script>
         </body></html>
         """

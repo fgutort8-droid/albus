@@ -4,9 +4,10 @@ import WebKit
 /// Runs the Turnstile check while the student answers the onboarding
 /// questions, so the pass is usually ready by the time they tap "Build my plan".
 ///
-/// **Why.** On the simulator (27 Sep 2026) Turnstile took 8–14 s to issue a
-/// pass. Started at the tap, that was 8–14 s of spinner before the account
-/// existed. Started when onboarding opens, it finishes while they type.
+/// **Why.** On the simulator (27 Sep 2026) Turnstile took 3–14 s to issue a
+/// pass, and 28 s on a cold simulator under heavy load. Started at the tap,
+/// all of that was spinner before the account existed. Started when
+/// onboarding opens, it has the whole of onboarding to finish.
 ///
 /// **Two rules the pass imposes.** Supabase checks it with Cloudflare, which
 /// accepts each pass once and only for 300 s after it was issued. So a pass is
@@ -50,13 +51,16 @@ final class CaptchaPrefetch {
     /// How long a pass is handed out for. Cloudflare's limit is 300 s; the rest
     /// is time for the sign-up to reach Supabase and Supabase to reach Cloudflare.
     private let freshFor: TimeInterval
-    /// A page with no answer by then is reloaded. A pass normally takes 7–14 s.
+    /// A page with no answer by then is reloaded. Generous on purpose: a pass
+    /// took up to 28 s on a cold, loaded simulator, and a watchdog that
+    /// reloads a slow page just starts it over. It was 25 s once, and on a cold
+    /// simulator it did exactly that, three times running.
     private let stallAfter: TimeInterval
     /// Stalled pages reloaded before the quiet check gives up for this session.
     private static let maxReloads = 2
     private let now: () -> Date
 
-    init(freshFor: TimeInterval = 240, stallAfter: TimeInterval = 25,
+    init(freshFor: TimeInterval = 240, stallAfter: TimeInterval = 60,
          now: @escaping () -> Date = Date.init) {
         self.freshFor = freshFor
         self.stallAfter = stallAfter
@@ -87,8 +91,8 @@ final class CaptchaPrefetch {
             try? await Task.sleep(for: .milliseconds(100))
         }
         if state == .ready, isFresh { return consume() }
-        // Far past the 7–14 s it normally takes: treat the page as stuck, so
-        // it stops while the visible check runs instead of running beside it.
+        // The caller has waited long enough: treat the page as stuck, so it
+        // stops while the visible check runs instead of running beside it.
         if state == .fetching { settle(.failed) }
         return nil
     }
@@ -219,7 +223,12 @@ struct CaptchaPrefetchPage: UIViewRepresentable {
         let view = WKWebView(frame: .zero, configuration: config)
         view.isOpaque = false
         view.backgroundColor = .clear
-        view.navigationDelegate = context.coordinator
+        // No navigation delegate. The page is a local string, and a failure
+        // reported for "the current navigation" could belong to a page that
+        // has since been replaced. A script that never loads or a widget that
+        // never answers is caught by the page's own guard and by the
+        // `CaptchaPrefetch` watchdog, and both know which challenge they
+        // belong to.
         context.coordinator.load(generation, into: view)
         return view
     }
@@ -236,7 +245,7 @@ struct CaptchaPrefetchPage: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKScriptMessageHandler {
         private weak var prefetch: CaptchaPrefetch?
         private(set) var loaded = -1
 
@@ -271,14 +280,6 @@ struct CaptchaPrefetchPage: UIViewRepresentable {
                 prefetch.needsPerson(generation: generation)
             default:
                 prefetch.failed(generation: generation)
-            }
-        }
-
-        nonisolated func webView(_ webView: WKWebView,
-                                 didFail navigation: WKNavigation!,
-                                 withError error: Error) {
-            Task { @MainActor in
-                prefetch?.failed(generation: loaded)
             }
         }
     }
