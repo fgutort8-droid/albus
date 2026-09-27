@@ -1,0 +1,36 @@
+{
+  "autoReview": ["open", "push", "rebase"],
+  "instructions": "Review the final commit and cite concrete code paths. Treat automated findings as leads requiring evidence. Require regression coverage at the real enforcement boundary and preserve legitimate student workflows. Do not propose raising AI spending limits or weakening a control to make tests pass. Never include credentials or exploit instructions in public comments.",
+  "rules": [
+    {
+      "id": "albus-table-rls",
+      "severity": "high",
+      "rule": "Every application-owned table, including private tables, must have RLS enabled in the migration that creates it. Check effective grants and policies as well as the RLS flag; tables exposed to authenticated clients require owner-scoped access. Migrations must be append-only."
+    },
+    {
+      "id": "albus-definer-boundary",
+      "severity": "high",
+      "rule": "Every SECURITY DEFINER function must explicitly use search_path = '' and schema-qualified references. Verify the actual catalog configuration and effective EXECUTE grants, including PUBLIC inheritance, rather than relying only on source-text matching."
+    },
+    {
+      "id": "albus-money-authority",
+      "severity": "high",
+      "rule": "Money, entitlement, subscription, revenue, spending-budget and usage-ledger tables must have no direct anon or authenticated grants. Privileged billing and usage mutation RPCs must remain service_role-only. Preserve webhook Authorization plus HMAC verification, app-ID and Apple-store restrictions, reservation-before-provider-call ordering, and usage continuity across deletion, restore and transfer."
+    },
+    {
+      "id": "albus-jwt-identity",
+      "severity": "high",
+      "rule": "At student-facing boundaries derive identity from a validated JWT/auth.uid(), never a user_id supplied in a request body or user-editable metadata. A service-only RPC may accept the user ID obtained by the server from a validated JWT. Resource IDs still require ownership checks."
+    },
+    {
+      "id": "albus-no-secrets",
+      "severity": "high",
+      "rule": "Never commit credentials, session tokens, private keys, Config.xcconfig or the Apple Team ID. Do not echo secret values in logs or workflows. Use placeholders in fixtures. Release session credentials must persist only in Keychain, with checked failures and safe legacy migration."
+    },
+    {
+      "id": "albus-account-maintenance",
+      "severity": "high",
+      "rule": "An account-cleanup job must spare recently signed-in accounts, any current or historical subscription/entitlement/payment record, any owned content (including rubrics, courses, assignments, logs and newly introduced ownership tables), and in-progress deletion or transfer. Preserve the scheduled privacy/cost-control job and prove both retention and reaping with database tests plus concurrent activity. A green suite alone is insufficient: inspect each deletion predicate and its locking boundary."
+    }
+  ]
+}
