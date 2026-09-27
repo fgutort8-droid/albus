@@ -6,7 +6,7 @@ set -euo pipefail
 REF=ssvehwhblgqtvqkfbkbj
 EXPECTED=20260925170000
 MIGRATION=20260925170000_subscription_ordering.sql
-DIGEST=7293aa88935051f8e230e976951b4f11f6382c0c319bcd9f1664fb6cca40f3ee
+DIGEST=b2dd077a1df14555e607459a218626e6391dcf7699a61ef16922beef873a784a
 WEBHOOK_DIGEST=27f7613a9ae3b012789a7e2db3eb4fa53d6c070fbc068dccd3b8e86e3527d491
 DRY_RUN=${DRY_RUN:-1}
 case "$DRY_RUN" in 0|1) ;; *) echo 'DRY_RUN must be 0 or 1'; exit 1;; esac
