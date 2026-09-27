@@ -172,8 +172,8 @@ export async function recordSignals(req: Request, userId: string): Promise<Signa
       }
       await Promise.all(writes);
     }
-  } catch (e) {
-    console.warn("signal recording failed:", e);
+  } catch {
+    console.warn("signal recording failed");
   }
 
   return { deviceHash, ipPrefixHash };
@@ -208,8 +208,8 @@ export function logSecurityEvent(
         p_ip_prefix_hash: signals.ipPrefixHash,
         p_detail: detail,
       });
-    } catch (e) {
-      console.warn("security event write failed:", e);
+    } catch {
+      console.warn("security event write failed");
     }
   })();
 

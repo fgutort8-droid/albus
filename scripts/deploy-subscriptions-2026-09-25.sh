@@ -7,7 +7,7 @@ REF=ssvehwhblgqtvqkfbkbj
 EXPECTED=20260925170000
 MIGRATION=20260925170000_subscription_ordering.sql
 DIGEST=b2dd077a1df14555e607459a218626e6391dcf7699a61ef16922beef873a784a
-WEBHOOK_DIGEST=aad1b2be11e09366150723b2283e6add48333de6f17fcc4aa5d589f9b231bfaf
+WEBHOOK_DIGEST=b4cb6aff216e4723c5b579c0388fd6bc6bf746d6402624e18da34d7d3487a5fe
 DRY_RUN=${DRY_RUN:-1}
 case "$DRY_RUN" in 0|1) ;; *) echo 'DRY_RUN must be 0 or 1'; exit 1;; esac
 stop() { echo "STOPPED: $*; no later step ran." >&2; exit 1; }

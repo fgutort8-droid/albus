@@ -31,7 +31,7 @@ export async function assertCanGeneratePlan(caller: Caller): Promise<void> {
   // Fail open on an infrastructure error: the trigger still enforces the cap,
   // so the worst case is a wasted generation, not a bypassed limit.
   if (tierError) {
-    console.warn("quota pre-check could not resolve tier:", tierError.message);
+    console.warn("quota pre-check could not resolve tier");
     return;
   }
 
@@ -52,7 +52,7 @@ export async function assertCanGeneratePlan(caller: Caller): Promise<void> {
     .eq("status", "active");
 
   if (error) {
-    console.warn("quota pre-check failed, deferring to the trigger:", error.message);
+    console.warn("quota pre-check failed, deferring to the trigger");
     return;
   }
 
@@ -136,7 +136,6 @@ export async function finalizeAIUsage(
   cacheWriteTokens: number | null = null,
   cacheReadTokens: number | null = null,
 ): Promise<boolean> {
-  let lastFailure = "unknown";
   // A transient database/network edge after a paid provider response should
   // not leave the ledger reserved merely because one write was unlucky. Keep
   // retries bounded and synchronous; the database transition itself is
@@ -154,16 +153,15 @@ export async function finalizeAIUsage(
       });
       if (!error) {
         if (data !== true) {
-          console.error("AI usage finalisation changed no reservation", { usageId, state });
+          console.error("AI usage finalisation changed no reservation", { state });
         }
         return data === true;
       }
-      lastFailure = error.message;
-    } catch (e) {
-      lastFailure = e instanceof Error ? e.message : String(e);
+    } catch {
+      // Retry without retaining arbitrary backend or transport details.
     }
   }
-  console.error("AI usage finalisation failed after three attempts:", lastFailure);
+  console.error("AI usage finalisation failed after three attempts");
   return false;
 }
 

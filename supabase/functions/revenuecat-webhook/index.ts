@@ -151,7 +151,6 @@ async function applyTransfer(
     // No Albus account, or more than one, to receive it. Nothing here can
     // decide between them, and a redelivery would say the same thing.
     console.error("transfer without exactly one Albus destination", {
-      eventID,
       destinations: to.length,
     });
     return jsonResponse({ ok: true, ignored: "transfer_destination" });
@@ -170,12 +169,12 @@ async function applyTransfer(
       : normaliseRevenueCatEnvironment(event.environment),
   });
   if (error) {
-    console.error("transfer_subscriptions failed:", error.message);
+    console.error("transfer_subscriptions failed");
     throw new HttpError(500, "INTERNAL_ERROR");
   }
   if (data === "invalid") {
     // The destination account does not exist any more.
-    console.error("transfer refused", { eventID });
+    console.error("transfer refused");
   }
   return jsonResponse({ ok: true, result: data ?? "unknown" });
 }
@@ -246,7 +245,6 @@ Deno.serve(async (req) => {
     if (!storeCanGrant(event.store)) {
       console.warn("ignoring event from a store that cannot grant", {
         type,
-        store: asString(event.store, 32),
       });
       return jsonResponse({ ok: true, ignored: "store" });
     }
@@ -289,7 +287,7 @@ Deno.serve(async (req) => {
 
     if (error) {
       // Do not leak the database's words to a caller we do not fully trust.
-      console.error("apply_subscription_state failed:", error.message);
+      console.error("apply_subscription_state failed");
       throw new HttpError(500, "INTERNAL_ERROR");
     }
 
@@ -299,13 +297,10 @@ Deno.serve(async (req) => {
     if (outcome.severity === "error") {
       console.error("subscription event not granted", {
         result: data,
-        originalID,
-        userID,
         type,
-        productID,
       });
     } else if (outcome.severity === "warn") {
-      console.warn("subscription event needs watching", { result: data, originalID, type });
+      console.warn("subscription event needs watching", { result: data, type });
     }
 
     // The money, recorded whatever the plan outcome: it moved either way, and
@@ -327,7 +322,7 @@ Deno.serve(async (req) => {
       });
       if (revenueError) {
         // Retried: the plan change above is idempotent and will read `stale`.
-        console.error("record_subscription_revenue failed:", revenueError.message);
+        console.error("record_subscription_revenue failed");
         throw new HttpError(500, "INTERNAL_ERROR");
       }
     }

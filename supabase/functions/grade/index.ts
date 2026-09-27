@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
         .eq("id", input.assignmentId)
         .maybeSingle();
       if (error) {
-        console.error("assignment ownership lookup failed:", error.message);
+        console.error("assignment ownership lookup failed");
         throw new HttpError(500, "INTERNAL_ERROR");
       }
       if (!data) {
