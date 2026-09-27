@@ -3,11 +3,11 @@
 Static privacy (`/privacy/`) and support (`/support/`) pages. No build step.
 The app links to these paths from `AppLinks.swift`.
 
-**Not published yet.** The support address is approved: fgutort8@gmail.com.
-Before publishing, account deletion must be finished and merged. The pages also
-require the payments app and backend changes, because they describe subscriptions,
-Restore purchases and Manage subscription. Do not publish these promises while
-those features are only on an unmerged branch. The owner deploys the backend.
+**Not published yet.** Publish only on the owner's go. The support address is
+approved: fgutort8@gmail.com. Account deletion and the payments features these
+pages describe are merged and live. Publish before testers or students get a
+build with the Cloudflare check (a Turnstile site key), because the policy must
+describe it before it runs.
 
 The privacy audit is recorded in `privacy-audit.md`. Keep it current when changing
 marking, authentication, retention or billing. In particular, saved marking

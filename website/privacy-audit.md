@@ -18,10 +18,23 @@ This is a code-to-copy audit, not certification of provider contracts or product
 
 The approved public contact is **fgutort8@gmail.com**. No outbound message was sent.
 
+## Update — 27 September 2026
+
+Reviewed against `main` at 195f769, after the security fixes (#13, #20) and the
+quiet CAPTCHA check (#22).
+
+| Claim | Evidence and correction |
+| --- | --- |
+| Cloudflare runs a check at set-up | **Added.** `ios/App/Albus/Services/CaptchaService.swift` and `CaptchaPrefetch.swift` load `challenges.cloudflare.com/turnstile/v0/api.js` in a `WKWebView` with a non-persistent data store, during onboarding, when the build has a Turnstile site key. The pass goes to `signInAnonymously(captchaToken:)`, and Supabase verifies it with Cloudflare. Cloudflare's [Turnstile privacy notice](https://www.cloudflare.com/turnstile-privacy-policy/) (updated 18 June 2025) lists the signals (IP address, TLS fingerprint, User-Agent, site key and origin) and a second purpose, improving its bot detection. Copy names Cloudflare, both purposes, and that our server receives only the pass. |
+| Accounts last until you delete them | **Incomplete.** `reap_abandoned_anonymous_users(30)` in `20260925140000_maintenance_account_guards.sql` deletes anonymous accounts with an untouched profile, no owned rows and no activity for 30 days. Copy now says a never-used account is removed automatically. |
+| Retention periods | Unchanged and confirmed: `prune_security_data(90, 180)` removes device/IP codes 90 days after the last observation and security records after 180 days; failed or reserved AI records go after 30 days; rate-limit windows after 2 hours (`20260925170000_subscription_ordering.sql`). |
+
 ## Publication gate
 
-Do not publish yet. Deletion must be merged, and the owner must deploy its RPC.
-The pages also describe the unmerged payments backend/app (PRs #2 and #3).
-This work does not authorize merging those unrelated changes or deploying production.
-The owner must verify actual provider contractual settings and purchase readiness
-before publication; code alone cannot certify those claims.
+Account deletion (#9) and the payments backend and app (#2, #3) are merged and
+live, so the earlier conditions are met. Publishing still needs the owner's go,
+and the owner should confirm the provider settings that code cannot certify.
+
+The Cloudflare paragraph describes builds made with a Turnstile site key. Publish
+this policy **before** testers or students get such a build: disclosing the
+check before it runs is safe, running it before it is disclosed is not.
