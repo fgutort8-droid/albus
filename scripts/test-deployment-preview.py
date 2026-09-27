@@ -27,6 +27,12 @@ else
 fi
 ''')
         binary.chmod(0o700)
+        # Each dated script pins the exact server code it was reviewed with.
+        # Once main moves on, the script rightly refuses to run and there is
+        # nothing left to test. That must not fail every later pull request.
+        baseline = self.run_preview()
+        if baseline.returncode != 0 and 'configuration differs' in baseline.stdout + baseline.stderr:
+            self.skipTest(self.script + ': server code has changed since this one-time deployment was reviewed')
 
     def run_preview(self):
         env = dict(os.environ, DRY_RUN='1', ALBUS_SOURCE=str(self.root / 'source'),
