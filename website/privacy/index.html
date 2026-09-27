@@ -24,8 +24,8 @@
       <li>Albus stores your assignments, plans, saved rubrics and marking results to provide the app's features.</li>
       <li>When you ask for an AI plan or for marking, the text that request needs is sent to Anthropic,
           which runs the AI. Anthropic does not use API content for model training by default under its commercial terms.</li>
-      <li>We don't save the full submission in our database. Saved feedback can include short excerpts from your work.</li>
-      <li>A security check from Cloudflare runs once while you set up Albus, to stop programs creating accounts in bulk.</li>
+      <li>We don't save the full submission in our database. Saved feedback can include excerpts from your work.</li>
+      <li>A security check from Cloudflare runs while you set up Albus, to stop programs creating accounts in bulk.</li>
       <li>No ads, no advertising identifier and no tracking across apps or websites.</li>
       <li>Apple handles payments. We never see your card or your Apple ID.</li>
     </ul>
@@ -64,7 +64,10 @@
         The extracted text, relevant title and instructions, and the rubric you chose are sent to Anthropic. The file or photo itself never
         leaves your phone.</li>
     <li>We store the mark and the feedback, and a fingerprint (a one-way hash) of the text, which lets us
-        recognise the same work sent twice. We do not save the full submission in our database, but saved feedback can include short excerpts (up to 400 characters per criterion), as well as your work's title. Our AI provider also processes the submission under its own retention terms.</li>
+        recognise the same work sent twice. We do not save the full submission in our database. Saved feedback can
+        quote your work, though: each criterion can include a quotation of up to 400 characters, and the written
+        comments and feedback can repeat or paraphrase other parts of it. It also keeps your work's title. Our AI
+        provider also processes the submission under its own retention terms.</li>
     <li>For every AI request we record its kind, the AI model used, its size in tokens and what it cost.
         These records contain none of your work. We use them to apply your plan's limits and to keep the
         cost of running Albus under control.</li>
@@ -87,7 +90,9 @@
      <em>Why: our legitimate interest in preventing abuse and keeping Albus affordable, including free.</em></p>
   <p>When you set up Albus, it also runs a check from Cloudflare, called Turnstile, that tells people apart
      from programs creating accounts in bulk. It runs in the background while you answer the setup questions,
-     and asks you to tick a box only if it isn't sure. To decide, Cloudflare processes signals such as your
+     and asks you to tick a box only if it isn't sure. It can run more than once during set-up: a pass is only
+     good for a few minutes, so a new check runs if set-up takes longer, if a check stalls, or if creating the
+     account fails. To decide, Cloudflare processes signals such as your
      IP address and technical details of your phone's connection and software, like its iOS version. Cloudflare also uses
      these signals to improve its bot detection, as its
      <a href="https://www.cloudflare.com/turnstile-privacy-policy/">Turnstile privacy notice</a> describes.
