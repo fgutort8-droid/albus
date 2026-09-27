@@ -9,6 +9,8 @@ final class ResilientAuthStorage: AuthLocalStorage, @unchecked Sendable {
     private let fallback: UserDefaults
     private let lock = NSRecursiveLock()
     private var failed = false
+    private var lastRetrievedKey: String?
+    private var migratingLegacy = false
     private let fallbackPrefix = "albus.auth."
 
     init(service: String = "com.felipegutierrez.albus.auth",
@@ -24,6 +26,8 @@ final class ResilientAuthStorage: AuthLocalStorage, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         failed = false
+        migratingLegacy = true
+        defer { migratingLegacy = false }
         for name in fallback.dictionaryRepresentation().keys where name.hasPrefix(fallbackPrefix) {
             // Visit every copy even if one migration fails; failure stays latched.
             _ = try? retrieve(key: String(name.dropFirst(fallbackPrefix.count)))
@@ -45,12 +49,21 @@ final class ResilientAuthStorage: AuthLocalStorage, @unchecked Sendable {
     }
 
     func store(key: String, value: Data) throws {
-        try operation(key: key) { try keychain.store(key: key, value: value) }
+        try operation(key: key) {
+            try keychain.store(key: key, value: value)
+            if Self.refreshToken(in: value) != nil,
+               try keychain.retrieve(key: recoveryKey(key)) != nil {
+                try keychain.remove(key: recoveryKey(key))
+            }
+        }
     }
 
     func retrieve(key: String) throws -> Data? {
         try operation(key: key) {
-            if let data = try keychain.retrieve(key: key), !data.isEmpty { return data }
+            if !migratingLegacy { lastRetrievedKey = key }
+            if let data = try keychain.retrieve(key: key), !data.isEmpty {
+                return data
+            }
             guard let legacy = fallback.data(forKey: fallbackPrefix + key), !legacy.isEmpty else { return nil }
             // Only return an old session after it has been secured successfully.
             try keychain.store(key: key, value: legacy)
@@ -59,7 +72,43 @@ final class ResilientAuthStorage: AuthLocalStorage, @unchecked Sendable {
     }
 
     func remove(key: String) throws {
-        try operation(key: key) { try keychain.remove(key: key) }
+        try operation(key: key) {
+            if let data = try keychain.retrieve(key: key), Self.refreshToken(in: data) != nil {
+                // The SDK removes sessions on terminal refresh responses. Keep
+                // an inert Keychain-only copy until the app settles that result,
+                // so process termination cannot lose the recovery evidence.
+                try keychain.store(key: recoveryKey(key), value: data)
+            }
+            try keychain.remove(key: key)
+        }
+    }
+
+    /// Never returned to the SDK as a live session. The app must explicitly
+    /// retry refresh to establish server rejection; local absence is insufficient.
+    func recoveryRefreshToken() throws -> String? {
+        lock.lock(); defer { lock.unlock() }
+        guard let key = lastRetrievedKey else { return nil }
+        return try operation(key: recoveryKey(key)) {
+            try keychain.retrieve(key: recoveryKey(key)).flatMap(Self.refreshToken(in:))
+        }
+    }
+
+    func clearRecovery() throws {
+        lock.lock(); defer { lock.unlock() }
+        guard let key = lastRetrievedKey else { return }
+        try operation(key: recoveryKey(key)) { try keychain.remove(key: recoveryKey(key)) }
+    }
+
+    private func recoveryKey(_ key: String) -> String { "albus.recovery." + key }
+
+    private static func refreshToken(in data: Data) -> String? {
+        guard let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let user = value["user"] as? [String: Any],
+              let id = user["id"] as? String, UUID(uuidString: id) != nil,
+              let token = (value["refreshToken"] ?? value["refresh_token"]) as? String,
+              !token.isEmpty else { return nil }
+        // The SDK stores camelCase; earlier HTTP-shaped sessions use snake_case.
+        return token
     }
 
     private func operation<T>(key: String, _ body: () throws -> T) throws -> T {

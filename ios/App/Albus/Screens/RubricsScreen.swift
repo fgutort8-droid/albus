@@ -119,7 +119,7 @@ struct RubricsScreen: View {
     }
 
     private func remove(_ rubric: Rubric) {
-        RubricWriter.delete(rubric, context: context)
+        RubricWriter.delete(rubric, context: context, onFailure: { syncFailure = $0 })
         deleting = nil
     }
 }

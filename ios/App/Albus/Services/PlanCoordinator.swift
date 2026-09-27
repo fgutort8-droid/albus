@@ -328,7 +328,7 @@ final class PlanCoordinator {
             return missed
         } catch {
             // A failed sweep must not stop the screen rendering.
-            print("[Albus] missed-session sweep failed: \(error)")
+            print("[Albus] missed-session sweep failed")
             return 0
         }
     }
@@ -503,11 +503,11 @@ final class PlanCoordinator {
         return PlanBridge.completionLogs(from: records)
     }
 
-    private func save(_ context: ModelContext, _ what: String) {
+    private func save(_ context: ModelContext, _ what: StaticString) {
         do { try context.save() } catch {
             // Losing a write silently is worse than a visible failure.
             status = .failed("Couldn't save.")
-            print("save failed during \(what): \(error)")
+            print("save failed during \(what)")
         }
     }
 }

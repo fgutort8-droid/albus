@@ -86,7 +86,7 @@ final class SessionService {
         credentialRejected = false
         do {
             try storage.beginAttempt()
-            let session = try await client.auth.session
+            let session = try await Self.validatedSession(client, storage: storage)
             try storage.checkHealth()
             state = .signedIn(userID: session.user.id,
                               isAnonymous: session.user.isAnonymous)
@@ -99,8 +99,15 @@ final class SessionService {
                 state = .failed(SessionStorageUnavailable().localizedDescription)
                 return
             }
-            credentialRejected = !(error is URLError)
-            state = .needsAccount
+            if error is AccountUnreachable {
+                credentialRejected = true
+                state = .needsAccount
+            } else if (error as? AuthError) == .sessionMissing {
+                // No credential was available; absence alone proves no deletion.
+                state = .needsAccount
+            } else {
+                state = .failed("Couldn't restore your sign-in. Please try again.")
+            }
         }
     }
 
@@ -124,9 +131,11 @@ final class SessionService {
             try storage.beginAttempt()
             try storage.checkWritable()
             // A retry after temporarily unavailable storage must restore first.
-            if client.auth.currentSession != nil {
+            let current = client.auth.currentSession
+            let recoveryToken = try storage.recoveryRefreshToken()
+            if current != nil || (recoveryToken != nil && state != .needsAccount) {
                 try storage.checkHealth()
-                let existing = try await client.auth.session
+                let existing = try await Self.validatedSession(client, storage: storage)
                 try storage.checkHealth()
                 state = .signedIn(userID: existing.user.id, isAnonymous: existing.user.isAnonymous)
                 return true
@@ -142,7 +151,12 @@ final class SessionService {
                               isAnonymous: session.user.isAnonymous)
             return true
         } catch {
-            state = .failed(Self.describe(error))
+            if error is AccountUnreachable {
+                credentialRejected = true
+                state = .needsAccount
+            } else {
+                state = .failed(Self.describe(error))
+            }
             return false
         }
     }
@@ -163,39 +177,32 @@ final class SessionService {
     /// Xcode 16.4 rejects and Xcode 26 allows. Here the response is consumed
     /// where it is produced, and only success or an error comes back.
     private nonisolated static func requestDeletion(_ client: SupabaseClient, storage: ResilientAuthStorage) async throws {
-        do {
-            try await client.rpc("delete_my_account").execute()
-        } catch {
-            let unreachable = isUnreachable(error, client: client)
-            try storage.checkHealth()
-            guard unreachable else { throw error }
-            throw AccountUnreachable()
-        }
+        // The SDK's RPC adapter suppresses refresh errors. Resolve credentials
+        // explicitly so a temporary refresh failure cannot become proof of loss.
+        _ = try await validatedSession(client, storage: storage)
+        try await client.rpc("delete_my_account").execute()
+        try storage.checkHealth()
     }
 
-    /// Whether this failure means the account can no longer be reached from
-    /// this device.
-    ///
-    /// The case this exists for: the delete committed on the server and the
-    /// answer was lost. The student retries an hour later, by which time the
-    /// access token has expired and the refresh token died with the account,
-    /// so every attempt from here on is refused — and without this, the app
-    /// asks them to try again forever while their work stays on the phone.
-    ///
-    /// A network failure is never evidence: it is the ordinary way a phone
-    /// fails, and reading it as "deleted" would erase the work of anyone who
-    /// tapped Delete in a lift and changed their mind.
-    private nonisolated static func isUnreachable(_ error: Error, client: SupabaseClient) -> Bool {
-        if error is URLError { return false }
-        // Strongest signal: the SDK abandons a stored session only once the
-        // server has definitively refused it.
-        if client.auth.currentSession == nil { return true }
-        if let postgrest = error as? PostgrestError {
-            // 28000 is `delete_my_account`'s own NOT_SIGNED_IN; PostgREST's
-            // PGRST3xx group is every JWT rejection.
-            return postgrest.code == "28000" || postgrest.code?.hasPrefix("PGRST3") == true
+    private nonisolated static func validatedSession(_ client: SupabaseClient,
+                                                     storage: ResilientAuthStorage) async throws -> Session {
+        let current = client.auth.currentSession
+        try storage.checkHealth()
+        if let current, !current.isExpired { return current }
+        guard let token = try current?.refreshToken ?? storage.recoveryRefreshToken() else {
+            throw AuthError.sessionMissing
         }
-        return error is AuthError
+        do {
+            // A supplied credential distinguishes terminal server rejection from
+            // the SDK's identical error for an ordinarily empty local store.
+            let session = try await client.auth.refreshSession(refreshToken: token)
+            try storage.checkHealth()
+            return session
+        } catch {
+            try storage.checkHealth()
+            if (error as? AuthError) == .sessionMissing { throw AccountUnreachable() }
+            throw error
+        }
     }
 
     func signOutDeletedAccount() async throws {
@@ -210,6 +217,7 @@ final class SessionService {
             }
         }
         try storage.checkHealth()
+        try storage.clearRecovery()
         state = .needsAccount
     }
 

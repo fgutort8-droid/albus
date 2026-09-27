@@ -209,6 +209,154 @@ struct SessionStorageTests {
         #expect(session.userID == nil)
     }
 
+    @MainActor @Test("transient refresh failures preserve the account and pending deletion", arguments: [0, 1, 2])
+    func transientRefresh(kind: Int) async throws {
+        let defaults = isolated(), keychain = MemoryKeychain()
+        var payload = try #require(JSONSerialization.jsonObject(with: SessionTestTransport.sessionData) as? [String: Any])
+        payload["expires_at"] = Date().timeIntervalSince1970 - 3600
+        try keychain.store(key: "sb-session-unit-auth-token", value: JSONSerialization.data(withJSONObject: payload))
+        let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
+        let transport: URLProtocol.Type = kind == 0 ? ServerFailureTransport.self
+            : kind == 1 ? MalformedRefreshTransport.self : TimeoutRefreshTransport.self
+        let client = Self.client(storage, transport: transport)
+        let session = SessionService(client: client, storage: storage)
+        defaults.set(true, forKey: "albus.accountDeletion.requested")
+        await session.start()
+        #expect(!session.credentialRejected)
+        if case .failed = session.state {} else { Issue.record("Transient failure must offer retry, not account replacement") }
+        let deletion = AccountDeletion(defaults: defaults)
+        deletion.adoptLostDeletion(credentialRejected: session.credentialRejected)
+        #expect(!deletion.requiresCleanup)
+        #expect(client.auth.currentSession != nil)
+        #expect(await session.createAccount() == false)
+        do {
+            try await session.deleteRemoteAccount()
+            Issue.record("Transient authentication must not confirm deletion")
+        } catch {
+            #expect(!(error is AccountUnreachable))
+        }
+    }
+
+    @MainActor @Test("ordinary credential absence is not a confirmed deletion")
+    func ordinaryAbsence() async {
+        let defaults = isolated()
+        let storage = ResilientAuthStorage(fallback: defaults, keychain: MemoryKeychain())
+        let session = SessionService(client: Self.client(storage), storage: storage)
+        defaults.set(true, forKey: "albus.accountDeletion.requested")
+        await session.start()
+        #expect(session.state == .needsAccount)
+        #expect(!session.credentialRejected)
+        let deletion = AccountDeletion(defaults: defaults)
+        deletion.adoptLostDeletion(credentialRejected: session.credentialRejected)
+        #expect(!deletion.requiresCleanup)
+    }
+
+    @MainActor @Test("terminal refresh rejection remains provable after SDK cleanup")
+    func initialRefreshRace() async throws {
+        let keychain = MemoryKeychain()
+        var payload = try #require(JSONSerialization.jsonObject(with: SessionTestTransport.sessionData) as? [String: Any])
+        payload["expires_at"] = Date().timeIntervalSince1970 - 3600
+        try keychain.store(key: "sb-session-unit-auth-token", value: JSONSerialization.data(withJSONObject: payload))
+        let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+        let client = Self.client(storage, transport: RejectedRefreshTransport.self)
+        _ = try? await client.auth.session
+        #expect(client.auth.currentSession == nil)
+        let session = SessionService(client: client, storage: storage)
+        await session.start()
+        #expect(session.credentialRejected)
+        #expect(session.state == .needsAccount)
+    }
+
+    @Test("remembered refresh credentials remain scoped to the SDK storage key")
+    func observedCredentialScope() throws {
+        let storage = ResilientAuthStorage(fallback: isolated(), keychain: MemoryKeychain())
+        try storage.store(key: "project-a", value: SessionTestTransport.sessionData)
+        _ = try storage.retrieve(key: "project-a")
+        try storage.remove(key: "project-a")
+        #expect(try storage.recoveryRefreshToken() != nil)
+        _ = try storage.retrieve(key: "project-b")
+        #expect(try storage.recoveryRefreshToken() == nil)
+        try storage.clearRecovery()
+        _ = try storage.retrieve(key: "project-b")
+        #expect(try storage.recoveryRefreshToken() == nil)
+    }
+
+    @MainActor @Test("SDK-encoded credentials retain terminal rejection provenance")
+    func sdkEncodedRecovery() async throws {
+        let keychain = MemoryKeychain()
+        var value = try AuthClient.Configuration.jsonDecoder.decode(Session.self, from: SessionTestTransport.sessionData)
+        value.expiresAt = Date().timeIntervalSince1970 - 3600
+        try keychain.store(key: "sb-session-unit-auth-token", value: JSONEncoder().encode(value))
+        let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+        let client = Self.client(storage, transport: RejectedRefreshTransport.self)
+        _ = try? await client.auth.session
+        #expect(client.auth.currentSession == nil)
+        let session = SessionService(client: client, storage: storage)
+        await session.start()
+        #expect(session.credentialRejected)
+    }
+
+    @MainActor @Test("rejection recovery survives recreating storage and client")
+    func durableRejectionRecovery() async throws {
+        let defaults = isolated(), keychain = MemoryKeychain()
+        var payload = try #require(JSONSerialization.jsonObject(with: SessionTestTransport.sessionData) as? [String: Any])
+        payload["expires_at"] = Date().timeIntervalSince1970 - 3600
+        try keychain.store(key: "sb-session-unit-auth-token", value: JSONSerialization.data(withJSONObject: payload))
+        defaults.set(true, forKey: "albus.accountDeletion.requested")
+        do {
+            let firstStorage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
+            let firstClient = Self.client(firstStorage, transport: RejectedRefreshTransport.self)
+            _ = try? await firstClient.auth.session
+            #expect(firstClient.auth.currentSession == nil)
+        }
+        let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: RejectedRefreshTransport.self), storage: storage)
+        await session.start()
+        let deletion = AccountDeletion(defaults: defaults)
+        deletion.adoptLostDeletion(credentialRejected: session.credentialRejected)
+        #expect(deletion.requiresCleanup)
+    }
+
+    @Test("replacement credentials retire recovery copies and confirmed cleanup removes them")
+    func recoveryLifecycle() throws {
+        let defaults = isolated(), keychain = MemoryKeychain()
+        let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
+        try storage.store(key: "project", value: SessionTestTransport.sessionData)
+        _ = try storage.retrieve(key: "project")
+        try storage.remove(key: "project")
+        #expect(try storage.recoveryRefreshToken() == "unit-refresh")
+        try storage.store(key: "project", value: SessionTestTransport.sessionData)
+        #expect(try storage.recoveryRefreshToken() == nil)
+        try storage.remove(key: "project")
+        try storage.clearRecovery()
+        #expect(try storage.recoveryRefreshToken() == nil)
+        #expect(try keychain.retrieve(key: "albus.recovery.project") == nil)
+        #expect(!defaults.dictionaryRepresentation().keys.contains { $0.hasPrefix("albus.auth.") })
+    }
+
+    @MainActor @Test("a terminal rejection during retry permits pending deletion recovery")
+    func terminalDuringRetry() async throws {
+        SwitchingRefreshTransport.mode.setRejected(false)
+        defer { SwitchingRefreshTransport.mode.setRejected(false) }
+        let defaults = isolated(), keychain = MemoryKeychain()
+        var payload = try #require(JSONSerialization.jsonObject(with: SessionTestTransport.sessionData) as? [String: Any])
+        payload["expires_at"] = Date().timeIntervalSince1970 - 3600
+        try keychain.store(key: "sb-session-unit-auth-token", value: JSONSerialization.data(withJSONObject: payload))
+        let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: SwitchingRefreshTransport.self), storage: storage)
+        defaults.set(true, forKey: "albus.accountDeletion.requested")
+        await session.start()
+        #expect(!session.credentialRejected)
+        if case .failed = session.state {} else { Issue.record("Temporary failure should offer retry") }
+        SwitchingRefreshTransport.mode.setRejected(true)
+        #expect(await session.createAccount() == false)
+        #expect(session.credentialRejected)
+        #expect(session.state == .needsAccount)
+        let deletion = AccountDeletion(defaults: defaults)
+        deletion.adoptLostDeletion(credentialRejected: session.credentialRejected)
+        #expect(deletion.requiresCleanup)
+    }
+
     private static func client(_ storage: ResilientAuthStorage, transport: URLProtocol.Type = SessionTestTransport.self) -> SupabaseClient {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [transport]
@@ -268,6 +416,54 @@ private final class RejectedRefreshTransport: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(#"{"error_code":"refresh_token_not_found","msg":"Mock refresh rejection"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private class ServerFailureTransport: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    var status: Int { 500 }
+    var body: Data { Data(#"{"code":"unexpected_failure","message":"Synthetic server failure"}"#.utf8) }
+    override func startLoading() {
+        #expect(request.url?.path != "/auth/v1/signup")
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+private final class MalformedRefreshTransport: ServerFailureTransport, @unchecked Sendable {
+    override var status: Int { 200 }
+    override var body: Data { Data("{broken-response".utf8) }
+}
+private final class TimeoutRefreshTransport: ServerFailureTransport, @unchecked Sendable {
+    override func startLoading() {
+        client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+    }
+}
+
+private final class SwitchingRefreshTransport: URLProtocol, @unchecked Sendable {
+    final class Mode: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func setRejected(_ rejected: Bool) { lock.lock(); defer { lock.unlock() }; value = rejected }
+        var rejected: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    }
+    static let mode = Mode()
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        #expect(request.url?.path != "/auth/v1/signup")
+        if !Self.mode.rejected {
+            client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+            return
+        }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"error_code":"refresh_token_not_found","msg":"Synthetic rejection"}"#.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
