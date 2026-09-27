@@ -36,6 +36,7 @@ jobs:
           python3 scripts/check-dependency-controls.py
           python3 scripts/test-dependency-controls.py
           python3 scripts/test-deployment-preview.py
+          python3 scripts/tools/test_fetch_logos.py
       - name: Scan for live credentials
         run: |
           set -euo pipefail
