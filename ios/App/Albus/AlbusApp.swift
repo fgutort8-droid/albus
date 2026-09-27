@@ -30,7 +30,7 @@ struct AlbusApp: App {
         do {
             return try ModelContainer(for: schema, configurations: onDisk)
         } catch {
-            print("[Albus] Local store would not open: \(error). Rebuilding it.")
+            print("[Albus] Local store would not open. Rebuilding it.")
         }
 
         // Second attempt: quarantine whatever is there and start clean. Renamed
@@ -40,9 +40,10 @@ struct AlbusApp: App {
         do {
             return try ModelContainer(for: schema, configurations: onDisk)
         } catch {
-            print("[Albus] Rebuilt store still would not open: \(error). Running in memory.")
+            print("[Albus] Rebuilt store still would not open. Running in memory.")
         }
 
+        AccountLocalData.recoveryStoreURL = onDisk.url
         // Last resort: an in-memory store. The app works for this launch and
         // re-syncs; a crash here would be strictly worse than a session that
         // does not persist.
@@ -54,7 +55,7 @@ struct AlbusApp: App {
         } catch {
             // Unreachable short of the schema itself being invalid, which is a
             // programming error a build cannot ship past unnoticed.
-            fatalError("The data model itself is invalid: \(error)")
+            fatalError("The data model itself is invalid")
         }
     }
 
@@ -131,8 +132,12 @@ struct AlbusApp: App {
                     // pending, and until it lands those rows still count
                     // against the student's active-plan limit.
                     await PendingDeletions.flush()
+                    await PendingRubricDeletions.flush(context: container.mainContext)
                     await notifications.registerCategories()
                     await rebuildNotifications()
+                }
+                .onChange(of: session.credentialRejected) { _, rejected in
+                    deletion.adoptLostDeletion(credentialRejected: rejected)
                 }
                 .onChange(of: scenePhase) { _, phase in
                     guard !deletion.requiresCleanup, session.userID != nil else { return }
@@ -140,7 +145,10 @@ struct AlbusApp: App {
                     case .active:
                         notifications.appDidBecomeActive()
                         catchUp()
-                        Task { await rebuildNotifications() }
+                        Task {
+                            await PendingRubricDeletions.flush(context: container.mainContext)
+                            await rebuildNotifications()
+                        }
                     case .background:
                         // The single most important rebuild point: the last
                         // chance to get the pending set right before the app is

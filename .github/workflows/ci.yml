@@ -22,12 +22,21 @@ on:
   # against, so it skips itself here.
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   secrets-scan:
     name: No secrets committed
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Verify dependency controls
+        run: |
+          python3 scripts/check-dependency-controls.py
+          python3 scripts/test-dependency-controls.py
+          python3 scripts/test-deployment-preview.py
+          bash scripts/tests/deploy-subscriptions-dry-run.sh
       - name: Scan for live credentials
         run: |
           set -euo pipefail
@@ -44,7 +53,7 @@ jobs:
     name: Every table has RLS
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Assert RLS on every created table
         run: |
           set -euo pipefail
@@ -77,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: { fetch-depth: 0 }
       - name: Reject edits to already-applied migrations
         run: |
@@ -100,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     container: swift:6.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: swift test
         working-directory: ios/AlbusCore
         run: swift test
@@ -109,7 +118,7 @@ jobs:
     name: iOS build and tests
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - id: probe
         run: |
           if [ -f ios/project.yml ]; then
@@ -153,7 +162,7 @@ jobs:
           # shared runner can fail with "Timed out while launching
           # application", which says nothing about the code. A test that is
           # genuinely broken fails both attempts and still turns the run red.
-          xcodebuild test -project Albus.xcodeproj -scheme Albus -destination "id=$UDID" \
+          xcodebuild test -onlyUsePackageVersionsFromResolvedFile -project Albus.xcodeproj -scheme Albus -destination "id=$UDID" \
             -skip-testing:AlbusUITests/GraderUITests \
             -skip-testing:AlbusUITests/CoreLoopUITests \
             -skip-testing:AlbusUITests/PopupChromeUITests \
@@ -166,9 +175,9 @@ jobs:
     name: Edge function tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: denoland/setup-deno@v2
-        with: { deno-version: v2.x }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2
+        with: { deno-version: v2.9.5 }
       - name: Type-check, lint and test the edge functions
         working-directory: supabase/functions
         # These tests never ran in CI before, so a regression in prompt

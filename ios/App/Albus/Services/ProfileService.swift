@@ -10,9 +10,11 @@ import AlbusCore
 struct ProfileService {
 
     private let client: SupabaseClient?
+    private let log: @Sendable (String) -> Void
 
-    init(client: SupabaseClient? = Backend.shared) {
+    init(client: SupabaseClient? = Backend.shared, log: @escaping @Sendable (String) -> Void = { print($0) }) {
         self.client = client
+        self.log = log
     }
 
     /// The arguments of `create_course(p_display_name, p_color_key,
@@ -50,7 +52,7 @@ struct ProfileService {
             .execute()
             .value
         } catch {
-            print("[Albus] course sync failed: \(error)")
+            log("[Albus] course sync failed")
             return nil
         }
     }

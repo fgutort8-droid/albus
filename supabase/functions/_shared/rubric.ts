@@ -1,6 +1,6 @@
 // _shared/rubric.ts — fetch the rubric a breakdown or a grading is grounded in.
 
-import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.112.3";
 import type { RubricContext } from "./prompt.ts";
 
 /** The rubric the student saved and attached to this assignment, if any. */
@@ -17,7 +17,7 @@ export async function loadPersonalRubric(
     .maybeSingle();
 
   if (error || !data) {
-    if (error) console.warn("personal rubric lookup failed, continuing generic:", error.message);
+    if (error) console.warn("personal rubric lookup failed, continuing generic");
     return null;
   }
 
@@ -75,7 +75,7 @@ export async function resolveGradingRubric(
   // No row means RLS refused it or it does not exist. Both are "we have no
   // rubric", and neither is worth distinguishing to the caller.
   if (error || !data) {
-    if (error) console.warn("assignment lookup failed, grading blind:", error.message);
+    if (error) console.warn("assignment lookup failed, grading blind");
     return { rubric: null, basis: "blind" };
   }
 

@@ -13,16 +13,19 @@ on:
       - 'scripts/security-concurrency-local.sh'
       - '.github/workflows/database-security.yml'
 
+permissions:
+  contents: read
+
 jobs:
   adversarial-database:
     name: RLS, quota and concurrency attacks
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: supabase/setup-cli@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1
         with:
-          version: latest
+          version: 2.98.2
       - name: Rebuild every migration
         run: supabase start
       - name: Rebuild the schema from migrations alone

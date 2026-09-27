@@ -35,6 +35,8 @@ enum Backend {
         }
     }()
 
+    static let authStorage = ResilientAuthStorage()
+
     private static func makeClient() throws -> SupabaseClient {
         let info = Bundle.main.infoDictionary ?? [:]
 
@@ -61,10 +63,8 @@ enum Backend {
                 // headroom is harmless everywhere else, and a per-call timeout
                 // is not something this SDK exposes.
                 auth: .init(
-                    // Keychain where available (survives app deletion, so a
-                    // reinstall cannot reset the free quota), UserDefaults only
-                    // when Keychain is genuinely unavailable. See the type.
-                    storage: ResilientAuthStorage(),
+                    // Credentials are persisted only in Keychain.
+                    storage: authStorage,
                     autoRefreshToken: true
                 ),
                 global: .init(session: Self.patientSession)

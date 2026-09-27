@@ -102,13 +102,41 @@ final class AccountDeletion {
 
 @MainActor
 enum AccountLocalData {
+    /// Set only when the app falls back from its own disk store to memory.
+    static var recoveryStoreURL: URL?
     static func erase(context: ModelContext, preferences: Preferences, defaults: UserDefaults = .standard) throws {
         context.rollback()
         for model in AlbusSchema.models {
             try context.delete(model: model)
         }
         try context.save()
+        let diskStores = context.container.configurations.filter { !$0.isStoredInMemoryOnly }.map(\.url)
+        for url in diskStores { try removeQuarantinedStores(at: url) }
+        if diskStores.isEmpty, let url = recoveryStoreURL {
+            try removeQuarantinedStores(at: url, includingOriginal: true)
+        }
         preferences.resetAfterAccountDeletion()
         PendingDeletions.clear(defaults: defaults)
+        PendingRubricDeletions.clear(defaults: defaults)
     }
+
+    static func removeQuarantinedStores(at store: URL, includingOriginal: Bool = false) throws {
+        let fm = FileManager.default
+        let directory = store.deletingLastPathComponent()
+        guard fm.fileExists(atPath: directory.path) else { return }
+        let prefix = NSRegularExpression.escapedPattern(for: store.lastPathComponent)
+        let pattern = "^" + prefix + #"\.corrupt-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(?:-wal|-shm)?$"#
+        for file in try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]) {
+            let original = ["", "-wal", "-shm"].contains { file.lastPathComponent == store.lastPathComponent + $0 }
+            guard (includingOriginal && original)
+                || file.lastPathComponent.range(of: pattern, options: .regularExpression) != nil else { continue }
+            let values = try file.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            // Never recursively remove a directory or follow a symlink.
+            guard values.isDirectory != true || values.isSymbolicLink == true else {
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            try fm.removeItem(at: file)
+        }
+    }
+
 }

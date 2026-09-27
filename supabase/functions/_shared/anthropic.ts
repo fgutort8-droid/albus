@@ -21,15 +21,46 @@ function getClient(): Anthropic {
   return client;
 }
 
-export interface GenerationResult {
-  raw: unknown;
-  model: string;
+export interface GenerationUsage {
   inputTokens: number;
   outputTokens: number;
-  /** Billed at 1.25x the input rate — dearer per token than fresh input. */
   cacheWriteTokens: number;
-  /** Billed at 0.10x the input rate. */
   cacheReadTokens: number;
+}
+
+export interface GenerationResult extends GenerationUsage {
+  raw: unknown;
+  model: string;
+}
+
+class ProviderResponseError extends HttpError {
+  constructor(error: HttpError, readonly usage: GenerationUsage | null) {
+    super(error.status, error.code, error.message);
+  }
+}
+
+/** Only validated billing counters cross this boundary, never response content. */
+export function providerUsage(error: unknown): GenerationUsage | null {
+  return error instanceof ProviderResponseError ? error.usage : null;
+}
+
+function readUsage(value: Anthropic.Usage): GenerationUsage | null {
+  if (!value) return null;
+  const counters = [
+    value.input_tokens,
+    value.output_tokens,
+    value.cache_creation_input_tokens ?? 0,
+    value.cache_read_input_tokens ?? 0,
+  ];
+  if (!counters.every((n) => Number.isSafeInteger(n) && n >= 0 && n <= 2147483647)) {
+    return null;
+  }
+  return {
+    inputTokens: counters[0],
+    outputTokens: counters[1],
+    cacheWriteTokens: counters[2],
+    cacheReadTokens: counters[3],
+  };
 }
 
 export async function generateBreakdown(
@@ -37,6 +68,7 @@ export async function generateBreakdown(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<GenerationResult> {
+  let usage: GenerationUsage | null = null;
   try {
     const response = await getClient().messages.create({
       model,
@@ -55,6 +87,7 @@ export async function generateBreakdown(
       },
     } as Anthropic.MessageCreateParamsNonStreaming);
 
+    usage = readUsage(response.usage);
     if (response.stop_reason === "refusal") {
       throw new HttpError(422, "REFUSED", "The assignment could not be planned.");
     }
@@ -71,24 +104,19 @@ export async function generateBreakdown(
       throw new HttpError(502, "MALFORMED_RESPONSE", "Model output was not valid JSON");
     }
 
-    const u = response.usage;
-    return {
-      raw,
-      model,
-      inputTokens: u.input_tokens ?? 0,
-      outputTokens: u.output_tokens ?? 0,
-      cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
-      cacheReadTokens: u.cache_read_input_tokens ?? 0,
-    };
+    if (!usage) {
+      throw new HttpError(502, "INVALID_PROVIDER_USAGE", "Provider accounting is unavailable.");
+    }
+    return { raw, model, ...usage };
   } catch (e) {
-    if (e instanceof HttpError) throw e;
+    if (e instanceof HttpError) throw new ProviderResponseError(e, usage);
     if (e instanceof Anthropic.APIError) {
       const status = e.status ?? 0;
 
       // 429 and 5xx are genuinely transient: the client should fall back to
       // its local planner and try again later.
       if (status === 429 || status >= 500) {
-        console.error("anthropic transient error", status, e.message);
+        console.error("anthropic transient error", status);
         throw new HttpError(503, "UPSTREAM_UNAVAILABLE", "Plan generation is unavailable.");
       }
 
@@ -97,9 +125,14 @@ export async function generateBreakdown(
       console.error(
         "ANTHROPIC REQUEST REJECTED (this is a bug in our request):",
         status,
-        e.message,
       );
       throw new HttpError(502, "UPSTREAM_REJECTED", "Plan generation failed.");
+    }
+    if (usage) {
+      throw new ProviderResponseError(
+        new HttpError(502, "MALFORMED_RESPONSE", "Provider response was unusable."),
+        usage,
+      );
     }
     throw e;
   }
@@ -122,6 +155,7 @@ export async function gradeWork(
   /** Chosen by the caller from the grading basis — see `gradeModelFor`. */
   model: string,
 ): Promise<GenerationResult> {
+  let usage: GenerationUsage | null = null;
   try {
     const response = await getClient().messages.create({
       model,
@@ -143,6 +177,7 @@ export async function gradeWork(
       },
     } as Anthropic.MessageCreateParamsNonStreaming);
 
+    usage = readUsage(response.usage);
     if (response.stop_reason === "refusal") {
       throw new HttpError(422, "REFUSED", "Albus could not mark this work.");
     }
@@ -170,25 +205,26 @@ export async function gradeWork(
       throw new HttpError(502, "MALFORMED_RESPONSE", "Model output was not valid JSON");
     }
 
-    const u = response.usage;
-    return {
-      raw,
-      model,
-      inputTokens: u.input_tokens ?? 0,
-      outputTokens: u.output_tokens ?? 0,
-      cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
-      cacheReadTokens: u.cache_read_input_tokens ?? 0,
-    };
+    if (!usage) {
+      throw new HttpError(502, "INVALID_PROVIDER_USAGE", "Provider accounting is unavailable.");
+    }
+    return { raw, model, ...usage };
   } catch (e) {
-    if (e instanceof HttpError) throw e;
+    if (e instanceof HttpError) throw new ProviderResponseError(e, usage);
     if (e instanceof Anthropic.APIError) {
       const status = e.status ?? 0;
       if (status === 429 || status >= 500) {
-        console.error("anthropic transient error", status, e.message);
+        console.error("anthropic transient error", status);
         throw new HttpError(503, "UPSTREAM_UNAVAILABLE", "Marking is unavailable right now.");
       }
-      console.error("ANTHROPIC REQUEST REJECTED (bug in our request):", status, e.message);
+      console.error("ANTHROPIC REQUEST REJECTED (bug in our request):", status);
       throw new HttpError(502, "UPSTREAM_REJECTED", "Albus could not mark this work.");
+    }
+    if (usage) {
+      throw new ProviderResponseError(
+        new HttpError(502, "MALFORMED_RESPONSE", "Provider response was unusable."),
+        usage,
+      );
     }
     throw e;
   }

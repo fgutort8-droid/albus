@@ -82,7 +82,7 @@ if [ "${1:-}" = "--full" ]; then
   hdr "iOS build and tests"
   if command -v xcodebuild >/dev/null; then
     ( cd ios && xcodegen generate --spec project.yml >/dev/null 2>&1 \
-      && xcodebuild test -scheme Albus -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+      && xcodebuild test -onlyUsePackageVersionsFromResolvedFile -scheme Albus -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
            -skip-testing:AlbusUITests >/dev/null 2>&1 ) \
       && pass "build and unit tests" || bad "iOS build or tests failed"
   else

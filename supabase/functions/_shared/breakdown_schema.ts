@@ -137,7 +137,7 @@ export function validateAndNormalise(
     }
     const parts = Math.ceil(minutes / stepCeiling);
     const each = Math.max(MIN_STEP_MINUTES, Math.round(minutes / parts));
-    return Array.from({ length: parts }, (_, part) => ({
+    return Array.from({ length: Math.min(parts, MAX_STEPS) }, (_, part) => ({
       ...base,
       title: `${base.title} (${part + 1} of ${parts})`.slice(0, 200),
       estimated_minutes: each,

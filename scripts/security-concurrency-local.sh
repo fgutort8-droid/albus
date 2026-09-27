@@ -4,6 +4,10 @@
 set -euo pipefail
 
 PROJECT_REF=$(sed -nE 's/^project_id = "([^"]+)"/\1/p' supabase/config.toml)
+if [ -n "${ALBUS_AUDIT_PROJECT:-}" ] && [ "$PROJECT_REF" != "$ALBUS_AUDIT_PROJECT" ]; then
+  echo 'STOP: configured project does not match the requested audit project' >&2
+  exit 1
+fi
 DB_CONTAINER="supabase_db_${PROJECT_REF}"
 TEST_USER_ID='40000000-0000-4000-8000-000000000001'
 FREE_USER_ID='41000000-0000-4000-8000-000000000001'
@@ -54,6 +58,8 @@ cleanup() {
               or user_id in ('${RESTORE_FROM_ID}', '${RESTORE_TO_ID}')" >/dev/null 2>&1 || true
   db -q -c "delete from public.subscription_transactions
               where original_transaction_id = 'race-restore';
+            delete from private.subscription_transfers
+              where event_id like 'race-restore-%';
             delete from public.subscription_webhook_events
               where event_id like 'race-restore-%';
             delete from auth.users

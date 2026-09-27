@@ -17,8 +17,8 @@ export function errorResponse(e: unknown): Response {
   if (e instanceof HttpError) {
     return jsonResponse({ error: e.code, message: e.message }, e.status);
   }
-  // Never leak internals to the client; keep the detail in the logs.
-  console.error("unhandled:", e);
+  // Keep arbitrary error details out of both client responses and logs.
+  console.error("unhandled application error");
   return jsonResponse({ error: "INTERNAL_ERROR" }, 500);
 }
 
@@ -199,9 +199,7 @@ export function mapPostgresError(message: string): HttpError {
     return new HttpError(503, "GLOBAL_CAPACITY_REACHED", "Albus is at capacity right now.");
   }
 
-  // Anything unmapped is a bug on our side. The message is a raw Postgres
-  // string — it can name tables, columns and constraints — so it goes to the
-  // logs and never to the caller.
-  console.error("unmapped postgres error:", message);
+  // Unmapped backend text may contain submitted content. Log only the category.
+  console.error("unmapped postgres error");
   return new HttpError(500, "INTERNAL_ERROR");
 }

@@ -35,6 +35,13 @@ supabase link --project-ref "$REF" </dev/null
 compare() {
   local out
   out=$(supabase migration list --linked </dev/null) || stop 'could not read migration history'
+  # Different CLI versions draw the table with "|" or "│". Read either, and
+  # stop if the newest local change is missing: an unreadable list must never
+  # look like "nothing pending".
+  out=$(printf '%s\n' "$out" | sed 's/│/|/g')
+  NEWEST=$(ls supabase/migrations/*.sql | sed -E 's#.*/([0-9]+)_[^/]*$#\1#' | sort | tail -1)
+  awk -F'|' 'NF>=3 {l=$1;gsub(/ /,"",l);if(l~/^[0-9]+$/)print l}' <<<"$out" | grep -qx "$NEWEST" \
+    || stop "could not read the migration list (newest local change $NEWEST not found); stopping rather than guessing"
   REMOTE_ONLY=$(awk -F'|' 'NF>=3 {l=$1;r=$2;gsub(/ /,"",l);gsub(/ /,"",r);if(r~/^[0-9]+$/ && l=="")print r}' <<<"$out" | xargs)
   PENDING=$(awk -F'|' 'NF>=3 {l=$1;r=$2;gsub(/ /,"",l);gsub(/ /,"",r);if(l~/^[0-9]+$/ && r=="")print l}' <<<"$out" | xargs)
   [ -z "$REMOTE_ONLY" ] || stop "unrecognized remote migrations: $REMOTE_ONLY"

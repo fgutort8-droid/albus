@@ -19,6 +19,7 @@
 
 import { adminClient } from "../_shared/auth.ts";
 import { readRawBody } from "../_shared/body.ts";
+import { peppered } from "../_shared/signals.ts";
 import { errorResponse, HttpError, jsonResponse } from "../_shared/http.ts";
 import {
   classifySubscriptionResult,
@@ -143,6 +144,7 @@ async function applyTransfer(
   event: RevenueCatEvent,
   eventID: string,
   eventAt: string,
+  configuredAppIDs: string,
 ): Promise<Response> {
   const to = userIDsIn(event.transferred_to);
   const from = userIDsIn(event.transferred_from).filter((id) => !to.includes(id));
@@ -150,25 +152,30 @@ async function applyTransfer(
     // No Albus account, or more than one, to receive it. Nothing here can
     // decide between them, and a redelivery would say the same thing.
     console.error("transfer without exactly one Albus destination", {
-      eventID,
       destinations: to.length,
     });
     return jsonResponse({ ok: true, ignored: "transfer_destination" });
   }
 
-  const { data, error } = await adminClient().rpc("transfer_subscriptions", {
+  const { data, error } = await adminClient().rpc("transfer_verified_subscriptions", {
     p_from: from,
     p_to: to[0],
     p_event_id: eventID,
     p_event_at: eventAt,
+    p_allowed_app_ids: configuredAppIDs.split(",").map((id) => id.trim()).filter(Boolean),
+    p_app_id: event.app_id ?? null,
+    p_store: event.store ?? null,
+    p_environment: event.environment == null
+      ? null
+      : normaliseRevenueCatEnvironment(event.environment),
   });
   if (error) {
-    console.error("transfer_subscriptions failed:", error.message);
+    console.error("transfer_subscriptions failed");
     throw new HttpError(500, "INTERNAL_ERROR");
   }
   if (data === "invalid") {
     // The destination account does not exist any more.
-    console.error("transfer refused", { eventID });
+    console.error("transfer refused", { correlation: await peppered(`webhook-event|${eventID}`) });
   }
   return jsonResponse({ ok: true, result: data ?? "unknown" });
 }
@@ -217,24 +224,34 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: true, ignored: "app" });
     }
 
+    const eventID = asString(event.id);
+    const eventAt = isoFromMilliseconds(event.event_timestamp_ms);
+    if (!eventID || !eventAt) throw new HttpError(422, "INVALID_EVENT_IDENTITY");
+
+    // Customer transfers can omit purchase metadata. Explicit metadata still
+    // passes the same gates; absent metadata only routes purchases whose stored
+    // app and Apple-store provenance matches this configured integration.
+    if (type === "TRANSFER") {
+      if (event.store != null && !storeCanGrant(event.store)) {
+        return jsonResponse({ ok: true, ignored: "store" });
+      }
+      if (event.environment != null && !normaliseRevenueCatEnvironment(event.environment)) {
+        throw new HttpError(422, "INVALID_ENVIRONMENT");
+      }
+      return await applyTransfer(event, eventID, eventAt, configuredAppIDs);
+    }
+
     // Only the App Store takes real money. A Test Store purchase is free to
     // make and must never reach a plan.
     if (!storeCanGrant(event.store)) {
       console.warn("ignoring event from a store that cannot grant", {
         type,
-        store: asString(event.store, 32),
       });
       return jsonResponse({ ok: true, ignored: "store" });
     }
 
     const environment = normaliseRevenueCatEnvironment(event.environment);
     if (!environment) throw new HttpError(422, "INVALID_ENVIRONMENT");
-
-    const eventID = asString(event.id);
-    const eventAt = isoFromMilliseconds(event.event_timestamp_ms);
-    if (!eventID || !eventAt) throw new HttpError(422, "INVALID_EVENT_IDENTITY");
-
-    if (type === "TRANSFER") return await applyTransfer(event, eventID, eventAt);
 
     // The Supabase user id. RevenueCat is configured to use it as app_user_id,
     // which is what removes Apple's "notification about a user we cannot
@@ -254,7 +271,7 @@ Deno.serve(async (req) => {
     const productID = asString(event.product_id);
 
     const admin = adminClient();
-    const { data, error } = await admin.rpc("apply_subscription_state", {
+    const { data, error } = await admin.rpc("apply_verified_subscription_state", {
       p_original_transaction_id: originalID,
       p_user_id: userID,
       p_latest_transaction_id: asString(event.transaction_id),
@@ -265,11 +282,13 @@ Deno.serve(async (req) => {
       p_revoked_at: revokedAt,
       p_event_id: eventID,
       p_event_at: eventAt,
+      p_store: event.store,
+      p_app_id: event.app_id,
     });
 
     if (error) {
       // Do not leak the database's words to a caller we do not fully trust.
-      console.error("apply_subscription_state failed:", error.message);
+      console.error("apply_subscription_state failed");
       throw new HttpError(500, "INTERNAL_ERROR");
     }
 
@@ -278,10 +297,16 @@ Deno.serve(async (req) => {
     const outcome = classifySubscriptionResult(data ?? null);
     if (outcome.severity === "error") {
       console.error("subscription event not granted", {
-        result: data, originalID, userID, type, productID,
+        correlation: await peppered(`webhook-event|${eventID}`),
+        result: data,
+        type,
       });
     } else if (outcome.severity === "warn") {
-      console.warn("subscription event needs watching", { result: data, originalID, type });
+      console.warn("subscription event needs watching", {
+        correlation: await peppered(`webhook-event|${eventID}`),
+        result: data,
+        type,
+      });
     }
 
     // The money, recorded whatever the plan outcome: it moved either way, and
@@ -303,7 +328,7 @@ Deno.serve(async (req) => {
       });
       if (revenueError) {
         // Retried: the plan change above is idempotent and will read `stale`.
-        console.error("record_subscription_revenue failed:", revenueError.message);
+        console.error("record_subscription_revenue failed");
         throw new HttpError(500, "INTERNAL_ERROR");
       }
     }

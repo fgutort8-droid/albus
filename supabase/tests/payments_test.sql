@@ -192,10 +192,11 @@ select is(public.effective_tier('d1000000-0000-4000-8000-000000000002'), 'pro',
 -- account that gives up a plan gives up its history.
 select pg_temp.student('d1000000-0000-4000-8000-000000000006');
 select pg_temp.spent('d1000000-0000-4000-8000-000000000005', 'free', 1, 3000);
+-- This is a later transfer than evt-transfer-1 (now()+2 seconds).
 select is(public.transfer_subscriptions(
   array['d1000000-0000-4000-8000-000000000002',
         'd1000000-0000-4000-8000-000000000005']::uuid[],
-  'd1000000-0000-4000-8000-000000000006', 'evt-transfer-4', now()),
+  'd1000000-0000-4000-8000-000000000006', 'evt-transfer-4', now() + interval '3 seconds'),
   'transferred', 'a transfer may list an account that never held the purchase');
 select is((select count(*)::integer from public.ai_usage
             where user_id = 'd1000000-0000-4000-8000-000000000005'), 1,

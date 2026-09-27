@@ -27,7 +27,7 @@ import {
 } from "../_shared/quota.ts";
 import { noteRefusal, recordSignals, type Signals } from "../_shared/signals.ts";
 import { loadPersonalRubric, resolveGradingRubric } from "../_shared/rubric.ts";
-import { gradeWork } from "../_shared/anthropic.ts";
+import { gradeWork, providerUsage } from "../_shared/anthropic.ts";
 import {
   buildGradeSystemPrompt,
   buildGradeUserPrompt,
@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
         .eq("id", input.assignmentId)
         .maybeSingle();
       if (error) {
-        console.error("assignment ownership lookup failed:", error.message);
+        console.error("assignment ownership lookup failed");
         throw new HttpError(500, "INTERNAL_ERROR");
       }
       if (!data) {
@@ -258,14 +258,15 @@ Deno.serve(async (req) => {
     // repeat expensive failures without hitting rate or project-cost limits.
     let generated: Awaited<ReturnType<typeof gradeWork>> | null = null;
     const refund = async (error: unknown) => {
+      const usage = generated ?? providerUsage(error);
       await finalizeAIUsage(
         usageId,
         "failed",
-        generated?.inputTokens ?? null,
-        generated?.outputTokens ?? null,
+        usage?.inputTokens ?? null,
+        usage?.outputTokens ?? null,
         usageFailureCode(error),
-        generated?.cacheWriteTokens ?? null,
-        generated?.cacheReadTokens ?? null,
+        usage?.cacheWriteTokens ?? null,
+        usage?.cacheReadTokens ?? null,
       );
     };
 

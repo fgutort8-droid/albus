@@ -59,9 +59,11 @@ struct RubricService {
     }
 
     private let client: SupabaseClient?
+    private let log: @Sendable (String) -> Void
 
-    init(client: SupabaseClient? = Backend.shared) {
+    init(client: SupabaseClient? = Backend.shared, log: @escaping @Sendable (String) -> Void = { print($0) }) {
         self.client = client
+        self.log = log
     }
 
     func save(_ snapshot: Snapshot) async throws {
@@ -83,10 +85,9 @@ struct RubricService {
                 ? Failure.offline
                 : Failure.unavailable
         } catch {
-            // Postgres error text can name tables and constraints, so it is
-            // logged rather than shown. The student gets something true and
-            // useless to an attacker.
-            print("[Albus] rubric sync failed: \(error)")
+            // Record the operation only: backend error details may include
+            // student content. Preserve the existing user-facing failure.
+            log("[Albus] rubric sync failed")
             throw Failure.unavailable
         }
     }
@@ -102,7 +103,7 @@ struct RubricService {
                 ? Failure.offline
                 : Failure.unavailable
         } catch {
-            print("[Albus] rubric delete failed: \(error)")
+            log("[Albus] rubric delete failed")
             throw Failure.unavailable
         }
     }
