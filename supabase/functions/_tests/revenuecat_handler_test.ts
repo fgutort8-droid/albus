@@ -11,6 +11,8 @@ Deno.test("signed transfer delivery preserves ordering inputs and all authorizat
   const previous = Object.fromEntries(Object.keys(env).map((key) => [key, Deno.env.get(key)]));
   const originalServe = Deno.serve;
   const originalFetch = globalThis.fetch;
+  const originalError = console.error;
+  const originalWarn = console.warn;
   let handler: (request: Request) => Promise<Response>;
   const calls: { name: string; args: Record<string, unknown> }[] = [];
   let result = "transferred";
@@ -106,6 +108,37 @@ Deno.test("signed transfer delivery preserves ordering inputs and all authorizat
         assertEquals(calls.length, count);
       });
     }
+    await t.step(
+      "non-grant diagnostics retain only a stable opaque event correlation",
+      async () => {
+        const logs: unknown[][] = [];
+        console.error = (...args) => logs.push(args);
+        console.warn = console.error;
+        result = "invalid";
+        for (const type of ["TRANSFER", "INITIAL_PURCHASE"]) {
+          logs.length = 0;
+          const extra = {
+            type,
+            id: "SENTINEL_STUDENT_CONTENT",
+            app_id: "unit-app",
+            store: "APP_STORE",
+            environment: "Production",
+            original_transaction_id: "SENTINEL_STUDENT_CONTENT",
+            product_id: "SENTINEL_STUDENT_CONTENT",
+            app_user_id: base.transferred_from[0],
+          };
+          assertEquals((await deliver(extra)).status, 200);
+          assertEquals((await deliver(extra)).status, 200);
+          const fields = logs.map((args) => args[1] as { correlation?: string } | undefined);
+          assertEquals(/^[a-f0-9]{64}$/.test(fields[0]?.correlation ?? ""), true);
+          assertEquals(fields[0]?.correlation, fields[1]?.correlation);
+          assertEquals(JSON.stringify(logs).includes("SENTINEL_STUDENT_CONTENT"), false);
+          assertEquals(JSON.stringify(logs).includes(base.transferred_from[0]), false);
+        }
+        console.error = originalError;
+        console.warn = originalWarn;
+      },
+    );
     await t.step("missing app configuration remains closed", async () => {
       Deno.env.delete("REVENUECAT_APP_IDS");
       const count = calls.length;
@@ -113,6 +146,8 @@ Deno.test("signed transfer delivery preserves ordering inputs and all authorizat
       assertEquals(calls.length, count);
     });
   } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
     Deno.serve = originalServe;
     globalThis.fetch = originalFetch;
     for (const [key, value] of Object.entries(previous)) {

@@ -19,6 +19,7 @@
 
 import { adminClient } from "../_shared/auth.ts";
 import { readRawBody } from "../_shared/body.ts";
+import { peppered } from "../_shared/signals.ts";
 import { errorResponse, HttpError, jsonResponse } from "../_shared/http.ts";
 import {
   classifySubscriptionResult,
@@ -174,7 +175,7 @@ async function applyTransfer(
   }
   if (data === "invalid") {
     // The destination account does not exist any more.
-    console.error("transfer refused");
+    console.error("transfer refused", { correlation: await peppered(`webhook-event|${eventID}`) });
   }
   return jsonResponse({ ok: true, result: data ?? "unknown" });
 }
@@ -296,11 +297,16 @@ Deno.serve(async (req) => {
     const outcome = classifySubscriptionResult(data ?? null);
     if (outcome.severity === "error") {
       console.error("subscription event not granted", {
+        correlation: await peppered(`webhook-event|${eventID}`),
         result: data,
         type,
       });
     } else if (outcome.severity === "warn") {
-      console.warn("subscription event needs watching", { result: data, type });
+      console.warn("subscription event needs watching", {
+        correlation: await peppered(`webhook-event|${eventID}`),
+        result: data,
+        type,
+      });
     }
 
     // The money, recorded whatever the plan outcome: it moved either way, and
