@@ -76,23 +76,25 @@ struct AppShell: View {
                 }
             }
 
-            AppTabBar(selection: $tab)
-        }
-        .ignoresSafeArea(.keyboard)
-        // A marking finished while the student was elsewhere in the app. The
-        // grader screen, when it is open, shows the result itself.
-        .overlay(alignment: .top) {
-            if let id = marking.ready, !marking.isWatched, let grading = grading(id) {
-                MarkingReadyBanner(title: grading.workTitle) {
-                    marking.markSeen()
-                    openedGrading = grading
-                } onDismiss: {
-                    marking.markSeen()
+            VStack(spacing: Tokens.Spacing.s) {
+                // A marking finished while the student was elsewhere in the
+                // app. The grader screen, when it is open, shows the result
+                // itself. Just above the tab bar, where it covers no back
+                // button, title or header, and what it sits over scrolls clear.
+                if let id = marking.ready, !marking.isWatched, let grading = grading(id) {
+                    MarkingReadyBanner(title: grading.workTitle) {
+                        marking.markSeen()
+                        openedGrading = grading
+                    } onDismiss: {
+                        marking.markSeen()
+                    }
+                    .padding(.horizontal, Tokens.Spacing.l)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                .padding(.horizontal, Tokens.Spacing.l)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                AppTabBar(selection: $tab)
             }
         }
+        .ignoresSafeArea(.keyboard)
         .animation(Tokens.Motion.sheet, value: marking.ready)
         .onChange(of: marking.ready) { _, id in
             if id != nil {

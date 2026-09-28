@@ -53,6 +53,8 @@ final class MarkingCoordinator {
     /// functions stop after 150 s), so a grading still being written is found.
     private let recoveryWindow: TimeInterval
     private let pollInterval: Duration
+    /// Writes a result to the phone. A seam for the test of a failed write.
+    private let save: @MainActor (ModelContext) throws -> Void
     /// The device clock and the server's need not agree; a saved grading is
     /// looked for from a little before the work was sent.
     private let clockSkew: TimeInterval = 120
@@ -60,11 +62,13 @@ final class MarkingCoordinator {
     init(service: GradingService = GradingService(),
          announcer: any MarkingAnnouncer = SystemMarkingAnnouncer(),
          recoveryWindow: TimeInterval = 160,
-         pollInterval: Duration = .seconds(5)) {
+         pollInterval: Duration = .seconds(5),
+         save: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }) {
         self.service = service
         self.announcer = announcer
         self.recoveryWindow = recoveryWindow
         self.pollInterval = pollInterval
+        self.save = save
     }
 
     /// Marks the work, stores the result, and says so if nobody is watching.
@@ -80,6 +84,11 @@ final class MarkingCoordinator {
                       isBlind: isBlind, startedAt: .now)
         current = job
         lastOutcome = nil
+        // Read now, while the assignment certainly exists. The student can
+        // leave and delete it while the work is marked; the result is then
+        // kept in their history, linked to nothing.
+        let assignmentID = assignment?.id
+        let assignmentRemoteID = assignment?.remoteID
         // Room to finish if the student switches apps: iOS allows about
         // thirty seconds more. Past that the app is suspended, the answer is
         // lost, and the recovery below finds it once they are back.
@@ -93,12 +102,14 @@ final class MarkingCoordinator {
         let outcome: Outcome
         do {
             let marked = try await service.grade(work: work, rubricID: rubricID,
-                                                 assignmentID: assignment?.remoteID,
+                                                 assignmentID: assignmentRemoteID,
                                                  presentation: presentation, title: title)
             outcome = store(marked, inputChars: work.count, fallbackTitle: title,
-                            assignment: assignment, context: context, mayStore: mayStore)
+                            assignmentID: assignmentID, context: context, mayStore: mayStore)
         } catch GradingService.Failure.answerLost {
-            outcome = await recover(job, inputChars: work.count, assignment: assignment,
+            outcome = await recover(job, inputChars: work.count,
+                                    workLength: GradingService.serverLength(of: work),
+                                    assignmentID: assignmentID, assignmentRemoteID: assignmentRemoteID,
                                     context: context, mayStore: mayStore)
         } catch let failure as GradingService.Failure {
             outcome = .failed(failure)
@@ -121,9 +132,10 @@ final class MarkingCoordinator {
     // MARK: - Private
 
     private func store(_ marked: GradingService.Result, inputChars: Int, fallbackTitle: String?,
-                       assignment: Assignment?, context: ModelContext,
+                       assignmentID: UUID?, context: ModelContext,
                        mayStore: @MainActor () -> Bool) -> Outcome {
         guard mayStore() else { return .discarded }
+        let assignment = assignmentID.flatMap { existingAssignment($0, in: context) }
         let grading = Grading(
             remoteID: marked.id,
             model: marked.model,
@@ -149,13 +161,22 @@ final class MarkingCoordinator {
             assignment: assignment
         )
         context.insert(grading)
-        try? context.save()
+        do {
+            try save(context)
+        } catch {
+            // Not on the phone, so nothing to announce: a notification would
+            // open onto nothing once the app has closed. The server keeps the
+            // result, and marking the same work again returns it for free.
+            context.delete(grading)
+            return .failed(.notSaved)
+        }
         return .marked(grading.id)
     }
 
     /// Looks for the grading the server saved for a job whose answer was lost,
     /// until the server can no longer be working on it.
-    private func recover(_ job: Job, inputChars: Int, assignment: Assignment?,
+    private func recover(_ job: Job, inputChars: Int, workLength: Int,
+                         assignmentID: UUID?, assignmentRemoteID: UUID?,
                          context: ModelContext,
                          mayStore: @MainActor () -> Bool) async -> Outcome {
         let giveUpAt = job.startedAt.addingTimeInterval(recoveryWindow)
@@ -165,10 +186,12 @@ final class MarkingCoordinator {
         // app arrives after the window, and their marking is most likely saved.
         while true {
             do {
-                if let saved = try await service.recover(since: since),
+                if let saved = try await service.recover(since: since,
+                                                         assignmentID: assignmentRemoteID,
+                                                         workLength: workLength),
                    !isStored(remoteID: saved.id, context: context) {
                     return store(saved, inputChars: inputChars, fallbackTitle: job.title,
-                                 assignment: assignment, context: context, mayStore: mayStore)
+                                 assignmentID: assignmentID, context: context, mayStore: mayStore)
                 }
                 offline = false
             } catch let error as URLError where error.code == .notConnectedToInternet {
@@ -180,6 +203,13 @@ final class MarkingCoordinator {
             try? await Task.sleep(for: pollInterval)
         }
         return .failed(offline ? .offline : .unavailable)
+    }
+
+    /// The assignment, if it is still on the phone.
+    private func existingAssignment(_ id: UUID, in context: ModelContext) -> Assignment? {
+        var descriptor = FetchDescriptor<Assignment>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first
     }
 
     /// Whether a grading the server holds is already on this phone: an earlier

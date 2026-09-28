@@ -32,7 +32,9 @@ struct MarkingCoordinatorTests {
     }
 
     private func coordinator(_ announcer: RecordingAnnouncer,
-                             recoveryWindow: TimeInterval = 5) -> MarkingCoordinator {
+                             recoveryWindow: TimeInterval = 5,
+                             save: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() })
+        -> MarkingCoordinator {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MarkingServer.self]
         let storage = ResilientAuthStorage(fallback: UserDefaults(suiteName: "albus.tests.\(UUID().uuidString)")!,
@@ -42,15 +44,22 @@ struct MarkingCoordinatorTests {
             options: .init(auth: .init(storage: storage, autoRefreshToken: false),
                            global: .init(session: URLSession(configuration: config))))
         return MarkingCoordinator(service: GradingService(client: client), announcer: announcer,
-                                  recoveryWindow: recoveryWindow, pollInterval: .milliseconds(40))
+                                  recoveryWindow: recoveryWindow, pollInterval: .milliseconds(40),
+                                  save: save)
     }
 
     private func mark(_ coordinator: MarkingCoordinator, context: ModelContext,
+                      assignment: Assignment? = nil,
                       mayStore: Bool = true) async -> MarkingCoordinator.Outcome {
-        await coordinator.mark(work: work, rubricID: nil, assignment: nil, presentation: nil,
+        await coordinator.mark(work: work, rubricID: nil, assignment: assignment, presentation: nil,
                                title: "History essay", isBlind: false, context: context,
                                mayStore: { mayStore })
     }
+
+    /// The test work's length as the server records it: run through the
+    /// server's own `normaliseWork`, it is the sentence six times over, less
+    /// the trailing space the phone trims before sending.
+    private static let serverLength = 305
 
     private func stored(_ context: ModelContext) throws -> [Grading] {
         try context.fetch(FetchDescriptor<Grading>())
@@ -178,6 +187,98 @@ struct MarkingCoordinatorTests {
         #expect(try stored(context).count == 2, "the earlier grading is not stored twice")
     }
 
+    /// The reported bug: the newest grading in the window was taken, whatever
+    /// work it was for.
+    @Test("recovery takes this work's grading, never a newer one of other work")
+    func recoveryMatchesTheWork() async throws {
+        let otherWork = UUID(), otherAssignment = UUID()
+        MarkingServer.state.reset(grade: .loseAnswer, saved: [[], [Self.savedID]], others: [
+            .init(id: otherWork, inputChars: Self.serverLength + 9, assignmentID: nil),
+            .init(id: otherAssignment, inputChars: Self.serverLength, assignmentID: UUID()),
+        ])
+        let context = try store(), announcer = RecordingAnnouncer()
+        let coordinator = coordinator(announcer)
+
+        let outcome = await mark(coordinator, context: context)
+
+        let grading = try #require(try stored(context).first)
+        #expect(outcome == .marked(grading.id))
+        #expect(grading.remoteID == Self.savedID)
+        #expect(try stored(context).count == 1, "nothing of the other work's is kept")
+        let asked = try #require(MarkingServer.state.lookupFilters.first)
+        #expect(asked["input_chars"] == "eq.\(Self.serverLength)", "as long as the server measured it")
+        #expect(asked["assignment_id"] == "is.null")
+        #expect(MarkingServer.state.gradeRequests == 1)
+    }
+
+    @Test("recovery for an assignment looks only at that assignment's gradings")
+    func recoveryMatchesTheAssignment() async throws {
+        let context = try store(), announcer = RecordingAnnouncer()
+        let assignment = Assignment(title: "History essay", taskType: "essay",
+                                    deadline: .now.addingTimeInterval(86_400), estimatedMinutes: 60)
+        assignment.remoteID = UUID()
+        context.insert(assignment)
+        try context.save()
+        MarkingServer.state.reset(grade: .loseAnswer, saved: [[], [Self.savedID]], others: [
+            .init(id: UUID(), inputChars: Self.serverLength, assignmentID: nil),
+        ])
+        let coordinator = coordinator(announcer)
+
+        let outcome = await mark(coordinator, context: context, assignment: assignment)
+
+        let grading = try #require(try stored(context).first)
+        #expect(outcome == .marked(grading.id))
+        #expect(grading.remoteID == Self.savedID)
+        #expect(grading.assignment?.id == assignment.id)
+        let asked = try #require(MarkingServer.state.lookupFilters.first)
+        #expect(asked["assignment_id"] == "eq.\(try #require(assignment.remoteID).uuidString)")
+    }
+
+    @Test("a result the phone could not save is neither announced nor left behind")
+    func failedSaveIsNotAnnounced() async throws {
+        MarkingServer.state.reset(grade: .answer)
+        let context = try store(), announcer = RecordingAnnouncer()
+        announcer.isAppActive = false
+        let coordinator = coordinator(announcer, save: { _ in throw CocoaError(.fileWriteOutOfSpace) })
+
+        let outcome = await mark(coordinator, context: context)
+
+        #expect(outcome == .failed(.notSaved))
+        #expect(try stored(context).isEmpty, "no half-kept grading for a later save to pick up")
+        #expect(announcer.notified.isEmpty, "a notification would open onto nothing")
+        #expect(coordinator.ready == nil)
+        #expect(GradingService.Failure.notSaved.errorDescription?.contains("won't be charged twice") == true)
+    }
+
+    /// The student can leave while the work is marked, and delete the
+    /// assignment it was for.
+    @Test("an assignment deleted during the marking leaves the result in history, unlinked")
+    func deletedAssignmentKeepsTheResult() async throws {
+        MarkingServer.state.reset(grade: .hold)
+        let context = try store(), announcer = RecordingAnnouncer()
+        let assignment = Assignment(title: "History essay", taskType: "essay",
+                                    deadline: .now.addingTimeInterval(86_400), estimatedMinutes: 60)
+        context.insert(assignment)
+        try context.save()
+        let coordinator = coordinator(announcer)
+
+        let marking = Task { await mark(coordinator, context: context, assignment: assignment) }
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(3))
+        while MarkingServer.state.gradeRequests == 0, clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        context.delete(assignment)
+        try context.save()
+        MarkingServer.state.answerHeld()
+        let outcome = await marking.value
+
+        let grading = try #require(try stored(context).first)
+        #expect(outcome == .marked(grading.id))
+        #expect(grading.assignment == nil)
+    }
+
     @Test("a student back after the window still gets one look, and their marking")
     func lateReturnStillLooksOnce() async throws {
         MarkingServer.state.reset(grade: .loseAnswer, saved: [[Self.savedID]])
@@ -192,11 +293,55 @@ struct MarkingCoordinatorTests {
     }
 }
 
+/// `GradingService.serverLength(of:)` must agree with the server to the unit:
+/// recovery finds a lost marking by it. Every expected value here is what the
+/// server's own `normaliseWork` returned for the input, run with Deno.
+@Suite("The server's measure of the work")
+struct ServerLengthTests {
+    static let cases: [(String, String, Int)] = [
+        ("Plain text.", "Plain text.", 11),
+        ("  Leading and trailing  \n\n", "Leading and trailing", 20),
+        ("Windows\r\nline\rendings\r\n", "Windows\nline\nendings", 20),
+        ("soft\u{00AD}hyphen", "softhyphen", 10),
+        ("Para one.\n12\nPara two.\n  3  \nPara three.", "Para one.\n\nPara two.\n\nPara three.", 33),
+        ("The year\n2024 was\nlong.", "The year\n2024 was\nlong.", 23),
+        ("Tabs\t\tand   spaces", "Tabs and spaces", 15),
+        ("Line one  \n   Line two", "Line one\nLine two", 17),
+        ("One\n\n\n\n\nTwo", "One\n\nTwo", 8),
+        ("\u{00A0}\u{FEFF}BOM and NBSP\u{00A0}", "BOM and NBSP", 12),
+        ("Arabic digits\n\u{0661}\u{0662}\nstay", "Arabic digits\n\u{0661}\u{0662}\nstay", 21),
+        ("Emoji \u{1F600} and \u{00E9}\n\nnext", "Emoji \u{1F600} and \u{00E9}\n\nnext", 20),
+        ("Page\n12345\nfive digits stay", "Page\n12345\nfive digits stay", 27),
+        ("Sep\u{2028}line", "Sep\u{2028}line", 8),
+        ("\u{0085}Next line\u{0085}", "\u{0085}Next line\u{0085}", 11)
+    ]
+
+    @Test("normalised exactly as the server does it", arguments: 0..<cases.count)
+    func matchesTheServer(index: Int) {
+        let (input, output, length) = Self.cases[index]
+        #expect(GradingService.serverNormalised(input) == output)
+        #expect(GradingService.serverNormalised(input).utf16.count == length)
+    }
+
+    @Test("the length is taken after the phone's own trim, as sent")
+    func lengthOfWhatIsSent() {
+        #expect(GradingService.serverLength(of: "  Para one.\n12\nPara two.  \n") == 20)
+        #expect(GradingService.serverLength(of: "Emoji 😀") == 8, "UTF-16 units, as JavaScript counts")
+    }
+}
+
 /// The server, for these tests only. `grade` answers, loses its answer or has
 /// no connection; each read of `gradings` returns the next saved set. Nothing
 /// reaches a real server.
 private final class MarkingServer: URLProtocol, @unchecked Sendable {
     enum Grade { case answer, loseAnswer, noConnection, hold }
+
+    /// A grading of some other work, saved in the same minutes.
+    struct Other: Sendable {
+        let id: UUID
+        let inputChars: Int
+        let assignmentID: UUID?
+    }
 
     final class State: @unchecked Sendable {
         private let lock = NSLock()
@@ -205,10 +350,30 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
         private var grades = 0
         private var reads = 0
         private var held: [MarkingServer] = []
+        private var others: [Other] = []
+        private var filters: [[String: String]] = []
 
-        func reset(grade: Grade, saved: [[UUID]] = [[]]) {
+        /// `saved` are this work's gradings, appearing read by read; `others`
+        /// are newer gradings of other work, there from the start.
+        func reset(grade: Grade, saved: [[UUID]] = [[]], others: [Other] = []) {
             lock.lock(); defer { lock.unlock() }
             self.grade = grade; self.saved = saved; grades = 0; reads = 0; held = []
+            self.others = others; filters = []
+        }
+        var otherGradings: [Other] { lock.lock(); defer { lock.unlock() }; return others }
+        func record(_ query: [String: String]) {
+            lock.lock(); defer { lock.unlock() }
+            filters.append(query)
+        }
+        /// What each read of `gradings` filtered on.
+        var lookupFilters: [[String: String]] { lock.lock(); defer { lock.unlock() }; return filters }
+        /// Answers every held marking, as a slow server finally would.
+        func answerHeld() {
+            lock.lock()
+            let waiting = held
+            held = []
+            lock.unlock()
+            waiting.forEach { $0.answerOnLoadingThread() }
         }
         func hold(_ request: MarkingServer) {
             lock.lock(); defer { lock.unlock() }
@@ -244,6 +409,12 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
 
     private var runLoop: CFRunLoop?
 
+    fileprivate func answerOnLoadingThread() {
+        guard let runLoop else { return }
+        CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue) { [self] in answerMarking() }
+        CFRunLoopWakeUp(runLoop)
+    }
+
     fileprivate func failOnLoadingThread() {
         guard let runLoop else { return }
         CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue) { [self] in
@@ -263,13 +434,7 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
         if path.hasSuffix("/functions/v1/grade") {
             switch Self.state.nextGrade() {
             case .answer:
-                respond([
-                    "id": "6a6a0000-0000-4000-8000-000000000001", "overall_marks": 6, "total_marks": 7,
-                    "grade_label": NSNull(), "grade_note": NSNull(), "title": "History essay",
-                    "criteria": Self.criteria, "feedback": "A strong draft.",
-                    "improvements": Self.improvements, "model": "claude-opus-5", "basis": "personal",
-                    "rubric_name": NSNull(), "reused": false,
-                ])
+                answerMarking()
             case .loseAnswer:
                 client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
             case .noConnection:
@@ -279,7 +444,18 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
                 Self.state.hold(self)
             }
         } else if path.hasSuffix("/rest/v1/gradings") {
-            respond(Self.state.nextSaved().map { id in
+            // As PostgREST would: newest first, then the filters, then one.
+            var query: [String: String] = [:]
+            for item in URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? [] {
+                query[item.name] = item.value
+            }
+            Self.state.record(query)
+            let others = Self.state.otherGradings.filter { other in
+                query["input_chars"] == "eq.\(other.inputChars)"
+                    && query["assignment_id"] == (other.assignmentID.map { "eq.\($0.uuidString)" } ?? "is.null")
+            }
+            let found = others.map(\.id) + Self.state.nextSaved()
+            respond(found.prefix(1).map { id in
                 [
                     "id": id.uuidString.lowercased(), "overall_marks": 5, "total_marks": 7,
                     "grade_label": NSNull(), "grade_note": NSNull(), "work_title": "History essay",
@@ -290,6 +466,16 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
         } else {
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
         }
+    }
+
+    private func answerMarking() {
+        respond([
+            "id": "6a6a0000-0000-4000-8000-000000000001", "overall_marks": 6, "total_marks": 7,
+            "grade_label": NSNull(), "grade_note": NSNull(), "title": "History essay",
+            "criteria": Self.criteria, "feedback": "A strong draft.",
+            "improvements": Self.improvements, "model": "claude-opus-5", "basis": "personal",
+            "rubric_name": NSNull(), "reused": false,
+        ])
     }
 
     private func respond(_ json: Any) {
