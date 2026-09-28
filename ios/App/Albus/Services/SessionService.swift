@@ -53,6 +53,12 @@ final class SessionService {
         return nil
     }
 
+    /// The account once the server has confirmed its pass. Whatever acts for
+    /// the account beyond this phone, such as the App Store's purchase
+    /// identity, waits for this: a stored account shown early may turn out to
+    /// have been deleted. The plans already on the phone need only `userID`.
+    var confirmedUserID: UUID? { awaitingRenewal ? nil : userID }
+
     private let client: SupabaseClient?
     private let storage: ResilientAuthStorage
 
@@ -72,7 +78,11 @@ final class SessionService {
     /// the only moment a CAPTCHA challenge can be attached. Creating an account
     /// silently at launch, as this used to, is precisely what makes account
     /// farming a one-line script.
-    func start() async {
+    ///
+    /// - Parameter opensEarly: false while a deletion the student asked for is
+    ///   unanswered. Its account may already be gone, so the app waits for the
+    ///   server rather than show its plans or buy under it.
+    func start(opensEarly: Bool = true) async {
 #if DEBUG
         // UI tests that exercise post-onboarding screens must not create a real
         // account (or spend a real AI call merely to reach the tab bar). This
@@ -94,6 +104,7 @@ final class SessionService {
         credentialRejected = false
         renewing = true
         defer { renewing = false }
+        var shown = state
         do {
             try storage.beginAttempt()
             // An account this phone already holds opens at once. Its pass
@@ -104,17 +115,22 @@ final class SessionService {
             // still in date never waited, and this treats an expired one the
             // same way. The launch sequence still awaits this function, so
             // nothing that needs the server runs before the renewal settles.
-            if let stored = client.auth.currentSession, stored.isExpired {
+            if opensEarly, let stored = client.auth.currentSession, stored.isExpired {
                 try storage.checkHealth()
                 state = .signedIn(userID: stored.user.id, isAnonymous: stored.user.isAnonymous)
                 awaitingRenewal = true
             }
+            shown = state
             let session = try await Self.validatedSession(client, storage: storage)
+            // Settled some other way while the server answered, by a sign-out
+            // after a deletion say: that stands.
+            guard state == shown else { return }
             try storage.checkHealth()
             state = .signedIn(userID: session.user.id,
                               isAnonymous: session.user.isAnonymous)
             awaitingRenewal = false
         } catch {
+            guard state == shown else { return }
             settle(restoreFailure: error)
         }
     }
@@ -124,15 +140,20 @@ final class SessionService {
     /// changes nothing, and the next return to the app tries again.
     func revalidate() async {
         guard awaitingRenewal, !renewing, let client, case .signedIn = state else { return }
+        let shown = state
         renewing = true
         defer { renewing = false }
         do {
             try storage.beginAttempt()
             let session = try await Self.validatedSession(client, storage: storage)
+            // Signed out while this was in flight: the sign-out stands, and
+            // an answer for the old pass must not bring the account back.
+            guard state == shown else { return }
             try storage.checkHealth()
             state = .signedIn(userID: session.user.id, isAnonymous: session.user.isAnonymous)
             awaitingRenewal = false
         } catch {
+            guard state == shown else { return }
             settle(restoreFailure: error)
         }
     }

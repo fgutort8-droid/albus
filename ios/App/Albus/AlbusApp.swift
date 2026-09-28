@@ -117,8 +117,10 @@ struct AlbusApp: App {
                     wireNotifications()
                     // Restores a stored session. It no longer *creates* one:
                     // account creation moved into onboarding, which is the only
-                    // place a CAPTCHA challenge can be presented.
-                    await session.start()
+                    // place a CAPTCHA challenge can be presented. It opens onto
+                    // the stored account at once, unless a deletion the student
+                    // asked for is still unanswered.
+                    await session.start(opensEarly: !deletion.hasUnansweredRequest)
                     // A deletion this phone asked for, never heard back about,
                     // and whose credential has since been refused, happened.
                     // Settle it before anything else reads the old account's
@@ -145,11 +147,13 @@ struct AlbusApp: App {
                     case .active:
                         notifications.appDidBecomeActive()
                         catchUp()
+                        // A pass launch could not renew, the phone being
+                        // offline, is renewed now. A refused one surfaces
+                        // through `credentialRejected`, as at launch. Its own
+                        // task: a stalled renewal must not hold up the upkeep
+                        // below.
+                        Task { await session.revalidate() }
                         Task {
-                            // A pass launch could not renew, the phone being
-                            // offline, is renewed now. A refused one surfaces
-                            // through `credentialRejected`, as at launch.
-                            await session.revalidate()
                             await PendingRubricDeletions.flush(context: container.mainContext)
                             await rebuildNotifications()
                         }

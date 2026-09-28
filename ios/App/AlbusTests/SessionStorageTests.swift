@@ -417,6 +417,76 @@ struct SessionStorageTests {
         #expect(!session.awaitingRenewal)
     }
 
+    @MainActor @Test("with a deletion unanswered, launch waits for the server instead of showing the account")
+    func unansweredDeletionWaits() async throws {
+        let keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: Self.expiredSessionData())
+        let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: SlowRefreshTransport.self), storage: storage)
+        let launch = Task { await session.start(opensEarly: false) }
+
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(session.userID == nil, "the old account is not shown while its deletion is unsettled")
+        #expect(session.state == .starting)
+
+        await launch.value
+        #expect(session.userID == Self.storedUserID)
+    }
+
+    @MainActor @Test("an unanswered deletion request is what keeps launch waiting")
+    func unansweredRequestIsReported() {
+        let requested = isolated()
+        requested.set(true, forKey: "albus.accountDeletion.requested")
+        #expect(AccountDeletion(defaults: requested).hasUnansweredRequest)
+
+        #expect(!AccountDeletion(defaults: isolated()).hasUnansweredRequest)
+
+        let settled = isolated()
+        settled.set(true, forKey: "albus.accountDeletion.requested")
+        settled.set(true, forKey: "albus.accountDeletion.pendingCleanup")
+        #expect(!AccountDeletion(defaults: settled).hasUnansweredRequest,
+                "a deletion being cleaned up is not waited on; cleanup has its own screen")
+    }
+
+    @MainActor @Test("purchases wait until the server has confirmed the account shown early")
+    func purchasesWaitForConfirmation() async throws {
+        let keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: Self.expiredSessionData())
+        let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: SlowRefreshTransport.self), storage: storage)
+        let launch = Task { await session.start() }
+
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(session.userID == Self.storedUserID, "shown early")
+        #expect(session.confirmedUserID == nil, "not yet confirmed")
+
+        await launch.value
+        #expect(session.confirmedUserID == Self.storedUserID)
+    }
+
+    @MainActor @Test("a renewal answered after a sign-out does not bring the account back")
+    func renewalCannotUndoSignOut() async throws {
+        SignOutRaceTransport.online.set(false)
+        defer { SignOutRaceTransport.online.set(false) }
+        let keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: Self.expiredSessionData())
+        let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: SignOutRaceTransport.self), storage: storage)
+        await session.start()
+        #expect(session.awaitingRenewal)
+
+        SignOutRaceTransport.online.set(true)
+        let renewal = Task { await session.revalidate() }
+        try await Task.sleep(for: .milliseconds(150))
+        try await session.signOutDeletedAccount()
+        #expect(session.state == .needsAccount)
+
+        await renewal.value
+        #expect(session.state == .needsAccount, "the late answer is for an account signed out")
+        #expect(session.userID == nil)
+        #expect(!session.awaitingRenewal)
+    }
+
     private static let storedUserID = UUID(uuidString: "a9400000-0000-4000-8000-000000000001")!
 
     /// A session this phone stored more than an hour ago: its pass has expired.
@@ -599,4 +669,36 @@ private final class ForbiddenTransport: URLProtocol, @unchecked Sendable {
         client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
     }
     override func stopLoading() {}
+}
+
+/// Offline until `online`; then signing out is answered at once and renewing
+/// the pass takes 1.2 s, so a sign-out can land while a renewal is in flight.
+private final class SignOutRaceTransport: URLProtocol, @unchecked Sendable {
+    static let online = RecoveringRefreshTransport.Flag()
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    private var timer: Timer?
+    override func startLoading() {
+        #expect(request.url?.path != "/auth/v1/signup")
+        guard Self.online.isSet else {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
+        if request.url?.path.hasSuffix("/logout") == true {
+            respond(status: 204, body: Data())
+            return
+        }
+        let timer = Timer(timeInterval: 1.2, repeats: false) { [weak self] _ in
+            self?.respond(status: 200, body: SessionTestTransport.sessionData)
+        }
+        RunLoop.current.add(timer, forMode: .common)
+        self.timer = timer
+    }
+    private func respond(status: Int, body: Data) {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() { timer?.invalidate() }
 }

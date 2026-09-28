@@ -33,9 +33,11 @@ struct RootView: View {
         }
         // Purchases belong to the Supabase account, so the store learns who
         // is buying whenever that changes: a restored session at launch, or
-        // the account onboarding creates.
-        .task(id: session.userID) {
-            await purchases.start(userID: session.userID)
+        // the account onboarding creates. Only once the server has confirmed
+        // it: an account shown early from storage may have been deleted, and
+        // a purchase made under it would reach nobody.
+        .task(id: session.confirmedUserID) {
+            await purchases.start(userID: session.confirmedUserID)
         }
     }
 }

@@ -24,6 +24,13 @@ final class AccountDeletion {
         requiresCleanup = defaults.bool(forKey: Self.receiptKey)
     }
 
+    /// The student asked for a deletion whose answer never arrived. Until the
+    /// server settles it, the app must not open onto the account as if nothing
+    /// had happened: see `SessionService.start(opensEarly:)`.
+    var hasUnansweredRequest: Bool {
+        !requiresCleanup && defaults.bool(forKey: Self.requestKey)
+    }
+
     func perform(deleteRemote: @MainActor () async throws -> Void,
                  clearLocal: @MainActor () async throws -> Void,
                  signOut: @MainActor () async throws -> Void) async -> Bool {
