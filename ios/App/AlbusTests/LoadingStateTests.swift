@@ -17,6 +17,8 @@ struct LoadingStateTests {
         private var released = false
         private var waiting: CheckedContinuation<Void, Never>?
 
+        private(set) var purchases = 0
+
         func identify(_ appUserID: String) async throws {}
         func offers() async throws -> [StoreOffer] {
             if holdOffers, !released { await withCheckedContinuation { waiting = $0 } }
@@ -28,32 +30,33 @@ struct LoadingStateTests {
             waiting = nil
         }
         var isHolding: Bool { waiting != nil }
-        func purchase(productID: String) async throws -> Bool { true }
+        func purchase(productID: String) async throws -> Bool {
+            purchases += 1
+            return true
+        }
         func restore() async throws -> Bool { true }
         func manageSubscriptions() async throws {}
     }
 
-    @Test("a paid plan shows the shape of its price only while it has none to show")
+    @Test("a paid plan shows the shape of its price while the App Store is asked")
     func priceSkeletonRule() {
-        // The App Store has not answered, and no price is to hand.
-        #expect(PaywallScreen.showsPriceSkeleton(isFree: false, availability: .loading, hasOffer: false))
-        // A price already fetched stays through a reload: it can still be bought.
-        #expect(!PaywallScreen.showsPriceSkeleton(isFree: false, availability: .loading, hasOffer: true))
+        #expect(PaywallScreen.showsPriceSkeleton(isFree: false, availability: .loading))
         // Answered, unanswerable, or not for sale in this build: never a skeleton.
-        #expect(!PaywallScreen.showsPriceSkeleton(isFree: false, availability: .ready, hasOffer: true))
-        #expect(!PaywallScreen.showsPriceSkeleton(isFree: false, availability: .failed("x"), hasOffer: false))
-        #expect(!PaywallScreen.showsPriceSkeleton(isFree: false, availability: .unavailable, hasOffer: false))
+        #expect(!PaywallScreen.showsPriceSkeleton(isFree: false, availability: .ready))
+        #expect(!PaywallScreen.showsPriceSkeleton(isFree: false, availability: .failed("x")))
+        #expect(!PaywallScreen.showsPriceSkeleton(isFree: false, availability: .unavailable))
         // Free has no price to wait for.
-        #expect(!PaywallScreen.showsPriceSkeleton(isFree: true, availability: .loading, hasOffer: false))
+        #expect(!PaywallScreen.showsPriceSkeleton(isFree: true, availability: .loading))
     }
 
-    @Test("prices arrive in place of their skeletons, and a reload keeps them on screen")
-    func reloadKeepsPricesOnScreen() async throws {
+    /// The reported bug: a reload kept the last prices on screen and let them
+    /// be bought, though the App Store's price might have changed.
+    @Test("during a reload, no old price is shown or sold; the new ones arrive in place")
+    func reloadHoldsPurchases() async throws {
         let store = ReloadingStore()
         let purchases = PurchaseService(store: store)
         func skeleton() -> Bool {
-            PaywallScreen.showsPriceSkeleton(isFree: false, availability: purchases.availability,
-                                             hasOffer: purchases.option(.plus, .monthly) != nil)
+            PaywallScreen.showsPriceSkeleton(isFree: false, availability: purchases.availability)
         }
 
         #expect(purchases.availability == .loading)
@@ -62,6 +65,7 @@ struct LoadingStateTests {
         await purchases.start(userID: UUID())
         #expect(purchases.availability == .ready)
         #expect(!skeleton(), "the storefront price, once it has arrived")
+        let offer = try #require(purchases.option(.plus, .monthly))
 
         store.holdOffers = true
         let reload = Task { await purchases.load() }
@@ -72,14 +76,17 @@ struct LoadingStateTests {
         #expect(caught, "the reload reached the App Store within two seconds")
         if caught {
             #expect(purchases.availability == .loading, "caught half-way through the reload")
-            #expect(purchases.option(.plus, .monthly) != nil, "the first load's offers are kept")
-            #expect(!skeleton(), "so their price and terms stay beside the buy button")
+            #expect(skeleton(), "the kept price may be stale: its shape, not its amount")
+            #expect(await purchases.purchase(offer) == .failed("Still loading prices. Try again in a moment."))
+            #expect(store.purchases == 0, "nothing reached the App Store")
         }
 
         // Released either way, so a reload that was slow to start still ends.
         store.release()
         await reload.value
         #expect(!skeleton())
+        #expect(await purchases.purchase(offer) == .purchased, "sold once the answer is in")
+        #expect(store.purchases == 1)
     }
 
     @Test("the marking skeleton sketches one card per rubric criterion, within reason")
