@@ -236,7 +236,15 @@ struct TaskDetailScreen: View {
                     .foregroundStyle(Tokens.Palette.inkSecondary)
                 }
 
-                if !steps.isEmpty {
+                if isRefining {
+                    // The count and the hours come with the AI's steps.
+                    VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+                        SkeletonBar(width: 170, height: 10)
+                            .frame(height: 16)
+                        SkeletonBar(height: 6, cornerRadius: 3)
+                    }
+                    .skeleton(label: "Albus is writing the steps")
+                } else if !steps.isEmpty {
                     VStack(spacing: Tokens.Spacing.s) {
                         HStack(alignment: .firstTextBaseline) {
                             Text("\(doneCount) of \(steps.count) steps · \(DurationText.short(minutes: remainingMinutes)) left of \(DurationText.short(minutes: totalMinutes))")
@@ -255,7 +263,9 @@ struct TaskDetailScreen: View {
     }
 
     @ViewBuilder private var albusNote: some View {
-        if steps.isEmpty {
+        if isRefining {
+            AlbusNote("Albus is writing the steps. **They'll be here in a moment.**", isBusy: true)
+        } else if steps.isEmpty {
             StatusBanner(tone: .warning,
                          message: "This assignment has no plan yet. Albus couldn't reach the planner when you added it.",
                          retryTitle: "Add a step") { addingStep = true }
@@ -347,34 +357,39 @@ struct TaskDetailScreen: View {
 
     @ViewBuilder private var plan: some View {
         if !steps.isEmpty {
-            SectionHeader(label: "Albus's plan", count: steps.count) {
-                HStack(spacing: Tokens.Spacing.m) {
-                    Text(DurationText.short(minutes: totalMinutes))
-                        .font(Tokens.Typography.mono)
-                        .foregroundStyle(Tokens.Palette.inkMuted)
-                    Menu {
-                        Button("Add a step", systemImage: "plus") { addingStep = true }
-                        if steps.count > 1 {
-                            Button("Reorder", systemImage: "arrow.up.arrow.down") {
-                                reordering = true
+            // No count, hours or edit menu while the AI writes the steps: all
+            // three are about to change.
+            SectionHeader(label: "Albus's plan", count: isRefining ? nil : steps.count) {
+                if !isRefining {
+                    HStack(spacing: Tokens.Spacing.m) {
+                        Text(DurationText.short(minutes: totalMinutes))
+                            .font(Tokens.Typography.mono)
+                            .foregroundStyle(Tokens.Palette.inkMuted)
+                        Menu {
+                            Button("Add a step", systemImage: "plus") { addingStep = true }
+                            if steps.count > 1 {
+                                Button("Reorder", systemImage: "arrow.up.arrow.down") {
+                                    reordering = true
+                                }
                             }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Tokens.Palette.inkSecondary)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
                         }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Tokens.Palette.inkSecondary)
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
+                        .accessibilityLabel("Edit plan")
                     }
-                    .accessibilityLabel("Edit plan")
                 }
             }
             .padding(.top, Tokens.Spacing.xs)
 
-            if unplacedCount > 0 {
+            if unplacedCount > 0 && !isRefining {
                 // Said plainly rather than hidden: the student needs to move the
                 // deadline, cut scope, or study more hours, and none of those
-                // decisions are the app's to make quietly.
+                // decisions are the app's to make quietly. Not while the AI is
+                // writing the steps, though: the fit is about to change.
                 StatusBanner(
                     tone: .warning,
                     message: unplacedCount == steps.count
@@ -384,32 +399,68 @@ struct TaskDetailScreen: View {
                 .padding(.top, Tokens.Spacing.xs)
             }
 
-            VStack(spacing: 0) {
-                let tools = toolsByStep
-                ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
-                    StepRow(
-                        step: step,
-                        tools: tools[step.id] ?? [],
-                        number: index + 1,
-                        isLast: index == steps.count - 1,
-                        isNext: step.id == nextStepID,
-                        isExpanded: expanded == step.id,
-                        subject: subject,
-                        onToggleDone: {
-                            coordinator.setCompleted(step, step.completedAt == nil, context: context,
-                                     availability: preferences.availability)
-                        },
-                        onStartSession: { start(step) },
-                        onEdit: { editing = StepDraft(step) },
-                        onTap: {
-                            withAnimation(Tokens.Motion.quick) {
-                                expanded = expanded == step.id ? nil : step.id
-                            }
+            if isRefining {
+                StepListSkeleton(count: max(steps.count, 3))
+            } else {
+                stepList
+            }
+        }
+    }
+
+    private var stepList: some View {
+        VStack(spacing: 0) {
+            let tools = toolsByStep
+            ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
+                StepRow(
+                    step: step,
+                    tools: tools[step.id] ?? [],
+                    number: index + 1,
+                    isLast: index == steps.count - 1,
+                    isNext: step.id == nextStepID,
+                    isExpanded: expanded == step.id,
+                    subject: subject,
+                    onToggleDone: {
+                        coordinator.setCompleted(step, step.completedAt == nil, context: context,
+                                 availability: preferences.availability)
+                    },
+                    onStartSession: { start(step) },
+                    onEdit: { editing = StepDraft(step) },
+                    onTap: {
+                        withAnimation(Tokens.Motion.quick) {
+                            expanded = expanded == step.id ? nil : step.id
                         }
-                    )
+                    }
+                )
+            }
+        }
+    }
+
+    /// The phone's plan is placed and the AI is still writing the steps.
+    private var isRefining: Bool { coordinator.isRefining(assignment) }
+}
+
+/// The step list's shape while the AI writes the steps: a node and two lines
+/// for each, and the length on the right.
+private struct StepListSkeleton: View {
+    let count: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Tokens.Spacing.l) {
+            ForEach(0..<count, id: \.self) { index in
+                HStack(alignment: .top, spacing: Tokens.Spacing.m) {
+                    Circle()
+                        .fill(Skeleton.fill)
+                        .frame(width: 24, height: 24)
+                    VStack(alignment: .leading, spacing: 7) {
+                        SkeletonBar(fraction: index == 0 ? 0.72 : 0.56, height: 12)
+                        SkeletonBar(fraction: 0.34, height: 9)
+                    }
+                    SkeletonBar(width: 34, height: 10)
                 }
             }
         }
+        .padding(.top, Tokens.Spacing.xs)
+        .skeleton(label: "Albus is writing the steps")
     }
 }
 

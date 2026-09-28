@@ -176,7 +176,8 @@ struct HomeScreen: View {
                                     NavigationLink {
                                         Screen { TaskDetailScreen(assignment: assignment) }
                                     } label: {
-                                        AssignmentCard(assignment: assignment, now: now)
+                                        AssignmentCard(assignment: assignment, now: now,
+                                                       isRefining: coordinator.isRefining(assignment))
                                     }
                                     .buttonStyle(.plain)
                                     // The up-next card shows the same title, so
@@ -322,7 +323,9 @@ struct HomeScreen: View {
 
     @ViewBuilder private var status: some View {
         if coordinator.status == .planning {
-            StatusBanner(tone: .working, message: "Albus is planning…")
+            // The plan is already in the week; what is still coming is the
+            // detail of each step.
+            StatusBanner(tone: .working, message: "Albus is writing the steps…")
         }
         if case .plannedLocally(let note, let suggestsUpgrade) = coordinator.status {
             StatusBanner(tone: .working, message: note,
@@ -390,6 +393,9 @@ struct HomeScreen: View {
 private struct AssignmentCard: View {
     let assignment: Assignment
     let now: Date
+    /// The phone's plan is in place and the AI is still writing the steps, so
+    /// the step count is about to change: its shape, not a number.
+    var isRefining = false
 
     private var subject: Tokens.SubjectColor {
         assignment.course?.subjectColor ?? .violet
@@ -415,7 +421,14 @@ private struct AssignmentCard: View {
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if assignment.subtasks.isEmpty {
+                    if isRefining {
+                        HStack(spacing: Tokens.Spacing.s + 2) {
+                            SkeletonBar(height: 6, cornerRadius: 3)
+                            SkeletonBar(width: 28, height: 10)
+                                .frame(minWidth: 34, alignment: .trailing)
+                        }
+                        .skeleton(label: "Albus is writing the steps")
+                    } else if assignment.subtasks.isEmpty {
                         Text("No plan yet")
                             .font(Tokens.Typography.micro)
                             .foregroundStyle(Tokens.Palette.inkMuted)
