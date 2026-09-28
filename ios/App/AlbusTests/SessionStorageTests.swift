@@ -543,7 +543,8 @@ struct SessionStorageTests {
     /// was never answered keeps launch waiting only until the server answers.
     @MainActor @Test("a launch the server answers settles an unanswered deletion either way")
     func launchSettlesUnansweredDeletion() async throws {
-        func relaunch(transport: URLProtocol.Type) async throws -> (SessionService, AccountDeletion) {
+        func relaunch(transport: URLProtocol.Type, askedAgo: TimeInterval = 3600) async throws
+            -> (SessionService, AccountDeletion) {
             let defaults = isolated(), keychain = MemoryKeychain()
             try keychain.store(key: "sb-session-unit-auth-token", value: Self.expiredSessionData())
             let deletion = AccountDeletion(defaults: defaults)
@@ -551,6 +552,8 @@ struct SessionStorageTests {
                                             deleteRemote: { throw URLError(.networkConnectionLost) },
                                             clearLocal: {}, signOut: {}))
             #expect(deletion.hasUnansweredRequest)
+            // When the student asked, as far as this launch can tell.
+            defaults.set(Date.now.addingTimeInterval(-askedAgo), forKey: "albus.accountDeletion.requestedAt")
             let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
             let session = SessionService(client: Self.client(storage, transport: transport), storage: storage)
             let relaunched = AccountDeletion(defaults: defaults)
@@ -558,10 +561,15 @@ struct SessionStorageTests {
             return (session, relaunched)
         }
 
-        // Renewed: the account exists, so the request deleted nothing.
+        // Renewed an hour on: the account exists, so the request deleted nothing.
         let (renewed, kept) = try await relaunch(transport: SlowRefreshTransport.self)
         #expect(renewed.userID == Self.storedUserID)
         #expect(!kept.hasUnansweredRequest && !kept.requiresCleanup)
+
+        // Renewed a minute on: the server might still have been deleting it.
+        let (soon, waiting) = try await relaunch(transport: SlowRefreshTransport.self, askedAgo: 60)
+        #expect(soon.userID == Self.storedUserID)
+        #expect(waiting.hasUnansweredRequest, "not settled by a renewal the deletion could follow")
 
         // Refused: the deletion happened, and cleanup starts.
         let (_, deleted) = try await relaunch(transport: RejectedRefreshTransport.self)
@@ -587,6 +595,53 @@ struct SessionStorageTests {
         #expect(session.userID == nil, "not opened onto an account that may be gone")
         await launch.value
         #expect(session.userID == Self.storedUserID)
+    }
+
+    /// The reported bug: asking first leaves a fresh pass, so after a lost
+    /// answer the next launch found the pass in date and never asked.
+    @MainActor @Test("with a deletion unanswered, launch asks the server even about a pass in date")
+    func unansweredLaunchAsksAboutFreshPass() async throws {
+        let defaults = isolated(), keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: SessionTestTransport.sessionData)
+        defaults.set(true, forKey: "albus.accountDeletion.requested")
+        defaults.set(Date.now.addingTimeInterval(-60), forKey: "albus.accountDeletion.requestedAt")
+        let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: RejectedRefreshTransport.self),
+                                     storage: storage)
+        let deletion = AccountDeletion(defaults: defaults)
+
+        await session.start(settling: deletion)
+
+        #expect(session.credentialRejected, "only the server could say, the pass being in date")
+        #expect(deletion.requiresCleanup)
+        #expect(session.userID == nil, "the old account's plans are not shown")
+    }
+
+    @MainActor @Test("with a deletion unanswered and no answer, the account opens as it would offline")
+    func unansweredWithoutAnswerOpensAwaiting() async throws {
+        SwitchingRefreshTransport.mode.setRejected(false)
+        defer { SwitchingRefreshTransport.mode.setRejected(false) }
+        let defaults = isolated(), keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: SessionTestTransport.sessionData)
+        defaults.set(true, forKey: "albus.accountDeletion.requested")
+        let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: SwitchingRefreshTransport.self),
+                                     storage: storage)
+        let deletion = AccountDeletion(defaults: defaults)
+
+        await session.start(settling: deletion)
+        #expect(session.userID == Self.storedUserID, "their plans, not the set-up questions")
+        #expect(session.awaitingRenewal)
+        #expect(session.confirmedUserID == nil, "nothing acts for the account beyond the phone")
+        #expect(deletion.hasUnansweredRequest && !deletion.requiresCleanup)
+
+        // Back in the app, and this time the server refuses the pass: asked
+        // again, though the pass is still in date.
+        SwitchingRefreshTransport.mode.setRejected(true)
+        await session.revalidate()
+        #expect(session.credentialRejected)
+        deletion.adoptLostDeletion(credentialRejected: session.credentialRejected)
+        #expect(deletion.requiresCleanup)
     }
 
     /// With nothing outstanding the app opens at once, so a student can ask

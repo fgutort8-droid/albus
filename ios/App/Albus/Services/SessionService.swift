@@ -40,15 +40,18 @@ final class SessionService {
     /// network failure deliberately leaves this false.
     private(set) var credentialRejected = false
 
-    /// True while the account on screen came from this phone's storage and its
-    /// expired pass has not been renewed yet, because the phone was offline or
-    /// the server did not answer. `revalidate()` tries again.
+    /// True while the account on screen came from this phone's storage and the
+    /// server has not renewed its pass yet, because the phone was offline or the
+    /// server did not answer. The pass had expired, or a deletion the student
+    /// asked for is unanswered. `revalidate()` asks again.
     private(set) var awaitingRenewal = false
 
     /// True when the last `start()` renewed the stored pass with the server,
     /// which proves the account existed then. A pass still in date is used
     /// without asking, and proves nothing.
     private(set) var renewedByServer = false
+    /// When that renewal was asked for.
+    private(set) var renewalBegan: Date?
 
     /// A renewal is in flight. Keeps `revalidate()` from racing `start()`.
     private var renewing = false
@@ -85,8 +88,11 @@ final class SessionService {
     /// farming a one-line script.
     ///
     /// - Parameter opensEarly: false while a deletion the student asked for is
-    ///   unanswered. Its account may already be gone, so the app waits for the
-    ///   server rather than show its plans or buy under it.
+    ///   unanswered. Its account may already be gone, so launch asks the server,
+    ///   even about a pass still in date, and waits for the answer rather than
+    ///   show its plans or buy under it. With no answer at all, offline say,
+    ///   the account opens as any does offline: awaiting renewal, with nothing
+    ///   acting for it beyond the phone, and the next return asks again.
     func start(opensEarly: Bool = true) async {
 #if DEBUG
         // UI tests that exercise post-onboarding screens must not create a real
@@ -108,6 +114,7 @@ final class SessionService {
         }
         credentialRejected = false
         renewedByServer = false
+        renewalBegan = nil
         renewing = true
         defer { renewing = false }
         var shown = state
@@ -127,7 +134,9 @@ final class SessionService {
                 awaitingRenewal = true
             }
             shown = state
-            let (session, renewed) = try await Self.validatedSession(client, storage: storage)
+            let began = Date.now
+            let (session, renewed) = try await Self.validatedSession(client, storage: storage,
+                                                                     renew: !opensEarly)
             // Settled some other way while the server answered, by a sign-out
             // after a deletion say: that stands.
             guard state == shown else { return }
@@ -136,15 +145,24 @@ final class SessionService {
                               isAnonymous: session.user.isAnonymous)
             awaitingRenewal = false
             renewedByServer = renewed
+            renewalBegan = renewed ? began : nil
         } catch {
             guard state == shown else { return }
+            // Kept back for the server's answer, and there was none. The stored
+            // account opens awaiting renewal, as it would have offline; a
+            // refused pass or none at all is settled below as ever.
+            if !opensEarly, let stored = client.auth.currentSession {
+                state = .signedIn(userID: stored.user.id, isAnonymous: stored.user.isAnonymous)
+                awaitingRenewal = true
+            }
             settle(restoreFailure: error)
         }
     }
 
     /// Renews a pass that `start()` could not, once the student is back in the
-    /// app. A refused pass is handled exactly as at launch; a network failure
-    /// changes nothing, and the next return to the app tries again.
+    /// app. Always with the server, even for a pass in date: what is awaited is
+    /// its answer. A refused pass is handled exactly as at launch; a network
+    /// failure changes nothing, and the next return to the app tries again.
     func revalidate() async {
         guard awaitingRenewal, !renewing, let client, case .signedIn = state else { return }
         let shown = state
@@ -152,7 +170,7 @@ final class SessionService {
         defer { renewing = false }
         do {
             try storage.beginAttempt()
-            let (session, _) = try await Self.validatedSession(client, storage: storage)
+            let (session, _) = try await Self.validatedSession(client, storage: storage, renew: true)
             // Signed out while this was in flight: the sign-out stands, and
             // an answer for the old pass must not bring the account back.
             guard state == shown else { return }

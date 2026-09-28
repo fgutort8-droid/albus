@@ -83,21 +83,55 @@ struct AccountDeletionTests {
         #expect(!AccountDeletion(defaults: store).hasUnansweredRequest)
     }
 
-    @Test("a pass the server renews settles an unanswered request")
+    @Test("a pass the server renews well after the request settles it")
     func renewalSettlesUnansweredRequest() async {
         let store = defaults()
+        let asked = Date.now
         #expect(await !AccountDeletion(defaults: store).perform(
             confirmAccount: {}, deleteRemote: { throw URLError(.timedOut) },
             clearLocal: {}, signOut: {}))
 
         let relaunched = AccountDeletion(defaults: store)
         #expect(relaunched.hasUnansweredRequest)
-        relaunched.accountOutlivedRequest()
+        relaunched.accountOutlivedRequest(renewalBegan: asked.addingTimeInterval(AccountDeletion.settleAfter + 5))
         #expect(!relaunched.hasUnansweredRequest)
         #expect(!AccountDeletion(defaults: store).hasUnansweredRequest, "and it stays settled")
+        #expect(store.object(forKey: "albus.accountDeletion.requestedAt") == nil)
         // Settled as "not deleted": a pass refused much later is some other story.
         relaunched.adoptLostDeletion(credentialRejected: true)
         #expect(!relaunched.requiresCleanup)
+    }
+
+    /// The server may still have been carrying out the deletion when it
+    /// renewed the pass. If it then finishes, the pass is refused next time,
+    /// and only the mark lets that refusal clean the phone.
+    @Test("a renewal soon after the request settles nothing")
+    func earlyRenewalSettlesNothing() async {
+        let store = defaults()
+        let asked = Date.now
+        #expect(await !AccountDeletion(defaults: store).perform(
+            confirmAccount: {}, deleteRemote: { throw URLError(.networkConnectionLost) },
+            clearLocal: {}, signOut: {}))
+
+        let relaunched = AccountDeletion(defaults: store)
+        relaunched.accountOutlivedRequest(renewalBegan: asked.addingTimeInterval(90))
+        #expect(relaunched.hasUnansweredRequest)
+        relaunched.adoptLostDeletion(credentialRejected: true)
+        #expect(relaunched.requiresCleanup, "the deletion finished after all, and the phone is cleaned")
+    }
+
+    @Test("a mark from before requests carried their time waits from the first renewal")
+    func undatedMarkWaits() {
+        let store = defaults()
+        store.set(true, forKey: "albus.accountDeletion.requested")
+        let deletion = AccountDeletion(defaults: store)
+        let first = Date.now
+        deletion.accountOutlivedRequest(renewalBegan: first)
+        #expect(deletion.hasUnansweredRequest, "no time to measure from: the clock starts now")
+        deletion.accountOutlivedRequest(renewalBegan: first.addingTimeInterval(60))
+        #expect(deletion.hasUnansweredRequest)
+        deletion.accountOutlivedRequest(renewalBegan: first.addingTimeInterval(AccountDeletion.settleAfter + 1))
+        #expect(!deletion.hasUnansweredRequest)
     }
 
     @Test("a request in flight is never settled from under it")
@@ -106,7 +140,7 @@ struct AccountDeletionTests {
         #expect(await !deletion.perform(
             confirmAccount: {},
             deleteRemote: {
-                deletion.accountOutlivedRequest()
+                deletion.accountOutlivedRequest(renewalBegan: .now.addingTimeInterval(3600))
                 throw URLError(.networkConnectionLost)
             },
             clearLocal: {}, signOut: {}))

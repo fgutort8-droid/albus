@@ -15,6 +15,13 @@ final class AccountDeletion {
     /// alone: it only says an unanswered question is outstanding, and
     /// `adoptLostDeletion` and `accountOutlivedRequest` are where it is answered.
     private static let requestKey = "albus.accountDeletion.requested"
+    /// When the request was made, for `accountOutlivedRequest`.
+    private static let requestedAtKey = "albus.accountDeletion.requestedAt"
+    /// How long after a request a renewal of the account's pass proves the
+    /// request deleted nothing. A server still carrying out the deletion
+    /// could renew the pass moments before the account goes; the server gives
+    /// up on a request within seconds, so ten minutes leaves no doubt.
+    static let settleAfter: TimeInterval = 10 * 60
     private let defaults: UserDefaults
     private(set) var requiresCleanup: Bool
     private(set) var isBusy = false
@@ -57,6 +64,7 @@ final class AccountDeletion {
                 // Before the request, not after: a lost answer must still leave
                 // this phone knowing a deletion is outstanding.
                 defaults.set(true, forKey: Self.requestKey)
+                defaults.set(Date.now, forKey: Self.requestedAtKey)
                 asked = true
                 try await deleteRemote()
             } catch is AccountUnreachable {
@@ -86,6 +94,7 @@ final class AccountDeletion {
             try await signOut()
             defaults.removeObject(forKey: Self.receiptKey)
             defaults.removeObject(forKey: Self.requestKey)
+            defaults.removeObject(forKey: Self.requestedAtKey)
             requiresCleanup = false
             return true
         } catch {
@@ -123,18 +132,27 @@ final class AccountDeletion {
     }
 
     /// Settles a deletion whose answer never arrived, the other way: the server
-    /// has since renewed this account's pass, so the account exists and the
-    /// request deleted nothing. Launch stops waiting on a question that has
-    /// been answered.
+    /// renewed this account's pass long enough after the request that the
+    /// request cannot still have been under way, so it deleted nothing. Launch
+    /// stops waiting on a question that has been answered.
     ///
-    /// Only for a renewal that began after the request, with no request in
-    /// flight. `SessionService.start(settling:)` guarantees both: it calls this
-    /// only when the mark was already set before the restore began, and with
-    /// it set the app does not open, so no new request can begin, until the
-    /// restore returns.
-    func accountOutlivedRequest() {
-        guard !isBusy, !requiresCleanup else { return }
+    /// A renewal sooner than `settleAfter` proves nothing and leaves the mark:
+    /// if the deletion is carried out after all, the pass is refused next time
+    /// and `adoptLostDeletion` still needs the mark to clean up.
+    ///
+    /// Never with a request in flight. `SessionService.start(settling:)` calls
+    /// this only for a mark set before its restore began, and with the mark set
+    /// the app does not open, so no new request can begin, until it returns.
+    func accountOutlivedRequest(renewalBegan: Date) {
+        guard !isBusy, !requiresCleanup, defaults.bool(forKey: Self.requestKey) else { return }
+        guard let requestedAt = defaults.object(forKey: Self.requestedAtKey) as? Date else {
+            // A mark from before requests carried their time: its clock starts now.
+            defaults.set(renewalBegan, forKey: Self.requestedAtKey)
+            return
+        }
+        guard renewalBegan.timeIntervalSince(requestedAt) >= Self.settleAfter else { return }
         defaults.removeObject(forKey: Self.requestKey)
+        defaults.removeObject(forKey: Self.requestedAtKey)
     }
 }
 
@@ -143,15 +161,18 @@ extension SessionService {
     /// settled by what the server says.
     ///
     /// The app opens onto the stored account at once, unless such a deletion
-    /// is outstanding: its account may be gone, so launch waits for the
-    /// server. A refused pass means the deletion happened, and cleanup starts;
-    /// a renewed one means the account exists and the request deleted nothing,
-    /// so later launches open at once again. No signal settles nothing.
+    /// is outstanding: its account may be gone, so launch asks the server and
+    /// waits for the answer. A refused pass means the deletion happened, and
+    /// cleanup starts; a pass renewed well after the request means the
+    /// account exists and the request deleted nothing, so later launches open
+    /// at once again. No signal settles nothing.
     func start(settling deletion: AccountDeletion) async {
         let unanswered = deletion.hasUnansweredRequest
         await start(opensEarly: !unanswered)
         deletion.adoptLostDeletion(credentialRejected: credentialRejected)
-        if unanswered, renewedByServer { deletion.accountOutlivedRequest() }
+        if unanswered, renewedByServer, let began = renewalBegan {
+            deletion.accountOutlivedRequest(renewalBegan: began)
+        }
     }
 }
 
