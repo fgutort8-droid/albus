@@ -81,6 +81,7 @@ struct AlbusApp: App {
     @State private var focusSession = FocusSession()
     @State private var notifications = NotificationCoordinator()
     @State private var router = NotificationRouter()
+    @State private var marking = MarkingCoordinator()
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -99,6 +100,7 @@ struct AlbusApp: App {
                 .environment(focusSession)
                 .environment(notifications)
                 .environment(router)
+                .environment(marking)
                 .onChange(of: deletion.requiresCleanup) { _, pending in
                     if !pending {
                         coordinator = PlanCoordinator()
@@ -106,6 +108,7 @@ struct AlbusApp: App {
                         focusSession = FocusSession()
                         notifications = NotificationCoordinator()
                         router = NotificationRouter()
+                        marking = MarkingCoordinator()
                         wireNotifications()
                     }
                 }

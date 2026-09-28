@@ -106,9 +106,16 @@ struct GradingService {
         case unusableResponse
         case unavailable
         case rejected(String)
+        /// The work was sent and the answer never came back: the connection
+        /// dropped or timed out mid-marking. The server may well have finished
+        /// and saved it, so `MarkingCoordinator` looks it up with
+        /// `recover(since:)` rather than reporting a failure. Never shown.
+        case answerLost
 
         var errorDescription: String? {
             switch self {
+            case .answerLost:
+                Failure.unavailable.errorDescription
             case .notOnPlan:
                 "Marking is part of Albus Plus and Pro."
             case .allowanceUsed(let resetsAt):
@@ -239,9 +246,69 @@ struct GradingService {
         } catch let error as FunctionsError {
             throw Self.translate(error)
         } catch let error as URLError {
-            throw error.code == .notConnectedToInternet || error.code == .networkConnectionLost
-                ? Failure.offline
-                : Failure.unavailable
+            switch error.code {
+            // Never left the phone: nothing was marked, and saying so is honest.
+            case .notConnectedToInternet:
+                throw Failure.offline
+            // Left the phone, and the answer did not come back. The marking
+            // may have finished on the server anyway; see `answerLost`.
+            case .networkConnectionLost, .timedOut:
+                throw Failure.answerLost
+            default:
+                throw Failure.unavailable
+            }
+        }
+    }
+
+    /// The newest grading the server saved at or after `since`, for a marking
+    /// whose answer never reached the phone.
+    ///
+    /// The server stores every grading it produces before answering, and row
+    /// security limits this to the caller's own. Reading it back costs nothing
+    /// and marks nothing, unlike sending the work again, which could start a
+    /// second, paid marking while the first is still running.
+    func recover(since: Date) async throws -> Result? {
+        guard let client else { throw Failure.unavailable }
+        let rows: [SavedGrading] = try await client.from("gradings")
+            // One literal, as in `grade/index.ts`: these are the columns its
+            // own reuse path returns, in the shape the app already reads.
+            .select("id, overall_marks, total_marks, grade_label, grade_note, work_title, breakdown, feedback, improvements, model, basis")
+            .gte("created_at", value: ISO8601DateFormatter().string(from: since))
+            .order("created_at", ascending: false)
+            .limit(1)
+            .execute()
+            .value
+        return rows.first?.result
+    }
+
+    /// A row of `gradings`: what `grade` returned, as the server keeps it.
+    private struct SavedGrading: Decodable {
+        let id: UUID
+        let overallMarks: Int?
+        let totalMarks: Int?
+        let gradeLabel: String?
+        let gradeNote: String?
+        let workTitle: String?
+        let breakdown: [Criterion]
+        let feedback: String
+        let improvements: [Improvement]
+        let model: String
+        let basis: GradingBasis
+
+        private enum CodingKeys: String, CodingKey {
+            case id, breakdown, feedback, improvements, model, basis
+            case overallMarks = "overall_marks"
+            case totalMarks = "total_marks"
+            case gradeLabel = "grade_label"
+            case gradeNote = "grade_note"
+            case workTitle = "work_title"
+        }
+
+        var result: Result {
+            Result(id: id, overallMarks: overallMarks, totalMarks: totalMarks,
+                   gradeLabel: gradeLabel, gradeNote: gradeNote, title: workTitle,
+                   criteria: breakdown, feedback: feedback, improvements: improvements,
+                   model: model, basis: basis, rubricName: nil, reused: true)
         }
     }
 
