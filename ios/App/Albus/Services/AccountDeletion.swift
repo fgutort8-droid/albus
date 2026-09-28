@@ -9,10 +9,19 @@ final class AccountDeletion {
     /// The student asked, and the server's answer may never have arrived.
     ///
     /// Written *before* the request, because the failure this guards against
-    /// is a request that succeeds and whose answer is lost. Nothing is erased
-    /// on the strength of this mark alone: it only says an unanswered question
-    /// is outstanding, and `adoptLostDeletion` is where it is answered.
+    /// is a request that succeeds and whose answer is lost; but only after the
+    /// server has answered `confirmAccount`, so an attempt that never left the
+    /// phone leaves no mark. Nothing is erased on the strength of this mark
+    /// alone: it only says an unanswered question is outstanding, and
+    /// `adoptLostDeletion` and `accountOutlivedRequest` are where it is answered.
     private static let requestKey = "albus.accountDeletion.requested"
+    /// When the request was made, for `accountOutlivedRequest`.
+    private static let requestedAtKey = "albus.accountDeletion.requestedAt"
+    /// How long after a request a renewal of the account's pass proves the
+    /// request deleted nothing. A server still carrying out the deletion
+    /// could renew the pass moments before the account goes; the server gives
+    /// up on a request within seconds, so ten minutes leaves no doubt.
+    static let settleAfter: TimeInterval = 10 * 60
     private let defaults: UserDefaults
     private(set) var requiresCleanup: Bool
     private(set) var isBusy = false
@@ -24,7 +33,19 @@ final class AccountDeletion {
         requiresCleanup = defaults.bool(forKey: Self.receiptKey)
     }
 
-    func perform(deleteRemote: @MainActor () async throws -> Void,
+    /// The student asked for a deletion whose answer never arrived. Until the
+    /// server settles it, the app must not open onto the account as if nothing
+    /// had happened: see `SessionService.start(opensEarly:)`.
+    var hasUnansweredRequest: Bool {
+        !requiresCleanup && defaults.bool(forKey: Self.requestKey)
+    }
+
+    /// - Parameters:
+    ///   - confirmAccount: asks the server whether the account still exists,
+    ///     deleting nothing. Throws `AccountUnreachable` if it is already gone.
+    ///   - deleteRemote: the request that deletes it.
+    func perform(confirmAccount: @MainActor () async throws -> Void,
+                 deleteRemote: @MainActor () async throws -> Void,
                  clearLocal: @MainActor () async throws -> Void,
                  signOut: @MainActor () async throws -> Void) async -> Bool {
         guard !isBusy else { return false }
@@ -33,10 +54,18 @@ final class AccountDeletion {
         defer { isBusy = false }
 
         if !requiresCleanup {
-            // Before the request, not after: a lost answer must still leave
-            // this phone knowing a deletion is outstanding.
-            defaults.set(true, forKey: Self.requestKey)
+            var asked = false
             do {
+                // A question first, which deletes nothing. A phone with no
+                // signal stops here, before any request that could delete the
+                // account has left it: nothing is outstanding, so launch keeps
+                // opening straight onto the plans.
+                try await confirmAccount()
+                // Before the request, not after: a lost answer must still leave
+                // this phone knowing a deletion is outstanding.
+                defaults.set(true, forKey: Self.requestKey)
+                defaults.set(Date.now, forKey: Self.requestedAtKey)
+                asked = true
                 try await deleteRemote()
             } catch is AccountUnreachable {
                 // The account cannot be reached from this device any more, and
@@ -48,6 +77,8 @@ final class AccountDeletion {
                 // Keep local work and credentials so the same idempotent RPC can retry.
                 if (error as? URLError)?.code == .notConnectedToInternet {
                     errorMessage = "Couldn't delete your account. You're offline. Nothing on this device was changed. Reconnect and try again."
+                } else if !asked {
+                    errorMessage = "Couldn't reach Albus to delete your account. Nothing was changed. Please try again."
                 } else {
                     errorMessage = "Couldn't confirm account deletion. Nothing on this device was changed. Please try again."
                 }
@@ -63,6 +94,7 @@ final class AccountDeletion {
             try await signOut()
             defaults.removeObject(forKey: Self.receiptKey)
             defaults.removeObject(forKey: Self.requestKey)
+            defaults.removeObject(forKey: Self.requestedAtKey)
             requiresCleanup = false
             return true
         } catch {
@@ -97,6 +129,50 @@ final class AccountDeletion {
         defaults.set(true, forKey: Self.receiptKey)
         requiresCleanup = true
         generation += 1
+    }
+
+    /// Settles a deletion whose answer never arrived, the other way: the server
+    /// renewed this account's pass long enough after the request that the
+    /// request cannot still have been under way, so it deleted nothing. Launch
+    /// stops waiting on a question that has been answered.
+    ///
+    /// A renewal sooner than `settleAfter` proves nothing and leaves the mark:
+    /// if the deletion is carried out after all, the pass is refused next time
+    /// and `adoptLostDeletion` still needs the mark to clean up.
+    ///
+    /// Never with a request in flight. `SessionService.start(settling:)` calls
+    /// this only for a mark set before its restore began, and with the mark set
+    /// the app does not open, so no new request can begin, until it returns.
+    func accountOutlivedRequest(renewalBegan: Date) {
+        guard !isBusy, !requiresCleanup, defaults.bool(forKey: Self.requestKey) else { return }
+        guard let requestedAt = defaults.object(forKey: Self.requestedAtKey) as? Date else {
+            // A mark from before requests carried their time: its clock starts now.
+            defaults.set(renewalBegan, forKey: Self.requestedAtKey)
+            return
+        }
+        guard renewalBegan.timeIntervalSince(requestedAt) >= Self.settleAfter else { return }
+        defaults.removeObject(forKey: Self.requestKey)
+        defaults.removeObject(forKey: Self.requestedAtKey)
+    }
+}
+
+extension SessionService {
+    /// Launch's restore, with any deletion this phone never heard back about
+    /// settled by what the server says.
+    ///
+    /// The app opens onto the stored account at once, unless such a deletion
+    /// is outstanding: its account may be gone, so launch asks the server and
+    /// waits for the answer. A refused pass means the deletion happened, and
+    /// cleanup starts; a pass renewed well after the request means the
+    /// account exists and the request deleted nothing, so later launches open
+    /// at once again. No signal settles nothing.
+    func start(settling deletion: AccountDeletion) async {
+        let unanswered = deletion.hasUnansweredRequest
+        await start(opensEarly: !unanswered)
+        deletion.adoptLostDeletion(credentialRejected: credentialRejected)
+        if unanswered, renewedByServer, let began = renewalBegan {
+            deletion.accountOutlivedRequest(renewalBegan: began)
+        }
     }
 }
 
