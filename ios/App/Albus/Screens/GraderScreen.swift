@@ -99,8 +99,11 @@ struct GraderScreen: View {
     /// How many criterion cards the waiting screen sketches: one per criterion
     /// of the rubric being marked against, within reason, or three when blind.
     private var skeletonCriteria: Int {
-        let count = (chosenRubric ?? chosenAssignment?.rubric)?.items.count ?? 0
-        return count == 0 ? 3 : min(count, 6)
+        Self.skeletonCriteria(rubricItems: (chosenRubric ?? chosenAssignment?.rubric)?.items.count ?? 0)
+    }
+
+    static func skeletonCriteria(rubricItems: Int) -> Int {
+        rubricItems <= 0 ? 3 : min(rubricItems, 6)
     }
 
     var body: some View {
@@ -592,9 +595,9 @@ struct GraderScreen: View {
                 .font(Tokens.Typography.micro)
                 .foregroundStyle(Tokens.Palette.inkMuted)
 
-            // Where the feedback will land, instead of a spinner: the score,
-            // the summary and the criteria, in the places they will appear.
-            GradeResultSkeleton(criteria: skeletonCriteria)
+            // Where the feedback will land, instead of a spinner: every
+            // section of the result, in the places they will appear.
+            GradeResultSkeleton(criteria: skeletonCriteria, isBlind: isBlind)
                 .padding(.top, Tokens.Spacing.s)
         }
         .frame(maxWidth: .infinity)
