@@ -23,28 +23,15 @@ struct GradeResultView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Tokens.Spacing.l) {
-                basisBanner
-                headline
-                improvements
-
-                if !grading.feedback.isEmpty {
-                    VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
-                        SectionHeader(grading.basis == .blind ? "Albus's read" : "Overall")
-                        Text(grading.feedback)
-                            .font(Tokens.Typography.body)
-                            .foregroundStyle(Tokens.Palette.ink)
-                            .lineSpacing(3)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                if !grading.criteria.isEmpty {
-                    SectionHeader(grading.basis == .blind ? "What stood out" : "Against the rubric",
-                                  count: grading.criteria.count)
-                    VStack(spacing: Tokens.Spacing.s) {
-                        ForEach(grading.criteria) { criterion in
-                            CriterionCard(criterion: criterion)
-                        }
+                // In the shared order `GradeResultSkeleton` sketches, so the
+                // result lands where its placeholder was.
+                ForEach(GradeResultSection.allCases, id: \.self) { section in
+                    switch section {
+                    case .basis: GradingBasisBanner(basis: grading.basis)
+                    case .headline: headline
+                    case .improvements: improvements
+                    case .feedback: feedback
+                    case .criteria: criteria
                     }
                 }
 
@@ -63,46 +50,27 @@ struct GradeResultView: View {
         }
     }
 
-    /// What this was marked against, said before anything that looks like a mark.
-    ///
-    /// **The blind case is the reason this is the first thing on the screen.** A
-    /// reading with no rubric behind it must never be mistaken for a grade, and
-    /// a disclaimer underneath a big number is a disclaimer nobody reads.
-    @ViewBuilder private var basisBanner: some View {
-        switch grading.basis {
-        case .blind:
-            HStack(alignment: .top, spacing: Tokens.Spacing.m) {
-                AlbusCactus(size: 34, mood: .cooked)
-                VStack(alignment: .leading, spacing: Tokens.Spacing.xs) {
-                    Text("Albus is grading blindly")
-                        .font(Tokens.Typography.cardTitle)
-                        .foregroundStyle(Tokens.Palette.ink)
-                    Text("There was no rubric for this, so Albus can only say what "
-                         + "it thinks is strong or weak on its own reading. It has "
-                         + "not awarded marks, and this may not reflect your real grade.")
-                        .font(Tokens.Typography.caption)
-                        .foregroundStyle(Tokens.Palette.inkSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+    @ViewBuilder private var feedback: some View {
+        if !grading.feedback.isEmpty {
+            VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+                SectionHeader(grading.basis == .blind ? "Albus's read" : "Overall")
+                Text(grading.feedback)
+                    .font(Tokens.Typography.body)
+                    .foregroundStyle(Tokens.Palette.ink)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(Tokens.Spacing.l)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Tokens.Palette.cardSurface,
-                        in: RoundedRectangle(cornerRadius: Tokens.Radius.card))
-            .overlay(alignment: .leading) {
-                Rectangle().fill(Tokens.SubjectColor.amber.color).frame(width: 4)
-                    .clipShape(RoundedRectangle(cornerRadius: Tokens.Radius.card))
-            }
+        }
+    }
 
-        case .personal, .curriculum:
-            HStack(spacing: Tokens.Spacing.s) {
-                Image(systemName: "checkmark.seal.fill")
-                    .foregroundStyle(Tokens.SubjectColor.green.color)
-                Text(grading.basis == .personal
-                     ? "Graded against your rubric"
-                     : "Graded against your course's marking criteria")
-                    .font(Tokens.Typography.caption)
-                    .foregroundStyle(Tokens.Palette.inkSecondary)
+    @ViewBuilder private var criteria: some View {
+        if !grading.criteria.isEmpty {
+            SectionHeader(grading.basis == .blind ? "What stood out" : "Against the rubric",
+                          count: grading.criteria.count)
+            VStack(spacing: Tokens.Spacing.s) {
+                ForEach(grading.criteria) { criterion in
+                    CriterionCard(criterion: criterion)
+                }
             }
         }
     }
@@ -268,52 +236,161 @@ struct GradeResultView: View {
     }
 }
 
-/// The shape of `GradeResultView` while the marking is written: the score, the
-/// feedback, and a card for each criterion. Only the bars shine, not the cards.
+/// The shape of `GradeResultView` while the marking is written, section by
+/// section in the order it lays out (`GradeResultSection`), so the result lands
+/// where its placeholder was. Only the bars shine, not the cards.
 struct GradeResultSkeleton: View {
     /// Criterion cards to sketch. The real number arrives with the result.
     var criteria = 3
+    /// Known before the result. A blind reading's notice is real content from
+    /// the start: it is what stops a reading being taken for a grade.
+    var isBlind = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Tokens.Spacing.l) {
-            GlassCard {
-                HStack(alignment: .center, spacing: Tokens.Spacing.m) {
-                    VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
-                        SkeletonBar(width: 110, height: 16, cornerRadius: 6)
-                        SkeletonBar(width: 170, height: 10)
-                    }
-                    Spacer(minLength: 0)
-                    SkeletonBar(width: 64, height: 30, cornerRadius: 8)
+            ForEach(GradeResultSection.allCases, id: \.self) { section in
+                switch section {
+                case .basis: basis
+                case .headline: headline
+                case .improvements: improvements
+                case .feedback: feedback
+                case .criteria: criteriaCards
                 }
-                .skeleton()
             }
+        }
+    }
 
-            VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
-                SkeletonBar()
-                SkeletonBar(fraction: 0.94)
-                SkeletonBar(fraction: 0.62)
+    @ViewBuilder private var basis: some View {
+        if isBlind {
+            GradingBasisBanner(basis: .blind)
+        } else {
+            HStack(spacing: Tokens.Spacing.s) {
+                Circle().fill(Skeleton.fill).frame(width: 16, height: 16)
+                SkeletonBar(width: 170, height: 10)
             }
-            .skeleton()
+            .skeleton(label: "Loading what this was marked against")
+        }
+    }
 
-            VStack(spacing: Tokens.Spacing.s) {
-                ForEach(0..<criteria, id: \.self) { _ in
-                    GlassCard(padding: Tokens.Spacing.m) {
-                        VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
-                            HStack(spacing: Tokens.Spacing.m) {
-                                SkeletonBar(width: 120, height: 12)
-                                Spacer(minLength: 0)
-                                SkeletonBar(width: 36, height: 12)
-                            }
-                            SkeletonBar(height: 9)
-                            SkeletonBar(fraction: 0.7, height: 9)
-                        }
-                        .skeleton()
+    private var headline: some View {
+        GlassCard {
+            HStack(alignment: .center, spacing: Tokens.Spacing.m) {
+                VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+                    SkeletonBar(width: 110, height: 16, cornerRadius: 6)
+                    SkeletonBar(width: 170, height: 10)
+                }
+                Spacer(minLength: 0)
+                SkeletonBar(width: 64, height: 30, cornerRadius: 8)
+            }
+            .skeleton(label: isBlind ? "Loading Albus's read" : "Loading your grade")
+        }
+    }
+
+    private var improvements: some View {
+        VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+            SkeletonBar(width: 120, height: 11)
+            ForEach(0..<2, id: \.self) { _ in
+                HStack(alignment: .top, spacing: Tokens.Spacing.m) {
+                    Circle().fill(Skeleton.fill).frame(width: 22, height: 22)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SkeletonBar(fraction: 0.8, height: 12)
+                        SkeletonBar(fraction: 0.55, height: 9)
                     }
                 }
             }
         }
-        // One element for VoiceOver, not a dozen empty shapes.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Your feedback will appear here")
+        .skeleton(label: "Loading what to change")
+    }
+
+    private var feedback: some View {
+        VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+            SkeletonBar(width: 70, height: 11)
+            SkeletonBar()
+            SkeletonBar(fraction: 0.94)
+            SkeletonBar(fraction: 0.62)
+        }
+        .skeleton(label: "Loading the feedback")
+    }
+
+    @ViewBuilder private var criteriaCards: some View {
+        SkeletonBar(width: 140, height: 11)
+            .skeleton(label: "Loading the criteria")
+        VStack(spacing: Tokens.Spacing.s) {
+            ForEach(0..<criteria, id: \.self) { _ in
+                GlassCard(padding: Tokens.Spacing.m) {
+                    VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+                        HStack(spacing: Tokens.Spacing.m) {
+                            SkeletonBar(width: 120, height: 12)
+                            Spacer(minLength: 0)
+                            SkeletonBar(width: 36, height: 12)
+                        }
+                        SkeletonBar(height: 9)
+                        SkeletonBar(fraction: 0.7, height: 9)
+                    }
+                    .skeleton()
+                }
+            }
+        }
+    }
+}
+
+/// A marking result, top to bottom. `GradeResultView` lays its sections out
+/// in this order and `GradeResultSkeleton` sketches the same, so the result
+/// lands where its placeholder was and the two cannot drift apart.
+enum GradeResultSection: CaseIterable {
+    /// What it was marked against, before anything that looks like a mark.
+    case basis
+    case headline
+    case improvements
+    case feedback
+    case criteria
+}
+
+/// What a marking was measured against, said before anything that looks like
+/// a mark. The waiting screen shows it too: the basis is known before the
+/// result, and for a blind reading it is the most important thing on screen.
+struct GradingBasisBanner: View {
+    let basis: GradingBasis
+
+    /// **The blind case is the reason this is the first thing on the screen.** A
+    /// reading with no rubric behind it must never be mistaken for a grade, and
+    /// a disclaimer underneath a big number is a disclaimer nobody reads.
+    var body: some View {
+        switch basis {
+        case .blind:
+            HStack(alignment: .top, spacing: Tokens.Spacing.m) {
+                AlbusCactus(size: 34, mood: .cooked)
+                VStack(alignment: .leading, spacing: Tokens.Spacing.xs) {
+                    Text("Albus is grading blindly")
+                        .font(Tokens.Typography.cardTitle)
+                        .foregroundStyle(Tokens.Palette.ink)
+                    Text("There was no rubric for this, so Albus can only say what "
+                         + "it thinks is strong or weak on its own reading. It has "
+                         + "not awarded marks, and this may not reflect your real grade.")
+                        .font(Tokens.Typography.caption)
+                        .foregroundStyle(Tokens.Palette.inkSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(Tokens.Spacing.l)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Tokens.Palette.cardSurface,
+                        in: RoundedRectangle(cornerRadius: Tokens.Radius.card))
+            .overlay(alignment: .leading) {
+                Rectangle().fill(Tokens.SubjectColor.amber.color).frame(width: 4)
+                    .clipShape(RoundedRectangle(cornerRadius: Tokens.Radius.card))
+            }
+
+        case .personal, .curriculum:
+            HStack(spacing: Tokens.Spacing.s) {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundStyle(Tokens.SubjectColor.green.color)
+                Text(basis == .personal
+                     ? "Graded against your rubric"
+                     : "Graded against your course's marking criteria")
+                    .font(Tokens.Typography.caption)
+                    .foregroundStyle(Tokens.Palette.inkSecondary)
+            }
+        }
     }
 }
