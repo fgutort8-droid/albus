@@ -152,7 +152,11 @@ struct HomeScreen: View {
                 freeLimitNotice
 
                 if let next = upNext(now: now) {
-                    UpNextCard(record: next, now: now) { focusing = next }
+                    UpNextCard(record: next, now: now) {
+                        // The timer holds this step: it stays.
+                        coordinator.claim(next.subtask?.assignment)
+                        focusing = next
+                    }
                 }
 
                 WeekStrip(sessions: sessions, now: now) { destination = .month }

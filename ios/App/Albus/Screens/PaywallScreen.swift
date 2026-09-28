@@ -330,7 +330,7 @@ struct PaywallScreen: View {
                 PlanCard(plan: option,
                          price: shown.amount,
                          period: shown.period,
-                         isPriceLoading: option != .free && pricesLoading,
+                         isPriceLoading: showsPriceSkeleton(for: option),
                          isSelected: plan == option,
                          isCurrent: current == option) { plan = option }
             }
@@ -401,7 +401,7 @@ struct PaywallScreen: View {
                 .disabled(isCurrentPlan || isBusy)
                 .accessibilityLabel(isBusy ? "Working" : callToAction)
 
-                if pricesLoading && plan != .free && !isCurrentPlan {
+                if !isCurrentPlan && showsPriceSkeleton(for: plan) {
                     // The terms quote the billed price, and until the App Store
                     // answers the only price to hand is display copy that may be
                     // in the wrong currency. Its shape, then the real line.
@@ -456,9 +456,22 @@ struct PaywallScreen: View {
 
     private var isBusy: Bool { isConfirming || purchases.isWorking }
 
-    /// The App Store has not answered with this storefront's prices yet. A
-    /// build that cannot buy is never loading; it shows the display copy.
-    private var pricesLoading: Bool { purchases.availability == .loading }
+    /// Whether a paid plan shows the shape of its price instead of a price.
+    ///
+    /// Only while the App Store has not answered *and* this plan has no
+    /// storefront price yet. A reload keeps the prices it already fetched, and
+    /// those stay on screen with their terms, because they can still be
+    /// bought: a purchase is never offered without its price beside it. A
+    /// build that cannot buy is never loading, and shows the display copy.
+    static func showsPriceSkeleton(isFree: Bool, availability: PurchaseService.Availability,
+                                   hasOffer: Bool) -> Bool {
+        !isFree && availability == .loading && !hasOffer
+    }
+
+    private func showsPriceSkeleton(for option: Plan) -> Bool {
+        Self.showsPriceSkeleton(isFree: option == .free, availability: purchases.availability,
+                                hasOffer: option != .free && purchases.option(option.tier, selectedPeriod) != nil)
+    }
 
     /// Yearly is offered only once the App Store has priced it for every paid
     /// plan. A build that cannot buy shows monthly display prices.
