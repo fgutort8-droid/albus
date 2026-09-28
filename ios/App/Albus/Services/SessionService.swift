@@ -40,6 +40,14 @@ final class SessionService {
     /// network failure deliberately leaves this false.
     private(set) var credentialRejected = false
 
+    /// True while the account on screen came from this phone's storage and its
+    /// expired pass has not been renewed yet, because the phone was offline or
+    /// the server did not answer. `revalidate()` tries again.
+    private(set) var awaitingRenewal = false
+
+    /// A renewal is in flight. Keeps `revalidate()` from racing `start()`.
+    private var renewing = false
+
     var userID: UUID? {
         if case .signedIn(let id, _) = state { return id }
         return nil
@@ -84,30 +92,77 @@ final class SessionService {
             return
         }
         credentialRejected = false
+        renewing = true
+        defer { renewing = false }
         do {
             try storage.beginAttempt()
+            // An account this phone already holds opens at once. Its pass
+            // expires an hour after it was issued and renewing it needs the
+            // server, but the plans are on the phone. Waiting showed a blank
+            // screen for as long as the network took, and offline it sent the
+            // student to the set-up questions instead of their plans. A pass
+            // still in date never waited, and this treats an expired one the
+            // same way. The launch sequence still awaits this function, so
+            // nothing that needs the server runs before the renewal settles.
+            if let stored = client.auth.currentSession, stored.isExpired {
+                try storage.checkHealth()
+                state = .signedIn(userID: stored.user.id, isAnonymous: stored.user.isAnonymous)
+                awaitingRenewal = true
+            }
             let session = try await Self.validatedSession(client, storage: storage)
             try storage.checkHealth()
             state = .signedIn(userID: session.user.id,
                               isAnonymous: session.user.isAnonymous)
+            awaitingRenewal = false
         } catch {
-            // No stored session, or it could not be refreshed. Which of those
-            // it was matters to `AccountDeletion`: a refused credential is the
-            // only evidence a phone has that a deletion it never heard back
-            // about actually happened.
-            guard (try? storage.checkHealth()) != nil else {
-                state = .failed(SessionStorageUnavailable().localizedDescription)
-                return
-            }
-            if error is AccountUnreachable {
-                credentialRejected = true
-                state = .needsAccount
-            } else if (error as? AuthError) == .sessionMissing {
-                // No credential was available; absence alone proves no deletion.
-                state = .needsAccount
-            } else {
-                state = .failed("Couldn't restore your sign-in. Please try again.")
-            }
+            settle(restoreFailure: error)
+        }
+    }
+
+    /// Renews a pass that `start()` could not, once the student is back in the
+    /// app. A refused pass is handled exactly as at launch; a network failure
+    /// changes nothing, and the next return to the app tries again.
+    func revalidate() async {
+        guard awaitingRenewal, !renewing, let client, case .signedIn = state else { return }
+        renewing = true
+        defer { renewing = false }
+        do {
+            try storage.beginAttempt()
+            let session = try await Self.validatedSession(client, storage: storage)
+            try storage.checkHealth()
+            state = .signedIn(userID: session.user.id, isAnonymous: session.user.isAnonymous)
+            awaitingRenewal = false
+        } catch {
+            settle(restoreFailure: error)
+        }
+    }
+
+    /// What a failed restore or renewal means for the student.
+    private func settle(restoreFailure error: Error) {
+        // No stored session, or it could not be refreshed. Which of those
+        // it was matters to `AccountDeletion`: a refused credential is the
+        // only evidence a phone has that a deletion it never heard back
+        // about actually happened.
+        guard (try? storage.checkHealth()) != nil else {
+            awaitingRenewal = false
+            state = .failed(SessionStorageUnavailable().localizedDescription)
+            return
+        }
+        if error is AccountUnreachable {
+            awaitingRenewal = false
+            credentialRejected = true
+            state = .needsAccount
+        } else if (error as? AuthError) == .sessionMissing {
+            // No credential was available; absence alone proves no deletion.
+            awaitingRenewal = false
+            state = .needsAccount
+        } else if awaitingRenewal {
+            // The network failed, not the account. The student keeps their
+            // plans, anything that needs the server fails the way it does
+            // offline, and `revalidate()` tries again. Never read as a
+            // deletion: a phone in a tunnel proves nothing.
+        } else {
+            state = .failed("Couldn't restore your sign-in. Please try again.")
         }
     }
 
@@ -218,6 +273,7 @@ final class SessionService {
         }
         try storage.checkHealth()
         try storage.clearRecovery()
+        awaitingRenewal = false
         state = .needsAccount
     }
 

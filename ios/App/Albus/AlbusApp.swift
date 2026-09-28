@@ -146,6 +146,10 @@ struct AlbusApp: App {
                         notifications.appDidBecomeActive()
                         catchUp()
                         Task {
+                            // A pass launch could not renew, the phone being
+                            // offline, is renewed now. A refused one surfaces
+                            // through `credentialRejected`, as at launch.
+                            await session.revalidate()
                             await PendingRubricDeletions.flush(context: container.mainContext)
                             await rebuildNotifications()
                         }

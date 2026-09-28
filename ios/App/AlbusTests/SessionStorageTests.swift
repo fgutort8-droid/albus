@@ -209,26 +209,30 @@ struct SessionStorageTests {
         #expect(session.userID == nil)
     }
 
-    @MainActor @Test("transient refresh failures preserve the account and pending deletion", arguments: [0, 1, 2])
+    @MainActor @Test("transient refresh failures preserve the account and pending deletion", arguments: [0, 1, 2, 3])
     func transientRefresh(kind: Int) async throws {
         let defaults = isolated(), keychain = MemoryKeychain()
-        var payload = try #require(JSONSerialization.jsonObject(with: SessionTestTransport.sessionData) as? [String: Any])
-        payload["expires_at"] = Date().timeIntervalSince1970 - 3600
-        try keychain.store(key: "sb-session-unit-auth-token", value: JSONSerialization.data(withJSONObject: payload))
+        try keychain.store(key: "sb-session-unit-auth-token", value: Self.expiredSessionData())
         let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
         let transport: URLProtocol.Type = kind == 0 ? ServerFailureTransport.self
-            : kind == 1 ? MalformedRefreshTransport.self : TimeoutRefreshTransport.self
+            : kind == 1 ? MalformedRefreshTransport.self
+            : kind == 2 ? TimeoutRefreshTransport.self : OfflineRefreshTransport.self
         let client = Self.client(storage, transport: transport)
         let session = SessionService(client: client, storage: storage)
         defaults.set(true, forKey: "albus.accountDeletion.requested")
         await session.start()
         #expect(!session.credentialRejected)
-        if case .failed = session.state {} else { Issue.record("Transient failure must offer retry, not account replacement") }
+        // The student stays in the account this phone holds, rather than
+        // being sent to set-up, and the pass is renewed later.
+        #expect(session.userID == Self.storedUserID)
+        #expect(session.awaitingRenewal)
         let deletion = AccountDeletion(defaults: defaults)
         deletion.adoptLostDeletion(credentialRejected: session.credentialRejected)
         #expect(!deletion.requiresCleanup)
         #expect(client.auth.currentSession != nil)
-        #expect(await session.createAccount() == false)
+        // Never a replacement account: creation keeps the one on screen.
+        #expect(await session.createAccount())
+        #expect(session.userID == Self.storedUserID)
         do {
             try await session.deleteRemoteAccount()
             Issue.record("Transient authentication must not confirm deletion")
@@ -347,14 +351,79 @@ struct SessionStorageTests {
         defaults.set(true, forKey: "albus.accountDeletion.requested")
         await session.start()
         #expect(!session.credentialRejected)
-        if case .failed = session.state {} else { Issue.record("Temporary failure should offer retry") }
+        #expect(session.awaitingRenewal, "a temporary failure keeps the account and retries later")
         SwitchingRefreshTransport.mode.setRejected(true)
-        #expect(await session.createAccount() == false)
+        // The retry, when the student comes back to the app.
+        await session.revalidate()
         #expect(session.credentialRejected)
         #expect(session.state == .needsAccount)
+        #expect(!session.awaitingRenewal)
         let deletion = AccountDeletion(defaults: defaults)
         deletion.adoptLostDeletion(credentialRejected: session.credentialRejected)
         #expect(deletion.requiresCleanup)
+    }
+
+    @MainActor @Test("a stored account opens at once, before the server renews its pass")
+    func opensBeforeRenewal() async throws {
+        let keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: Self.expiredSessionData())
+        let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: SlowRefreshTransport.self), storage: storage)
+        let launch = Task { await session.start() }
+
+        // The server takes 1.5 s to answer; the account is on screen long before.
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .milliseconds(500))
+        while session.userID == nil, clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(session.userID == Self.storedUserID)
+        #expect(session.awaitingRenewal)
+
+        await launch.value
+        #expect(session.userID == Self.storedUserID)
+        #expect(!session.awaitingRenewal, "the answer renews the pass")
+        #expect(!session.credentialRejected)
+    }
+
+    @MainActor @Test("a pass that could not be renewed offline is renewed when the student comes back")
+    func renewsOnReturn() async throws {
+        RecoveringRefreshTransport.online.set(false)
+        defer { RecoveringRefreshTransport.online.set(false) }
+        let keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: Self.expiredSessionData())
+        let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: RecoveringRefreshTransport.self), storage: storage)
+        await session.start()
+        #expect(session.awaitingRenewal)
+
+        RecoveringRefreshTransport.online.set(true)
+        await session.revalidate()
+        #expect(!session.awaitingRenewal)
+        #expect(session.userID == Self.storedUserID)
+        #expect(!session.credentialRejected)
+    }
+
+    @MainActor @Test("coming back to the app asks nothing of the server once the pass is renewed")
+    func revalidationIsFreeWhenCurrent() async throws {
+        let keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: SessionTestTransport.sessionData)
+        let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: ForbiddenTransport.self), storage: storage)
+        await session.start()
+        await session.revalidate()
+        await session.revalidate()
+        #expect(session.userID == Self.storedUserID)
+        #expect(!session.awaitingRenewal)
+    }
+
+    private static let storedUserID = UUID(uuidString: "a9400000-0000-4000-8000-000000000001")!
+
+    /// A session this phone stored more than an hour ago: its pass has expired.
+    private static func expiredSessionData() throws -> Data {
+        var payload = try #require(JSONSerialization.jsonObject(with: SessionTestTransport.sessionData) as? [String: Any])
+        payload["expires_at"] = Date().timeIntervalSince1970 - 3600
+        return try JSONSerialization.data(withJSONObject: payload)
     }
 
     private static func client(_ storage: ResilientAuthStorage, transport: URLProtocol.Type = SessionTestTransport.self) -> SupabaseClient {
@@ -465,6 +534,69 @@ private final class SwitchingRefreshTransport: URLProtocol, @unchecked Sendable 
             headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(#"{"error_code":"refresh_token_not_found","msg":"Synthetic rejection"}"#.utf8))
         client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// No connection at all, as in airplane mode.
+private final class OfflineRefreshTransport: ServerFailureTransport, @unchecked Sendable {
+    override func startLoading() {
+        client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+    }
+}
+
+/// A slow network: renews the pass, but only after 1.5 s.
+private final class SlowRefreshTransport: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    private var timer: Timer?
+    override func startLoading() {
+        // On the loading thread's own run loop, where the answer belongs.
+        let timer = Timer(timeInterval: 1.5, repeats: false) { [weak self] _ in self?.answer() }
+        RunLoop.current.add(timer, forMode: .common)
+        self.timer = timer
+    }
+    private func answer() {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: SessionTestTransport.sessionData)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() { timer?.invalidate() }
+}
+
+/// Offline until `online` is set, then renews the pass.
+private final class RecoveringRefreshTransport: URLProtocol, @unchecked Sendable {
+    final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func set(_ newValue: Bool) { lock.lock(); defer { lock.unlock() }; value = newValue }
+        var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    }
+    static let online = Flag()
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        #expect(request.url?.path != "/auth/v1/signup")
+        guard Self.online.isSet else {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: SessionTestTransport.sessionData)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// Fails the test if anything reaches the network.
+private final class ForbiddenTransport: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Issue.record("unexpected request to \(request.url?.path ?? "?")")
+        client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
     }
     override func stopLoading() {}
 }
