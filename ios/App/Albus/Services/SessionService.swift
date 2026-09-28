@@ -45,6 +45,11 @@ final class SessionService {
     /// the server did not answer. `revalidate()` tries again.
     private(set) var awaitingRenewal = false
 
+    /// True when the last `start()` renewed the stored pass with the server,
+    /// which proves the account existed then. A pass still in date is used
+    /// without asking, and proves nothing.
+    private(set) var renewedByServer = false
+
     /// A renewal is in flight. Keeps `revalidate()` from racing `start()`.
     private var renewing = false
 
@@ -102,6 +107,7 @@ final class SessionService {
             return
         }
         credentialRejected = false
+        renewedByServer = false
         renewing = true
         defer { renewing = false }
         var shown = state
@@ -121,7 +127,7 @@ final class SessionService {
                 awaitingRenewal = true
             }
             shown = state
-            let session = try await Self.validatedSession(client, storage: storage)
+            let (session, renewed) = try await Self.validatedSession(client, storage: storage)
             // Settled some other way while the server answered, by a sign-out
             // after a deletion say: that stands.
             guard state == shown else { return }
@@ -129,6 +135,7 @@ final class SessionService {
             state = .signedIn(userID: session.user.id,
                               isAnonymous: session.user.isAnonymous)
             awaitingRenewal = false
+            renewedByServer = renewed
         } catch {
             guard state == shown else { return }
             settle(restoreFailure: error)
@@ -145,7 +152,7 @@ final class SessionService {
         defer { renewing = false }
         do {
             try storage.beginAttempt()
-            let session = try await Self.validatedSession(client, storage: storage)
+            let (session, _) = try await Self.validatedSession(client, storage: storage)
             // Signed out while this was in flight: the sign-out stands, and
             // an answer for the old pass must not bring the account back.
             guard state == shown else { return }
@@ -211,7 +218,7 @@ final class SessionService {
             let recoveryToken = try storage.recoveryRefreshToken()
             if current != nil || (recoveryToken != nil && state != .needsAccount) {
                 try storage.checkHealth()
-                let existing = try await Self.validatedSession(client, storage: storage)
+                let (existing, _) = try await Self.validatedSession(client, storage: storage)
                 try storage.checkHealth()
                 state = .signedIn(userID: existing.user.id, isAnonymous: existing.user.isAnonymous)
                 return true
@@ -237,6 +244,21 @@ final class SessionService {
         }
     }
 
+    /// Asks the auth server whether this account still exists, deleting
+    /// nothing: the pass is renewed even when still in date, which only the
+    /// server can do. With no signal this fails before anything that could
+    /// delete the account has left the phone; a refused pass throws
+    /// `AccountUnreachable`, as it does everywhere else.
+    func confirmAccountWithServer() async throws {
+        guard let client else { throw Backend.ConfigError.missing("Supabase") }
+        try storage.beginAttempt()
+        // As below: probe storage first, so a failed read cannot pass for an
+        // absent session.
+        _ = client.auth.currentSession
+        try storage.checkHealth()
+        _ = try await Self.validatedSession(client, storage: storage, renew: true)
+    }
+
     func deleteRemoteAccount() async throws {
         guard let client else { throw Backend.ConfigError.missing("Supabase") }
         try storage.beginAttempt()
@@ -260,11 +282,15 @@ final class SessionService {
         try storage.checkHealth()
     }
 
+    /// The session to act with, and whether the server renewed it to get it.
+    ///
+    /// - Parameter renew: ask the server even when the pass is still in date.
     private nonisolated static func validatedSession(_ client: SupabaseClient,
-                                                     storage: ResilientAuthStorage) async throws -> Session {
+                                                     storage: ResilientAuthStorage,
+                                                     renew: Bool = false) async throws -> (Session, renewed: Bool) {
         let current = client.auth.currentSession
         try storage.checkHealth()
-        if let current, !current.isExpired { return current }
+        if !renew, let current, !current.isExpired { return (current, false) }
         guard let token = try current?.refreshToken ?? storage.recoveryRefreshToken() else {
             throw AuthError.sessionMissing
         }
@@ -273,7 +299,7 @@ final class SessionService {
             // the SDK's identical error for an ordinarily empty local store.
             let session = try await client.auth.refreshSession(refreshToken: token)
             try storage.checkHealth()
-            return session
+            return (session, true)
         } catch {
             try storage.checkHealth()
             if (error as? AuthError) == .sessionMissing { throw AccountUnreachable() }

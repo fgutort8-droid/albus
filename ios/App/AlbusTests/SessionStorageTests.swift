@@ -487,6 +487,133 @@ struct SessionStorageTests {
         #expect(!session.awaitingRenewal)
     }
 
+    /// A pass in date is used without asking the server, so only the server
+    /// can say whether the account still exists. Deletion asks it first.
+    @MainActor @Test("asking whether an account exists goes to the server, even with a pass in date")
+    func confirmationAsksTheServer() async throws {
+        func session(_ transport: URLProtocol.Type) throws -> SessionService {
+            let keychain = MemoryKeychain()
+            try keychain.store(key: "sb-session-unit-auth-token", value: SessionTestTransport.sessionData)
+            let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+            return SessionService(client: Self.client(storage, transport: transport), storage: storage)
+        }
+
+        // Refused: only the server could have said so, the pass being in date.
+        do {
+            try await session(RejectedRefreshTransport.self).confirmAccountWithServer()
+            Issue.record("a refused pass must not confirm the account")
+        } catch {
+            #expect(error is AccountUnreachable)
+        }
+        // No signal: an error, and never read as the account being gone.
+        do {
+            try await session(OfflineRefreshTransport.self).confirmAccountWithServer()
+            Issue.record("offline must not confirm the account")
+        } catch {
+            #expect(!(error is AccountUnreachable))
+        }
+        try await session(SessionTestTransport.self).confirmAccountWithServer()
+    }
+
+    @MainActor @Test("launch notes when the server renewed the pass, and only then")
+    func renewalIsNoted() async throws {
+        func launch(stored: Data, transport: URLProtocol.Type, opensEarly: Bool = true) async throws -> SessionService {
+            let keychain = MemoryKeychain()
+            try keychain.store(key: "sb-session-unit-auth-token", value: stored)
+            let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+            let session = SessionService(client: Self.client(storage, transport: transport), storage: storage)
+            await session.start(opensEarly: opensEarly)
+            return session
+        }
+        // A network that takes a moment, as every real one does. The SDK starts
+        // renewing an expired pass itself as soon as the client exists; `start`
+        // joins that renewal, and the answer is the server's either way. (Were
+        // the SDK's to finish first, `start` would find the pass in date and
+        // note nothing: the safe way to be wrong.)
+        #expect(try await launch(stored: Self.expiredSessionData(), transport: SlowRefreshTransport.self).renewedByServer)
+        #expect(try await launch(stored: Self.expiredSessionData(), transport: SlowRefreshTransport.self,
+                                 opensEarly: false).renewedByServer)
+        #expect(try await !launch(stored: SessionTestTransport.sessionData, transport: ForbiddenTransport.self).renewedByServer,
+                "a pass in date was not asked about")
+        #expect(try await !launch(stored: Self.expiredSessionData(), transport: OfflineRefreshTransport.self).renewedByServer,
+                "no answer")
+    }
+
+    /// The fix for the reported bug, end to end: a request that went out and
+    /// was never answered keeps launch waiting only until the server answers.
+    @MainActor @Test("a launch the server answers settles an unanswered deletion either way")
+    func launchSettlesUnansweredDeletion() async throws {
+        func relaunch(transport: URLProtocol.Type) async throws -> (SessionService, AccountDeletion) {
+            let defaults = isolated(), keychain = MemoryKeychain()
+            try keychain.store(key: "sb-session-unit-auth-token", value: Self.expiredSessionData())
+            let deletion = AccountDeletion(defaults: defaults)
+            #expect(await !deletion.perform(confirmAccount: {},
+                                            deleteRemote: { throw URLError(.networkConnectionLost) },
+                                            clearLocal: {}, signOut: {}))
+            #expect(deletion.hasUnansweredRequest)
+            let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
+            let session = SessionService(client: Self.client(storage, transport: transport), storage: storage)
+            let relaunched = AccountDeletion(defaults: defaults)
+            await session.start(settling: relaunched)
+            return (session, relaunched)
+        }
+
+        // Renewed: the account exists, so the request deleted nothing.
+        let (renewed, kept) = try await relaunch(transport: SlowRefreshTransport.self)
+        #expect(renewed.userID == Self.storedUserID)
+        #expect(!kept.hasUnansweredRequest && !kept.requiresCleanup)
+
+        // Refused: the deletion happened, and cleanup starts.
+        let (_, deleted) = try await relaunch(transport: RejectedRefreshTransport.self)
+        #expect(deleted.requiresCleanup)
+
+        // No signal: still unanswered, and still nothing erased.
+        let (_, unsure) = try await relaunch(transport: OfflineRefreshTransport.self)
+        #expect(unsure.hasUnansweredRequest && !unsure.requiresCleanup)
+    }
+
+    @MainActor @Test("launch waits for the server while a deletion is unanswered")
+    func settlingLaunchWaits() async throws {
+        let defaults = isolated(), keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: Self.expiredSessionData())
+        let deletion = AccountDeletion(defaults: defaults)
+        #expect(await !deletion.perform(confirmAccount: {},
+                                        deleteRemote: { throw URLError(.timedOut) },
+                                        clearLocal: {}, signOut: {}))
+        let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: SlowRefreshTransport.self), storage: storage)
+        let launch = Task { await session.start(settling: AccountDeletion(defaults: defaults)) }
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(session.userID == nil, "not opened onto an account that may be gone")
+        await launch.value
+        #expect(session.userID == Self.storedUserID)
+    }
+
+    /// With nothing outstanding the app opens at once, so a student can ask
+    /// for a deletion before launch's renewal is answered. That renewal began
+    /// before the request, so it proves nothing about it.
+    @MainActor @Test("a renewal that began before a deletion request never settles it")
+    func launchRenewalPredatesRequest() async throws {
+        let defaults = isolated(), keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: Self.expiredSessionData())
+        let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: SlowRefreshTransport.self), storage: storage)
+        let deletion = AccountDeletion(defaults: defaults)
+        let launch = Task { await session.start(settling: deletion) }
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(session.userID == Self.storedUserID, "opened before the 1.5 s renewal")
+
+        #expect(await !deletion.perform(confirmAccount: {},
+                                        deleteRemote: { throw URLError(.networkConnectionLost) },
+                                        clearLocal: {}, signOut: {}))
+        #expect(deletion.hasUnansweredRequest)
+
+        await launch.value
+        #expect(session.renewedByServer)
+        #expect(deletion.hasUnansweredRequest, "still unanswered: the renewal was asked before it")
+        #expect(!deletion.requiresCleanup)
+    }
+
     private static let storedUserID = UUID(uuidString: "a9400000-0000-4000-8000-000000000001")!
 
     /// A session this phone stored more than an hour ago: its pass has expired.

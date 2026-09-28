@@ -117,15 +117,11 @@ struct AlbusApp: App {
                     wireNotifications()
                     // Restores a stored session. It no longer *creates* one:
                     // account creation moved into onboarding, which is the only
-                    // place a CAPTCHA challenge can be presented. It opens onto
-                    // the stored account at once, unless a deletion the student
-                    // asked for is still unanswered.
-                    await session.start(opensEarly: !deletion.hasUnansweredRequest)
-                    // A deletion this phone asked for, never heard back about,
-                    // and whose credential has since been refused, happened.
-                    // Settle it before anything else reads the old account's
-                    // data or tries to sync on its behalf.
-                    deletion.adoptLostDeletion(credentialRejected: session.credentialRejected)
+                    // place a CAPTCHA challenge can be presented. A deletion the
+                    // student asked for and never heard back about is settled
+                    // before anything else reads the old account's data or
+                    // tries to sync on its behalf.
+                    await session.start(settling: deletion)
                     guard !deletion.requiresCleanup else { return }
                     // Only meaningful once signed in; refresh reads the
                     // caller's own row and no-ops otherwise.

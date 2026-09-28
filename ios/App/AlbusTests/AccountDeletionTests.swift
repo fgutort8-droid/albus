@@ -13,14 +13,104 @@ struct AccountDeletionTests {
     @Test("offline refusal leaves the cache and session untouched")
     func offline() async {
         let deletion = AccountDeletion(defaults: defaults())
+        var requested = false
         var cleared = false
         var signedOut = false
         let result = await deletion.perform(
-            deleteRemote: { throw URLError(.notConnectedToInternet) },
+            confirmAccount: { throw URLError(.notConnectedToInternet) },
+            deleteRemote: { requested = true },
             clearLocal: { cleared = true }, signOut: { signedOut = true })
-        #expect(!result && !cleared && !signedOut)
+        #expect(!result && !requested && !cleared && !signedOut)
         #expect(!deletion.requiresCleanup && !deletion.isBusy)
         #expect(deletion.errorMessage?.contains("offline") == true)
+    }
+
+    /// The reported bug: a failed offline attempt left the request mark set,
+    /// and the mark keeps launch waiting for the server. Offline with an
+    /// expired pass, that sent the student to set-up instead of their plans.
+    @Test("an attempt that never left the phone leaves nothing outstanding",
+          arguments: [URLError.Code.notConnectedToInternet, .timedOut, .networkConnectionLost, .cannotConnectToHost])
+    func unsentAttemptLeavesNothingOutstanding(failure: URLError.Code) async {
+        let store = defaults()
+        let attempt = AccountDeletion(defaults: store)
+        var requested = false
+        #expect(await !attempt.perform(
+            confirmAccount: { throw URLError(failure) },
+            deleteRemote: { requested = true },
+            clearLocal: {}, signOut: {}))
+        #expect(!requested, "the question failed, so the deletion was never asked for")
+        #expect(attempt.errorMessage != nil)
+
+        let relaunched = AccountDeletion(defaults: store)
+        #expect(!relaunched.hasUnansweredRequest, "launch opens straight onto the plans")
+        // Nothing was asked, so a pass refused later is not read as a deletion.
+        relaunched.adoptLostDeletion(credentialRejected: true)
+        #expect(!relaunched.requiresCleanup)
+    }
+
+    @Test("an unanswered request outlives a retry that never left the phone")
+    func earlierRequestOutlivesUnsentRetry() async {
+        let store = defaults()
+        let deletion = AccountDeletion(defaults: store)
+        #expect(await !deletion.perform(
+            confirmAccount: {}, deleteRemote: { throw URLError(.networkConnectionLost) },
+            clearLocal: {}, signOut: {}))
+        #expect(deletion.hasUnansweredRequest, "the first request may have been carried out")
+
+        #expect(await !deletion.perform(
+            confirmAccount: { throw URLError(.notConnectedToInternet) },
+            deleteRemote: { Issue.record("never sent") },
+            clearLocal: {}, signOut: {}))
+        #expect(deletion.hasUnansweredRequest, "a retry that went nowhere answers nothing")
+
+        let relaunched = AccountDeletion(defaults: store)
+        relaunched.adoptLostDeletion(credentialRejected: true)
+        #expect(relaunched.requiresCleanup)
+    }
+
+    @Test("an account already gone when asked about is cleared without a deletion request")
+    func goneAtConfirmationFinishes() async {
+        let store = defaults()
+        let deletion = AccountDeletion(defaults: store)
+        var requested = false
+        var cleared = false
+        #expect(await deletion.perform(
+            confirmAccount: { throw AccountUnreachable() },
+            deleteRemote: { requested = true },
+            clearLocal: { cleared = true }, signOut: {}))
+        #expect(!requested && cleared)
+        #expect(!AccountDeletion(defaults: store).requiresCleanup)
+        #expect(!AccountDeletion(defaults: store).hasUnansweredRequest)
+    }
+
+    @Test("a pass the server renews settles an unanswered request")
+    func renewalSettlesUnansweredRequest() async {
+        let store = defaults()
+        #expect(await !AccountDeletion(defaults: store).perform(
+            confirmAccount: {}, deleteRemote: { throw URLError(.timedOut) },
+            clearLocal: {}, signOut: {}))
+
+        let relaunched = AccountDeletion(defaults: store)
+        #expect(relaunched.hasUnansweredRequest)
+        relaunched.accountOutlivedRequest()
+        #expect(!relaunched.hasUnansweredRequest)
+        #expect(!AccountDeletion(defaults: store).hasUnansweredRequest, "and it stays settled")
+        // Settled as "not deleted": a pass refused much later is some other story.
+        relaunched.adoptLostDeletion(credentialRejected: true)
+        #expect(!relaunched.requiresCleanup)
+    }
+
+    @Test("a request in flight is never settled from under it")
+    func settlingWaitsForInFlightRequest() async {
+        let deletion = AccountDeletion(defaults: defaults())
+        #expect(await !deletion.perform(
+            confirmAccount: {},
+            deleteRemote: {
+                deletion.accountOutlivedRequest()
+                throw URLError(.networkConnectionLost)
+            },
+            clearLocal: {}, signOut: {}))
+        #expect(deletion.hasUnansweredRequest)
     }
 
     @Test("confirmed removal clears local data before signing out")
@@ -29,7 +119,7 @@ struct AccountDeletionTests {
         let deletion = AccountDeletion(defaults: store)
         var steps: [String] = []
         let result = await deletion.perform(
-            deleteRemote: { steps.append("remote") },
+            confirmAccount: {}, deleteRemote: { steps.append("remote") },
             clearLocal: {
                 #expect(deletion.requiresCleanup)
                 steps.append("local")
@@ -46,14 +136,14 @@ struct AccountDeletionTests {
         var removals = 0
         var signOuts = 0
         let result = await deletion.perform(
-            deleteRemote: { removals += 1 },
+            confirmAccount: {}, deleteRemote: { removals += 1 },
             clearLocal: { throw URLError(.cannotWriteToFile) },
             signOut: { signOuts += 1 })
         #expect(!result && signOuts == 0)
         let restarted = AccountDeletion(defaults: store)
         #expect(restarted.requiresCleanup)
         #expect(await restarted.perform(
-            deleteRemote: { removals += 1 }, clearLocal: {},
+            confirmAccount: {}, deleteRemote: { removals += 1 }, clearLocal: {},
             signOut: { signOuts += 1 }))
         #expect(removals == 1 && signOuts == 1)
     }
@@ -62,10 +152,10 @@ struct AccountDeletionTests {
     func signOutRecovery() async {
         let deletion = AccountDeletion(defaults: defaults())
         var removals = 0
-        #expect(await !deletion.perform(deleteRemote: { removals += 1 }, clearLocal: {},
+        #expect(await !deletion.perform(confirmAccount: {}, deleteRemote: { removals += 1 }, clearLocal: {},
             signOut: { throw URLError(.cannotConnectToHost) }))
         #expect(deletion.requiresCleanup)
-        #expect(await deletion.perform(deleteRemote: { removals += 1 }, clearLocal: {}, signOut: {}))
+        #expect(await deletion.perform(confirmAccount: {}, deleteRemote: { removals += 1 }, clearLocal: {}, signOut: {}))
         #expect(removals == 1)
     }
 
@@ -74,9 +164,9 @@ struct AccountDeletionTests {
         let deletion = AccountDeletion(defaults: defaults())
         var calls = 0
         var duplicate = true
-        let result = await deletion.perform(deleteRemote: {
+        let result = await deletion.perform(confirmAccount: {}, deleteRemote: {
             calls += 1
-            duplicate = await deletion.perform(deleteRemote: { calls += 1 }, clearLocal: {}, signOut: {})
+            duplicate = await deletion.perform(confirmAccount: {}, deleteRemote: { calls += 1 }, clearLocal: {}, signOut: {})
         }, clearLocal: {}, signOut: {})
         #expect(result && !duplicate)
         #expect(calls == 1)
@@ -89,7 +179,7 @@ struct AccountDeletionTests {
         var cleared = false
         var signedOut = false
         let result = await deletion.perform(
-            deleteRemote: { throw AccountUnreachable() },
+            confirmAccount: {}, deleteRemote: { throw AccountUnreachable() },
             clearLocal: { cleared = true }, signOut: { signedOut = true })
         #expect(result && cleared && signedOut)
         #expect(deletion.errorMessage == nil)
@@ -103,9 +193,10 @@ struct AccountDeletionTests {
         let store = defaults()
         let attempt = AccountDeletion(defaults: store)
         #expect(await !attempt.perform(
-            deleteRemote: { throw URLError(.networkConnectionLost) },
+            confirmAccount: {}, deleteRemote: { throw URLError(.networkConnectionLost) },
             clearLocal: {}, signOut: {}))
         #expect(!attempt.requiresCleanup)
+        #expect(attempt.hasUnansweredRequest, "the account answered, so the request went out")
 
         let relaunched = AccountDeletion(defaults: store)
         relaunched.adoptLostDeletion(credentialRejected: true)
@@ -114,7 +205,7 @@ struct AccountDeletionTests {
         var removals = 0
         var cleared = false
         #expect(await relaunched.perform(
-            deleteRemote: { removals += 1 }, clearLocal: { cleared = true }, signOut: {}))
+            confirmAccount: {}, deleteRemote: { removals += 1 }, clearLocal: { cleared = true }, signOut: {}))
         // The account is already gone; asking again would fail and strand them.
         #expect(removals == 0 && cleared)
         #expect(!AccountDeletion(defaults: store).requiresCleanup)
@@ -124,9 +215,12 @@ struct AccountDeletionTests {
     func offlineIsNotEvidence() async {
         let store = defaults()
         let attempt = AccountDeletion(defaults: store)
+        // The signal went between the question and the request: the request
+        // may have gone out, so it is outstanding, but it proves nothing.
         #expect(await !attempt.perform(
-            deleteRemote: { throw URLError(.notConnectedToInternet) },
+            confirmAccount: {}, deleteRemote: { throw URLError(.notConnectedToInternet) },
             clearLocal: {}, signOut: {}))
+        #expect(attempt.hasUnansweredRequest)
 
         let relaunched = AccountDeletion(defaults: store)
         relaunched.adoptLostDeletion(credentialRejected: false)
