@@ -96,6 +96,13 @@ struct GraderScreen: View {
         chosenRubric == nil && (chosenAssignment?.rubric == nil)
     }
 
+    /// How many criterion cards the waiting screen sketches: one per criterion
+    /// of the rubric being marked against, within reason, or three when blind.
+    private var skeletonCriteria: Int {
+        let count = (chosenRubric ?? chosenAssignment?.rubric)?.items.count ?? 0
+        return count == 0 ? 3 : min(count, 6)
+    }
+
     var body: some View {
         Group {
             // The result owns the whole screen.
@@ -585,7 +592,10 @@ struct GraderScreen: View {
                 .font(Tokens.Typography.micro)
                 .foregroundStyle(Tokens.Palette.inkMuted)
 
-            ProgressView().tint(Tokens.Palette.accent)
+            // Where the feedback will land, instead of a spinner: the score,
+            // the summary and the criteria, in the places they will appear.
+            GradeResultSkeleton(criteria: skeletonCriteria)
+                .padding(.top, Tokens.Spacing.s)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, Tokens.Spacing.xxl)

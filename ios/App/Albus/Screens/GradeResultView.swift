@@ -267,3 +267,53 @@ struct GradeResultView: View {
         }
     }
 }
+
+/// The shape of `GradeResultView` while the marking is written: the score, the
+/// feedback, and a card for each criterion. Only the bars shine, not the cards.
+struct GradeResultSkeleton: View {
+    /// Criterion cards to sketch. The real number arrives with the result.
+    var criteria = 3
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Tokens.Spacing.l) {
+            GlassCard {
+                HStack(alignment: .center, spacing: Tokens.Spacing.m) {
+                    VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+                        SkeletonBar(width: 110, height: 16, cornerRadius: 6)
+                        SkeletonBar(width: 170, height: 10)
+                    }
+                    Spacer(minLength: 0)
+                    SkeletonBar(width: 64, height: 30, cornerRadius: 8)
+                }
+                .skeleton()
+            }
+
+            VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+                SkeletonBar()
+                SkeletonBar(fraction: 0.94)
+                SkeletonBar(fraction: 0.62)
+            }
+            .skeleton()
+
+            VStack(spacing: Tokens.Spacing.s) {
+                ForEach(0..<criteria, id: \.self) { _ in
+                    GlassCard(padding: Tokens.Spacing.m) {
+                        VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+                            HStack(spacing: Tokens.Spacing.m) {
+                                SkeletonBar(width: 120, height: 12)
+                                Spacer(minLength: 0)
+                                SkeletonBar(width: 36, height: 12)
+                            }
+                            SkeletonBar(height: 9)
+                            SkeletonBar(fraction: 0.7, height: 9)
+                        }
+                        .skeleton()
+                    }
+                }
+            }
+        }
+        // One element for VoiceOver, not a dozen empty shapes.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Your feedback will appear here")
+    }
+}
