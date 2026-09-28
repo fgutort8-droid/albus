@@ -161,6 +161,155 @@ struct InstantPlanTests {
         #expect(titles(added) == HeldPlanTransport.aiTitles)
     }
 
+    /// The reported bug: the step editor was open when the answer came, the
+    /// answer replaced the step, and the student's save went nowhere.
+    @Test("a step open in the editor is never replaced under it")
+    func openStepSurvivesLateAnswer() async throws {
+        let context = try store()
+        let coordinator = coordinator(showingSkeletonsFor: .milliseconds(100))
+        let adding = Task {
+            await coordinator.addAssignment(essay(), context: context,
+                                            availability: availability, now: now)
+        }
+        #expect(try await eventually { try assignment(in: context)?.subtasks.isEmpty == false })
+        let added = try #require(try assignment(in: context))
+        #expect(await eventually { !coordinator.isRefining(added) }, "the phone's titles are showing")
+        #expect(coordinator.isWritingSteps(added))
+        let theirs = titles(added)
+        let open = try #require(added.subtasks.min { $0.ordinal < $1.ordinal })
+
+        coordinator.claim(added)  // what opening the editor does
+        #expect(!coordinator.isWritingSteps(added))
+        HeldPlanTransport.state.release()
+        await adding.value
+
+        #expect(titles(added) == theirs, "the answer came while the step was open")
+        coordinator.updateStep(open, title: "My own first step", minutes: 45, context: context,
+                               availability: availability, now: now)
+        #expect(added.subtasks.contains { $0.id == open.id && $0.title == "My own first step" },
+                "and the save lands on the step the editor was opened on")
+        #expect(added.remoteID == Self.serverID, "still linked to the server's copy")
+    }
+
+    @Test("using the steps in any way keeps them, and clears the sketches at once",
+          arguments: ["open", "done", "rename", "add", "remove", "reorder", "start"])
+    func anyUseKeepsThePlan(action: String) async throws {
+        let context = try store()
+        let coordinator = coordinator()
+        let adding = Task {
+            await coordinator.addAssignment(essay(), context: context,
+                                            availability: availability, now: now)
+        }
+        #expect(try await eventually { try assignment(in: context)?.subtasks.isEmpty == false })
+        let added = try #require(try assignment(in: context))
+        #expect(coordinator.isRefining(added))
+        let ordered = added.subtasks.sorted { $0.ordinal < $1.ordinal }
+        let first = try #require(ordered.first)
+        var session: PlanSessionRecord?
+        switch action {
+        case "open": coordinator.claim(added)
+        case "done": coordinator.setCompleted(first, true, context: context, availability: availability, now: now)
+        case "rename": coordinator.updateStep(first, title: "Mine", minutes: 30, context: context,
+                                              availability: availability, now: now)
+        case "add": coordinator.addStep(to: added, title: "Extra", minutes: 30, context: context,
+                                        availability: availability, now: now)
+        case "remove": coordinator.deleteStep(first, context: context, availability: availability, now: now)
+        case "reorder": coordinator.moveSteps(in: added, from: IndexSet(integer: 0), to: 2, context: context,
+                                              availability: availability, now: now)
+        default: session = coordinator.session(toStart: first, context: context, now: now)
+        }
+        #expect(!coordinator.isRefining(added), "the titles shown are the ones that stay")
+        #expect(!coordinator.isWritingSteps(added))
+        let theirs = titles(added)
+
+        HeldPlanTransport.state.release()
+        await adding.value
+        #expect(titles(added) == theirs)
+        if let session {
+            #expect(first.sessions.contains { $0.id == session.id },
+                    "the session opening in the timer is still there")
+        }
+    }
+
+    /// Refused at the request boundary: the real `PlanService` reads the
+    /// server's answer, as it does in the app.
+    @Test("an assignment the server refuses leaves the week",
+          arguments: [(422, "REFUSED", "The assignment could not be planned."),
+                      (422, "INVALID_DEADLINE", "Deadline must be an ISO-8601 timestamp."),
+                      (413, "PAYLOAD_TOO_LARGE", "Too large."),
+                      (402, "PLAN_TASK_LIMIT_REACHED", "Limit.")])
+    func refusedAssignmentLeaves(status: Int, error: String, message: String) async throws {
+        let context = try store()
+        let coordinator = coordinator()
+        HeldPlanTransport.state.refuse(status: status, error: error, message: message)
+        let adding = Task {
+            await coordinator.addAssignment(essay(), context: context,
+                                            availability: availability, now: now)
+        }
+        #expect(try await eventually { try assignment(in: context)?.subtasks.isEmpty == false },
+                "in the week while the server considers it")
+
+        HeldPlanTransport.state.release()
+        await adding.value
+
+        #expect(try assignment(in: context) == nil, "no copy the server will never accept")
+        #expect(try context.fetch(FetchDescriptor<Subtask>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<PlanSessionRecord>()).isEmpty, "nothing left on the calendar")
+        guard case .failed(let why) = coordinator.status else {
+            Issue.record("expected the refusal to be shown, got \(coordinator.status)")
+            return
+        }
+        #expect(!why.isEmpty)
+        if error == "REFUSED" { #expect(why == message, "the server's reason, in its words") }
+    }
+
+    @Test("a refused assignment the student has started on stays, as theirs")
+    func refusedButInUseStays() async throws {
+        let context = try store()
+        let coordinator = coordinator()
+        HeldPlanTransport.state.refuse(status: 422, error: "REFUSED", message: "The assignment could not be planned.")
+        let adding = Task {
+            await coordinator.addAssignment(essay(), context: context,
+                                            availability: availability, now: now)
+        }
+        #expect(try await eventually { try assignment(in: context)?.subtasks.isEmpty == false })
+        let added = try #require(try assignment(in: context))
+        let first = try #require(added.subtasks.min { $0.ordinal < $1.ordinal })
+        let timer = try #require(coordinator.session(toStart: first, context: context, now: now))
+        let theirs = titles(added)
+
+        HeldPlanTransport.state.release()
+        await adding.value
+
+        #expect(try assignment(in: context)?.id == added.id, "not taken from under the timer")
+        #expect(titles(added) == theirs)
+        #expect(first.sessions.contains { $0.id == timer.id })
+        if case .failed = coordinator.status {} else {
+            Issue.record("the refusal is still shown, got \(coordinator.status)")
+        }
+    }
+
+    /// A timer can start without passing through the coordinator; what it
+    /// changes is enough on its own to keep the plan.
+    @Test("a refused assignment whose session has begun by any route stays")
+    func refusedAfterAnyStartStays() async throws {
+        let context = try store()
+        let coordinator = coordinator()
+        HeldPlanTransport.state.refuse(status: 402, error: "PLAN_TASK_LIMIT_REACHED", message: "Limit.")
+        let adding = Task {
+            await coordinator.addAssignment(essay(), context: context,
+                                            availability: availability, now: now)
+        }
+        #expect(try await eventually { try assignment(in: context)?.subtasks.isEmpty == false })
+        let added = try #require(try assignment(in: context))
+        let session = try #require(added.subtasks.flatMap(\.sessions).first)
+        session.startedAt = now  // what `FocusSession.start` does
+
+        HeldPlanTransport.state.release()
+        await adding.value
+        #expect(try assignment(in: context)?.id == added.id)
+    }
+
     @Test("when the AI cannot plan, the phone's plan stays, with nothing pending")
     func failedAIKeepsThePhonesPlan() async throws {
         let context = try store()
@@ -188,10 +337,20 @@ private final class HeldPlanTransport: URLProtocol, @unchecked Sendable {
         private var held: [HeldPlanTransport] = []
         private var released = false
         private var deleted: [String] = []
+        private var refusal: (status: Int, body: Data)?
 
         func reset() {
             lock.lock(); defer { lock.unlock() }
-            held = []; released = false; deleted = []
+            held = []; released = false; deleted = []; refusal = nil
+        }
+        /// Answer `breakdown` with this refusal instead of a plan.
+        func refuse(status: Int, error: String, message: String) {
+            lock.lock(); defer { lock.unlock() }
+            refusal = (status, try! JSONSerialization.data(withJSONObject: ["error": error, "message": message]))
+        }
+        var refusalToSend: (status: Int, body: Data)? {
+            lock.lock(); defer { lock.unlock() }
+            return refusal
         }
         /// False once released: later requests are answered straight away.
         func hold(_ request: HeldPlanTransport) -> Bool {
@@ -246,6 +405,10 @@ private final class HeldPlanTransport: URLProtocol, @unchecked Sendable {
     }
 
     private func answer() {
+        if let refusal = Self.state.refusalToSend {
+            respond(status: refusal.status, body: refusal.body)
+            return
+        }
         let steps = Self.aiTitles.map { title in
             ["title": title, "guidance": "", "estimated_minutes": 60,
              "rubric_criterion_code": NSNull(), "tool_need": NSNull()] as [String: Any]

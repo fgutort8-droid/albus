@@ -104,6 +104,16 @@ struct PlanService {
             }
         }
 
+        /// The server refused the assignment itself, not just the AI's help
+        /// with it: it keeps no copy, so neither should the phone.
+        var refusesAssignment: Bool {
+            switch self {
+            case .quotaReached, .rejected: true
+            case .aiPlansUsed, .aiPlansNotIncluded, .rateLimited, .fairUseReached,
+                 .offline, .unusableResponse, .unavailable: false
+            }
+        }
+
         /// What the student is told when the phone made the plan.
         var localPlanNote: String {
             switch self {
