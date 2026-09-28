@@ -671,6 +671,32 @@ struct SessionStorageTests {
         #expect(deletion.requiresCleanup)
     }
 
+    @MainActor @Test("a return to the app whose renewal the server answers settles an old request",
+                     arguments: [(3600.0, true), (60.0, false)])
+    func foregroundRenewalSettles(askedAgo: TimeInterval, settles: Bool) async throws {
+        RecoveringRefreshTransport.online.set(false)
+        defer { RecoveringRefreshTransport.online.set(false) }
+        let defaults = isolated(), keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: SessionTestTransport.sessionData)
+        defaults.set(true, forKey: "albus.accountDeletion.requested")
+        defaults.set(Date.now.addingTimeInterval(-askedAgo), forKey: "albus.accountDeletion.requestedAt")
+        let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: RecoveringRefreshTransport.self),
+                                     storage: storage)
+        let deletion = AccountDeletion(defaults: defaults)
+
+        await session.start(settling: deletion)
+        #expect(session.awaitingRenewal, "launch had no answer")
+        #expect(deletion.hasUnansweredRequest)
+
+        RecoveringRefreshTransport.online.set(true)
+        await session.revalidate(settling: deletion)
+        #expect(!session.awaitingRenewal)
+        #expect(deletion.hasUnansweredRequest == !settles,
+                settles ? "an hour on: the request deleted nothing" : "a minute on: it might yet")
+        #expect(!deletion.requiresCleanup)
+    }
+
     /// With nothing outstanding the app opens at once, so a student can ask
     /// for a deletion before launch's renewal is answered. That renewal began
     /// before the request, so it proves nothing about it.

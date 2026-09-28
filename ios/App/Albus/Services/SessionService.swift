@@ -163,23 +163,29 @@ final class SessionService {
     /// app. Always with the server, even for a pass in date: what is awaited is
     /// its answer. A refused pass is handled exactly as at launch; a network
     /// failure changes nothing, and the next return to the app tries again.
-    func revalidate() async {
-        guard awaitingRenewal, !renewing, let client, case .signedIn = state else { return }
+    ///
+    /// - Returns: when the renewal was asked for, if the server renewed the pass.
+    @discardableResult
+    func revalidate() async -> Date? {
+        guard awaitingRenewal, !renewing, let client, case .signedIn = state else { return nil }
         let shown = state
         renewing = true
         defer { renewing = false }
+        let began = Date.now
         do {
             try storage.beginAttempt()
             let (session, _) = try await Self.validatedSession(client, storage: storage, renew: true)
             // Signed out while this was in flight: the sign-out stands, and
             // an answer for the old pass must not bring the account back.
-            guard state == shown else { return }
+            guard state == shown else { return nil }
             try storage.checkHealth()
             state = .signedIn(userID: session.user.id, isAnonymous: session.user.isAnonymous)
             awaitingRenewal = false
+            return began
         } catch {
-            guard state == shown else { return }
+            guard state == shown else { return nil }
             settle(restoreFailure: error)
+            return nil
         }
     }
 
