@@ -9,17 +9,21 @@ import Testing
 struct LoadingStateTests {
 
     /// Offers arrive only when released, so a reload can be caught half-way.
+    /// Once released, a request that arrives late is answered at once, so the
+    /// test can never be left waiting on it.
     @MainActor
     private final class ReloadingStore: PurchaseStore {
         var holdOffers = false
+        private var released = false
         private var waiting: CheckedContinuation<Void, Never>?
 
         func identify(_ appUserID: String) async throws {}
         func offers() async throws -> [StoreOffer] {
-            if holdOffers { await withCheckedContinuation { waiting = $0 } }
+            if holdOffers, !released { await withCheckedContinuation { waiting = $0 } }
             return PurchaseServiceTests.catalogue
         }
         func release() {
+            released = true
             waiting?.resume()
             waiting = nil
         }
@@ -64,10 +68,15 @@ struct LoadingStateTests {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(2))
         while !store.isHolding, clock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(purchases.availability == .loading, "caught half-way through the reload")
-        #expect(purchases.option(.plus, .monthly) != nil, "the first load's offers are kept")
-        #expect(!skeleton(), "so their price and terms stay beside the buy button")
+        let caught = store.isHolding
+        #expect(caught, "the reload reached the App Store within two seconds")
+        if caught {
+            #expect(purchases.availability == .loading, "caught half-way through the reload")
+            #expect(purchases.option(.plus, .monthly) != nil, "the first load's offers are kept")
+            #expect(!skeleton(), "so their price and terms stay beside the buy button")
+        }
 
+        // Released either way, so a reload that was slow to start still ends.
         store.release()
         await reload.value
         #expect(!skeleton())
