@@ -174,6 +174,16 @@ extension SessionService {
             deletion.accountOutlivedRequest(renewalBegan: began)
         }
     }
+
+    /// A return to the app's renewal, settling a deletion as launch does: a
+    /// pass the server renews well after the request proves it deleted
+    /// nothing. Without this, a launch that could not reach the server leaves
+    /// the next cold launch waiting on a question already answered. A refused
+    /// pass reaches `adoptLostDeletion` through `credentialRejected`.
+    func revalidate(settling deletion: AccountDeletion) async {
+        guard let began = await revalidate(), deletion.hasUnansweredRequest else { return }
+        deletion.accountOutlivedRequest(renewalBegan: began)
+    }
 }
 
 @MainActor

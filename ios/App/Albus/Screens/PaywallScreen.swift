@@ -398,10 +398,13 @@ struct PaywallScreen: View {
                             radius: 14, x: 0, y: 10)
                 }
                 .buttonStyle(.plain)
-                .disabled(isCurrentPlan || isBusy)
-                .accessibilityLabel(isBusy ? "Working" : callToAction)
+                // Nothing to buy while the price is on its way: dimmed, so
+                // it does not invite a tap that could only be refused.
+                .opacity(isPriceLoading ? 0.5 : 1)
+                .disabled(isCurrentPlan || isBusy || isPriceLoading)
+                .accessibilityLabel(isBusy ? "Working" : isPriceLoading ? "Loading prices" : callToAction)
 
-                if !isCurrentPlan && showsPriceSkeleton(for: plan) {
+                if isPriceLoading {
                     // The terms quote the billed price, and until the App Store
                     // answers the only price to hand is display copy that may be
                     // in the wrong currency. Its shape, then the real line.
@@ -455,6 +458,9 @@ struct PaywallScreen: View {
     private var isCurrentPlan: Bool { plan == current }
 
     private var isBusy: Bool { isConfirming || purchases.isWorking }
+
+    /// The chosen plan's price is still on its way from the App Store.
+    private var isPriceLoading: Bool { !isCurrentPlan && showsPriceSkeleton(for: plan) }
 
     /// Whether a paid plan shows the shape of its price instead of a price.
     ///

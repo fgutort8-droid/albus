@@ -151,7 +151,7 @@ struct AlbusApp: App {
                         // through `credentialRejected`, as at launch. Its own
                         // task: a stalled renewal must not hold up the upkeep
                         // below.
-                        Task { await session.revalidate() }
+                        Task { await session.revalidate(settling: deletion) }
                         Task {
                             await PendingRubricDeletions.flush(context: container.mainContext)
                             await rebuildNotifications()
