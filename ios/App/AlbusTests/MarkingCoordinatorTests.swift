@@ -450,9 +450,12 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
                 query[item.name] = item.value
             }
             Self.state.record(query)
+            // A filter the app leaves out restricts nothing, as in PostgREST.
             let others = Self.state.otherGradings.filter { other in
-                query["input_chars"] == "eq.\(other.inputChars)"
-                    && query["assignment_id"] == (other.assignmentID.map { "eq.\($0.uuidString)" } ?? "is.null")
+                (query["input_chars"].map { $0 == "eq.\(other.inputChars)" } ?? true)
+                    && (query["assignment_id"].map {
+                        $0 == (other.assignmentID.map { "eq.\($0.uuidString)" } ?? "is.null")
+                    } ?? true)
             }
             let found = others.map(\.id) + Self.state.nextSaved()
             respond(found.prefix(1).map { id in

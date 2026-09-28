@@ -289,7 +289,9 @@ struct GradingService {
         if let assignmentID {
             query = query.eq("assignment_id", value: assignmentID.uuidString)
         } else {
-            query = query.is("assignment_id", value: nil)
+            // PostgREST's documented spelling. The SDK's `is(_:value: nil)`
+            // sends `is.NULL`, which nothing here should need to rely on.
+            query = query.filter("assignment_id", operator: "is", value: "null")
         }
         let rows: [SavedGrading] = try await query
             .order("created_at", ascending: false)
