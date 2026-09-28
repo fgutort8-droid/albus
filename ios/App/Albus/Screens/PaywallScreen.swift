@@ -330,6 +330,7 @@ struct PaywallScreen: View {
                 PlanCard(plan: option,
                          price: shown.amount,
                          period: shown.period,
+                         isPriceLoading: showsPriceSkeleton(for: option),
                          isSelected: plan == option,
                          isCurrent: current == option) { plan = option }
             }
@@ -400,11 +401,22 @@ struct PaywallScreen: View {
                 .disabled(isCurrentPlan || isBusy)
                 .accessibilityLabel(isBusy ? "Working" : callToAction)
 
-                Text(subCaption)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.gray)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+                if !isCurrentPlan && showsPriceSkeleton(for: plan) {
+                    // The terms quote the billed price, and until the App Store
+                    // answers the only price to hand is display copy that may be
+                    // in the wrong currency. Its shape, then the real line.
+                    VStack(spacing: 5) {
+                        SkeletonBar(width: 230, height: 9)
+                        SkeletonBar(width: 150, height: 9)
+                    }
+                    .skeleton(label: "Loading price")
+                } else {
+                    Text(subCaption)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.gray)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 if let notice {
                     Text(notice)
@@ -443,6 +455,23 @@ struct PaywallScreen: View {
     private var isCurrentPlan: Bool { plan == current }
 
     private var isBusy: Bool { isConfirming || purchases.isWorking }
+
+    /// Whether a paid plan shows the shape of its price instead of a price.
+    ///
+    /// Only while the App Store has not answered *and* this plan has no
+    /// storefront price yet. A reload keeps the prices it already fetched, and
+    /// those stay on screen with their terms, because they can still be
+    /// bought: a purchase is never offered without its price beside it. A
+    /// build that cannot buy is never loading, and shows the display copy.
+    static func showsPriceSkeleton(isFree: Bool, availability: PurchaseService.Availability,
+                                   hasOffer: Bool) -> Bool {
+        !isFree && availability == .loading && !hasOffer
+    }
+
+    private func showsPriceSkeleton(for option: Plan) -> Bool {
+        Self.showsPriceSkeleton(isFree: option == .free, availability: purchases.availability,
+                                hasOffer: option != .free && purchases.option(option.tier, selectedPeriod) != nil)
+    }
 
     /// Yearly is offered only once the App Store has priced it for every paid
     /// plan. A build that cannot buy shows monthly display prices.
@@ -605,6 +634,9 @@ struct PaywallScreen: View {
         let plan: Plan
         let price: String
         let period: String
+        /// The App Store's price is still on its way: its shape rather than
+        /// display copy that may be in the wrong currency.
+        var isPriceLoading = false
         let isSelected: Bool
         /// Whether this is the plan the student is already on. Marked rather
         /// than hidden — "you are here" is the most useful thing a price list
@@ -629,16 +661,29 @@ struct PaywallScreen: View {
                             .foregroundStyle(Palette.ink)
                             .lineLimit(1)
                     }
-                    Text(price)
-                        .font(.system(size: 19, weight: .bold, design: .rounded))
-                        .foregroundStyle(Palette.ink)
-                        .minimumScaleFactor(0.6)
-                        .lineLimit(1)
+                    if isPriceLoading {
+                        // Sized to the two lines they stand in for, so nothing
+                        // moves when the price arrives.
+                        VStack(alignment: .leading, spacing: 1) {
+                            SkeletonBar(width: 58, height: 17)
+                                .frame(height: 23)
+                            SkeletonBar(width: 38, height: 8, cornerRadius: 4)
+                                .frame(height: 13)
+                        }
+                        .skeleton()
                         .padding(.top, 8)
-                    Text(period)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Palette.gray)
-                        .padding(.top, 1)
+                    } else {
+                        Text(price)
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                            .foregroundStyle(Palette.ink)
+                            .minimumScaleFactor(0.6)
+                            .lineLimit(1)
+                            .padding(.top, 8)
+                        Text(period)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Palette.gray)
+                            .padding(.top, 1)
+                    }
                     Text(plan.pitch)
                         .font(.system(size: 10.5))
                         .foregroundStyle(Palette.gray)
@@ -671,7 +716,7 @@ struct PaywallScreen: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(
-                "\(plan.title), \(price) \(period)"
+                "\(plan.title), " + (isPriceLoading ? "price loading" : "\(price) \(period)")
                 + (isCurrent ? ", your current plan" : ""))
             .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         }
