@@ -10,7 +10,7 @@ final class AccountDeletion {
     ///
     /// Written *before* the request, because the failure this guards against
     /// is a request that succeeds and whose answer is lost; but only after the
-    /// server has answered `confirmAccount`, so an attempt that never left the
+    /// server has answered `reachServer`, so an attempt that never left the
     /// phone leaves no mark. Nothing is erased on the strength of this mark
     /// alone: it only says an unanswered question is outstanding, and
     /// `adoptLostDeletion` and `accountOutlivedRequest` are where it is answered.
@@ -41,10 +41,12 @@ final class AccountDeletion {
     }
 
     /// - Parameters:
-    ///   - confirmAccount: asks the server whether the account still exists,
-    ///     deleting nothing. Throws `AccountUnreachable` if it is already gone.
+    ///   - reachServer: asks the server something that changes nothing, with
+    ///     the account's own credentials. Must not renew a pass still in date,
+    ///     which the deletion needs. Throws `AccountUnreachable` if the
+    ///     account can no longer be reached from this phone.
     ///   - deleteRemote: the request that deletes it.
-    func perform(confirmAccount: @MainActor () async throws -> Void,
+    func perform(reachServer: @MainActor () async throws -> Void,
                  deleteRemote: @MainActor () async throws -> Void,
                  clearLocal: @MainActor () async throws -> Void,
                  signOut: @MainActor () async throws -> Void) async -> Bool {
@@ -60,7 +62,7 @@ final class AccountDeletion {
                 // signal stops here, before any request that could delete the
                 // account has left it: nothing is outstanding, so launch keeps
                 // opening straight onto the plans.
-                try await confirmAccount()
+                try await reachServer()
                 // Before the request, not after: a lost answer must still leave
                 // this phone knowing a deletion is outstanding.
                 defaults.set(true, forKey: Self.requestKey)

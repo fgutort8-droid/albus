@@ -17,7 +17,7 @@ struct AccountDeletionTests {
         var cleared = false
         var signedOut = false
         let result = await deletion.perform(
-            confirmAccount: { throw URLError(.notConnectedToInternet) },
+            reachServer: { throw URLError(.notConnectedToInternet) },
             deleteRemote: { requested = true },
             clearLocal: { cleared = true }, signOut: { signedOut = true })
         #expect(!result && !requested && !cleared && !signedOut)
@@ -35,7 +35,7 @@ struct AccountDeletionTests {
         let attempt = AccountDeletion(defaults: store)
         var requested = false
         #expect(await !attempt.perform(
-            confirmAccount: { throw URLError(failure) },
+            reachServer: { throw URLError(failure) },
             deleteRemote: { requested = true },
             clearLocal: {}, signOut: {}))
         #expect(!requested, "the question failed, so the deletion was never asked for")
@@ -53,12 +53,12 @@ struct AccountDeletionTests {
         let store = defaults()
         let deletion = AccountDeletion(defaults: store)
         #expect(await !deletion.perform(
-            confirmAccount: {}, deleteRemote: { throw URLError(.networkConnectionLost) },
+            reachServer: {}, deleteRemote: { throw URLError(.networkConnectionLost) },
             clearLocal: {}, signOut: {}))
         #expect(deletion.hasUnansweredRequest, "the first request may have been carried out")
 
         #expect(await !deletion.perform(
-            confirmAccount: { throw URLError(.notConnectedToInternet) },
+            reachServer: { throw URLError(.notConnectedToInternet) },
             deleteRemote: { Issue.record("never sent") },
             clearLocal: {}, signOut: {}))
         #expect(deletion.hasUnansweredRequest, "a retry that went nowhere answers nothing")
@@ -75,7 +75,7 @@ struct AccountDeletionTests {
         var requested = false
         var cleared = false
         #expect(await deletion.perform(
-            confirmAccount: { throw AccountUnreachable() },
+            reachServer: { throw AccountUnreachable() },
             deleteRemote: { requested = true },
             clearLocal: { cleared = true }, signOut: {}))
         #expect(!requested && cleared)
@@ -88,7 +88,7 @@ struct AccountDeletionTests {
         let store = defaults()
         let asked = Date.now
         #expect(await !AccountDeletion(defaults: store).perform(
-            confirmAccount: {}, deleteRemote: { throw URLError(.timedOut) },
+            reachServer: {}, deleteRemote: { throw URLError(.timedOut) },
             clearLocal: {}, signOut: {}))
 
         let relaunched = AccountDeletion(defaults: store)
@@ -110,7 +110,7 @@ struct AccountDeletionTests {
         let store = defaults()
         let asked = Date.now
         #expect(await !AccountDeletion(defaults: store).perform(
-            confirmAccount: {}, deleteRemote: { throw URLError(.networkConnectionLost) },
+            reachServer: {}, deleteRemote: { throw URLError(.networkConnectionLost) },
             clearLocal: {}, signOut: {}))
 
         let relaunched = AccountDeletion(defaults: store)
@@ -138,7 +138,7 @@ struct AccountDeletionTests {
     func settlingWaitsForInFlightRequest() async {
         let deletion = AccountDeletion(defaults: defaults())
         #expect(await !deletion.perform(
-            confirmAccount: {},
+            reachServer: {},
             deleteRemote: {
                 deletion.accountOutlivedRequest(renewalBegan: .now.addingTimeInterval(3600))
                 throw URLError(.networkConnectionLost)
@@ -153,7 +153,7 @@ struct AccountDeletionTests {
         let deletion = AccountDeletion(defaults: store)
         var steps: [String] = []
         let result = await deletion.perform(
-            confirmAccount: {}, deleteRemote: { steps.append("remote") },
+            reachServer: {}, deleteRemote: { steps.append("remote") },
             clearLocal: {
                 #expect(deletion.requiresCleanup)
                 steps.append("local")
@@ -170,14 +170,14 @@ struct AccountDeletionTests {
         var removals = 0
         var signOuts = 0
         let result = await deletion.perform(
-            confirmAccount: {}, deleteRemote: { removals += 1 },
+            reachServer: {}, deleteRemote: { removals += 1 },
             clearLocal: { throw URLError(.cannotWriteToFile) },
             signOut: { signOuts += 1 })
         #expect(!result && signOuts == 0)
         let restarted = AccountDeletion(defaults: store)
         #expect(restarted.requiresCleanup)
         #expect(await restarted.perform(
-            confirmAccount: {}, deleteRemote: { removals += 1 }, clearLocal: {},
+            reachServer: {}, deleteRemote: { removals += 1 }, clearLocal: {},
             signOut: { signOuts += 1 }))
         #expect(removals == 1 && signOuts == 1)
     }
@@ -186,10 +186,10 @@ struct AccountDeletionTests {
     func signOutRecovery() async {
         let deletion = AccountDeletion(defaults: defaults())
         var removals = 0
-        #expect(await !deletion.perform(confirmAccount: {}, deleteRemote: { removals += 1 }, clearLocal: {},
+        #expect(await !deletion.perform(reachServer: {}, deleteRemote: { removals += 1 }, clearLocal: {},
             signOut: { throw URLError(.cannotConnectToHost) }))
         #expect(deletion.requiresCleanup)
-        #expect(await deletion.perform(confirmAccount: {}, deleteRemote: { removals += 1 }, clearLocal: {}, signOut: {}))
+        #expect(await deletion.perform(reachServer: {}, deleteRemote: { removals += 1 }, clearLocal: {}, signOut: {}))
         #expect(removals == 1)
     }
 
@@ -198,9 +198,9 @@ struct AccountDeletionTests {
         let deletion = AccountDeletion(defaults: defaults())
         var calls = 0
         var duplicate = true
-        let result = await deletion.perform(confirmAccount: {}, deleteRemote: {
+        let result = await deletion.perform(reachServer: {}, deleteRemote: {
             calls += 1
-            duplicate = await deletion.perform(confirmAccount: {}, deleteRemote: { calls += 1 }, clearLocal: {}, signOut: {})
+            duplicate = await deletion.perform(reachServer: {}, deleteRemote: { calls += 1 }, clearLocal: {}, signOut: {})
         }, clearLocal: {}, signOut: {})
         #expect(result && !duplicate)
         #expect(calls == 1)
@@ -213,7 +213,7 @@ struct AccountDeletionTests {
         var cleared = false
         var signedOut = false
         let result = await deletion.perform(
-            confirmAccount: {}, deleteRemote: { throw AccountUnreachable() },
+            reachServer: {}, deleteRemote: { throw AccountUnreachable() },
             clearLocal: { cleared = true }, signOut: { signedOut = true })
         #expect(result && cleared && signedOut)
         #expect(deletion.errorMessage == nil)
@@ -227,7 +227,7 @@ struct AccountDeletionTests {
         let store = defaults()
         let attempt = AccountDeletion(defaults: store)
         #expect(await !attempt.perform(
-            confirmAccount: {}, deleteRemote: { throw URLError(.networkConnectionLost) },
+            reachServer: {}, deleteRemote: { throw URLError(.networkConnectionLost) },
             clearLocal: {}, signOut: {}))
         #expect(!attempt.requiresCleanup)
         #expect(attempt.hasUnansweredRequest, "the account answered, so the request went out")
@@ -239,7 +239,7 @@ struct AccountDeletionTests {
         var removals = 0
         var cleared = false
         #expect(await relaunched.perform(
-            confirmAccount: {}, deleteRemote: { removals += 1 }, clearLocal: { cleared = true }, signOut: {}))
+            reachServer: {}, deleteRemote: { removals += 1 }, clearLocal: { cleared = true }, signOut: {}))
         // The account is already gone; asking again would fail and strand them.
         #expect(removals == 0 && cleared)
         #expect(!AccountDeletion(defaults: store).requiresCleanup)
@@ -252,7 +252,7 @@ struct AccountDeletionTests {
         // The signal went between the question and the request: the request
         // may have gone out, so it is outstanding, but it proves nothing.
         #expect(await !attempt.perform(
-            confirmAccount: {}, deleteRemote: { throw URLError(.notConnectedToInternet) },
+            reachServer: {}, deleteRemote: { throw URLError(.notConnectedToInternet) },
             clearLocal: {}, signOut: {}))
         #expect(attempt.hasUnansweredRequest)
 
