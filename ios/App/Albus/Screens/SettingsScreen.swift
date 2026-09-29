@@ -40,7 +40,11 @@ struct SettingsScreen: View {
                 .foregroundStyle(Tokens.Palette.danger)
                 .accessibilityIdentifier("deleteAccount")
             }
-            .padding(Tokens.Spacing.xl)
+            // The same top inset as the other tabs, so the title sits where
+            // theirs do when switching between them.
+            .padding(.horizontal, Tokens.Spacing.xl)
+            .padding(.top, Tokens.Spacing.s)
+            .padding(.bottom, Tokens.Spacing.xl)
         }
         .scrollContentBackground(.hidden)
         .navigationBarTitleDisplayMode(.inline)
@@ -51,17 +55,13 @@ struct SettingsScreen: View {
         .refreshable { await entitlements.refresh() }
     }
 
+    /// Said once. A small "SETTINGS" above the big one repeated it.
     private var header: some View {
-        VStack(alignment: .leading, spacing: Tokens.Spacing.xs) {
-            Text("SETTINGS")
-                .font(Tokens.Typography.overline)
-                .tracking(Tokens.Tracking.overline)
-                .foregroundStyle(Tokens.Palette.inkMuted)
-            Text("Settings")
-                .font(Tokens.Typography.displayLarge)
-                .foregroundStyle(Tokens.Palette.ink)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        Text("Settings")
+            .font(Tokens.Typography.displayLarge)
+            .tracking(Tokens.Tracking.display)
+            .foregroundStyle(Tokens.Palette.ink)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Plan
@@ -87,9 +87,13 @@ struct SettingsScreen: View {
                             .font(Tokens.Typography.cardTitle)
                             .foregroundStyle(Tokens.Palette.ink)
                         Spacer()
-                        Text(entitlements.plan.priceLabel)
-                            .font(Tokens.Typography.body)
-                            .foregroundStyle(Tokens.Palette.inkSecondary)
+                        // Free's price is its name: "Free … Free" said nothing
+                        // the first word hadn't.
+                        if entitlements.isPaid {
+                            Text(entitlements.plan.priceLabel)
+                                .font(Tokens.Typography.body)
+                                .foregroundStyle(Tokens.Palette.inkSecondary)
+                        }
                     }
 
                     if let renews = entitlements.plan.expiresAt, entitlements.isPaid {

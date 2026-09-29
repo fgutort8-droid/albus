@@ -278,24 +278,18 @@ struct HomeScreen: View {
 
     private func header(now: Date) -> some View {
         HStack(alignment: .top, spacing: Tokens.Spacing.m) {
-            VStack(alignment: .leading, spacing: Tokens.Spacing.xs) {
-                Text(now, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day())
-                    .font(Tokens.Typography.overline)
-                    .tracking(Tokens.Tracking.dateline)
-                    .textCase(.uppercase)
-                    .foregroundStyle(Tokens.Palette.inkMuted)
-
-                VStack(alignment: .leading, spacing: -2) {
-                    Text(greeting(at: now) + ",")
-                        .font(Tokens.Typography.displayLarge)
-                        .tracking(Tokens.Tracking.display)
-                        .foregroundStyle(Tokens.Palette.ink)
-                    Text(preferences.firstName.isEmpty ? "let's go" : preferences.firstName)
-                        .font(.system(size: 30, weight: .regular))
-                        .italic()
-                        .tracking(Tokens.Tracking.display)
-                        .foregroundStyle(Tokens.Palette.ink)
-                }
+            // No date above the greeting: the week strip just below already
+            // shows today, picked out, with the month beside it.
+            VStack(alignment: .leading, spacing: -2) {
+                Text(greeting(at: now) + ",")
+                    .font(Tokens.Typography.displayLarge)
+                    .tracking(Tokens.Tracking.display)
+                    .foregroundStyle(Tokens.Palette.ink)
+                Text(preferences.firstName.isEmpty ? "let's go" : preferences.firstName)
+                    .font(.system(size: 30, weight: .regular))
+                    .italic()
+                    .tracking(Tokens.Tracking.display)
+                    .foregroundStyle(Tokens.Palette.ink)
             }
 
             Spacer(minLength: 0)

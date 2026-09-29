@@ -60,8 +60,12 @@ struct ToolsScreen: View {
                                message: "Try a subject, or what you're trying to do — \"cite\", \"graph\", \"focus\".")
                 } else {
                     ForEach(grouped, id: \.0) { key, tools in
-                        SectionHeader(key.title, count: tools.count)
-                            .padding(.top, Tokens.Spacing.xs)
+                        // A chosen category is already named by its chip, lit
+                        // up just above. A heading under it would say it twice.
+                        if category == .all {
+                            SectionHeader(key.title, count: tools.count)
+                                .padding(.top, Tokens.Spacing.xs)
+                        }
                         LazyVGrid(
                             columns: [GridItem(.flexible(), spacing: Tokens.Spacing.m),
                                       GridItem(.flexible(), spacing: Tokens.Spacing.m)],
@@ -152,18 +156,11 @@ struct ToolsScreen: View {
                 AlbusCactus(size: 44, mood: .busy)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: Tokens.Spacing.xs) {
-                        Text("Albus Grader")
-                            .font(Tokens.Typography.cardTitle)
-                            .foregroundStyle(Tokens.Palette.ink)
-                        Text("BY ALBUS")
-                            .font(Tokens.Typography.overline)
-                            .fontWeight(.bold)
-                            .foregroundStyle(Tokens.Palette.accent)
-                            .padding(.horizontal, Tokens.Spacing.xs)
-                            .padding(.vertical, 2)
-                            .background(Tokens.Palette.accentWash, in: Capsule())
-                    }
+                    // The name already says whose it is; a "by Albus" badge
+                    // beside it said so a second time.
+                    Text("Albus Grader")
+                        .font(Tokens.Typography.cardTitle)
+                        .foregroundStyle(Tokens.Palette.ink)
                     Text("Mark finished work against your own rubric, and see where every mark went.")
                         .font(Tokens.Typography.caption)
                         .foregroundStyle(Tokens.Palette.inkSecondary)
@@ -190,17 +187,15 @@ struct ToolsScreen: View {
         .buttonStyle(.plain)
     }
 
+    /// The title says "Tools" once. No eyebrow above it and no second "tools"
+    /// in the line below — each tab names itself a single time.
     private var header: some View {
         VStack(alignment: .leading, spacing: Tokens.Spacing.xs) {
-            Text("YOUR TOOLKIT")
-                .font(Tokens.Typography.overline)
-                .tracking(Tokens.Tracking.dateline)
-                .foregroundStyle(Tokens.Palette.inkMuted)
             Text("Tools")
                 .font(Tokens.Typography.displayLarge)
                 .tracking(Tokens.Tracking.display)
                 .foregroundStyle(Tokens.Palette.ink)
-            Text("\(StudyTool.allCases.count) tools. Albus picks from all of them inside a step, by what the step is for.")
+            Text("Albus picks from all \(StudyTool.allCases.count) inside a step, by what the step is for.")
                 .font(Tokens.Typography.caption)
                 .foregroundStyle(Tokens.Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)

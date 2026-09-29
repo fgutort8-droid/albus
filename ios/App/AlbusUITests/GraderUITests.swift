@@ -54,23 +54,27 @@ final class GraderUITests: XCTestCase {
                       "the pinned Albus Grader card is not on Tools")
         grader.tap()
 
-        // "Not on the Free plan" / "N left this week" / "Unlimited" — any of the
-        // three is a decoded plan. None of them is a plan call that failed.
-        let meter = app.staticTexts.containing(
+        // "N left this week" / "Unlimited" while there are markings to use, and
+        // otherwise the card saying which of its two reasons applies — any of
+        // them is a decoded plan. None of them is a plan call that failed. The
+        // meter no longer says "Not on the Free plan": the card below it did too.
+        let notOnPlan = "Marking is part of Plus and Pro."
+        let meter = app.staticTexts.matching(
             NSPredicate(format:
                 "label CONTAINS[c] 'left this week' OR label == 'Unlimited' "
-                + "OR label CONTAINS[c] 'Not on the'")
-        ).element
+                + "OR label == %@ OR label BEGINSWITH %@",
+                notOnPlan, "That's this week's markings used")
+        ).firstMatch
         XCTAssertTrue(meter.waitForExistence(timeout: 15),
-                      "the plan meter never resolved — my_plan() returned a "
-                      + "shape the client could not decode")
+                      "the plan never resolved — my_plan() returned a shape the "
+                      + "client could not decode")
 
         // Every account on this project is currently granted Pro for testing,
         // so the Free path below is unreachable from here. Skipping rather than
         // asserting the wrong thing: a test that quietly passes because it
         // tested nothing is worse than one that says it could not run.
-        guard meter.label.contains("Not on the") else {
-            throw XCTSkip("this account is not on Free — the meter reads '\(meter.label)'")
+        guard meter.label == notOnPlan else {
+            throw XCTSkip("this account is not on Free — the screen reads '\(meter.label)'")
         }
 
         attach(app.screenshot(), named: "grader-free")
@@ -78,9 +82,9 @@ final class GraderUITests: XCTestCase {
         // **Zero is not unlimited.** A limit of 0 and a limit of nil both leave
         // nothing to spend, and the app used to read 0 as "no ceiling" — which
         // under three tiers would hand every free student unlimited marking.
-        XCTAssertNotEqual(meter.label, "Unlimited",
-                          "a free account is reading its zero allowance as "
-                          + "unlimited — the nil/zero convention has inverted")
+        XCTAssertFalse(app.staticTexts["Unlimited"].exists,
+                       "a free account is reading its zero allowance as "
+                       + "unlimited — the nil/zero convention has inverted")
 
         // Offered a price, not a date. Telling somebody who never had a grading
         // that theirs comes back on Monday promises a Monday that never comes.

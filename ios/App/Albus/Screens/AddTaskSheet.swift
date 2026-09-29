@@ -52,7 +52,9 @@ struct AddTaskSheet: View {
             primaryAction: add,
             onCancel: { dismiss() }
         ) {
-            SheetField(label: "Assignment") {
+            // "Title", not "Assignment": the eyebrow right above already says
+            // this is a new assignment.
+            SheetField(label: "Title") {
                 TextField("What is it?", text: $title)
                     .textInputAutocapitalization(.sentences)
                     .onChange(of: title) {

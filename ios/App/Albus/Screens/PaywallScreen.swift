@@ -94,8 +94,10 @@ struct PaywallScreen: View {
             }
         }
 
+        /// Free is "€0", not "Free": its card is already headed "Free", and
+        /// "Free / Free" said the name twice where the others show a price.
         var price: String {
-            priceCents == 0 ? "Free" : String(format: "€%.2f", Double(priceCents) / 100)
+            priceCents == 0 ? "€0" : String(format: "€%.2f", Double(priceCents) / 100)
         }
 
         var period: String { priceCents == 0 ? "always" : "per month" }
@@ -499,10 +501,25 @@ struct PaywallScreen: View {
     /// storefront once it has loaded, and until then, or in a build that
     /// cannot buy, the display copy `PricingTests` pins to the server.
     private func price(of option: Plan) -> (amount: String, period: String) {
-        if option != .free, let offer = purchases.option(option.tier, selectedPeriod) {
+        if option == .free {
+            // Zero in the storefront's own format, taken from a price it
+            // wrote, so it reads as the same currency as the cards beside it.
+            let written = purchases.option(.plus, selectedPeriod)?.price
+            return (written.flatMap(Self.zeroPrice(like:)) ?? option.price, option.period)
+        }
+        if let offer = purchases.option(option.tier, selectedPeriod) {
             return (offer.price, selectedPeriod.unit)
         }
         return (option.price, option.period)
+    }
+
+    /// A price the App Store wrote, with its amount replaced by zero: "€9.99"
+    /// becomes "€0", "9,99 €" becomes "0 €", "US$9.99" becomes "US$0". Nil when
+    /// there is no amount in it to replace.
+    static func zeroPrice(like price: String) -> String? {
+        let amount = "\\d(?:[\\d.,' \u{00A0}\u{202F}\u{066B}\u{066C}]*\\d)?"
+        guard let range = price.range(of: amount, options: .regularExpression) else { return nil }
+        return price.replacingCharacters(in: range, with: "0")
     }
 
     /// The billed price of the selected plan, as it will be charged.
