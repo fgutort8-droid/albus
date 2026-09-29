@@ -17,30 +17,66 @@ export interface Caller {
   db: SupabaseClient;
 }
 
+function requireEnv(name: string): string {
+  const v = Deno.env.get(name);
+  if (v) return v;
+  throw new HttpError(500, "MISCONFIGURED", `${name} is not set`);
+}
+
+type Env = (name: string) => string | undefined;
+
 /**
- * Supabase reserves the `SUPABASE_` prefix for secrets, so the modern
- * publishable/secret keys cannot be injected under those names. The runtime
- * does auto-inject the legacy `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY`
- * into every deployed function.
+ * The key a client is built with, newest kind first.
  *
- * So: prefer the modern key if it has been provided under a non-reserved name,
- * and fall back to the auto-injected legacy one. This keeps deploys working
- * with zero configuration while leaving a clean path to the new keys, which
- * rotate independently.
+ * Supabase's legacy `anon` / `service_role` keys stop working at the end of
+ * 2026, so they come last: kept only so a project without the new keys still
+ * runs. Before them, in order:
+ *
+ *   1. `ALBUS_SUPABASE_*_KEY`, an override set by hand. The `SUPABASE_` prefix
+ *      is reserved for the platform, hence the name.
+ *   2. `SUPABASE_*_KEYS`, which the platform injects into every deployed
+ *      function: a JSON object of named keys, of which `default` is the one
+ *      the dashboard creates.
+ *   3. `SUPABASE_*_KEY`, the single key `supabase start` injects locally.
+ *   4. The legacy key.
+ *
+ * The new keys rotate one at a time, and a secret key refuses to work from a
+ * browser. A legacy key is a JWT signed with the project's shared secret, so
+ * replacing it means replacing that secret.
  */
-function requireEnv(...names: string[]): string {
-  for (const n of names) {
-    const v = Deno.env.get(n);
-    if (v) return v;
+export function resolveKey(
+  kind: "secret" | "publishable",
+  env: Env = (name) => Deno.env.get(name),
+): string {
+  const upper = kind === "secret" ? "SECRET" : "PUBLISHABLE";
+  const legacy = kind === "secret" ? "SUPABASE_SERVICE_ROLE_KEY" : "SUPABASE_ANON_KEY";
+  const candidates = [
+    env(`ALBUS_SUPABASE_${upper}_KEY`),
+    namedDefault(env(`SUPABASE_${upper}_KEYS`)),
+    env(`SUPABASE_${upper}_KEY`),
+    env(legacy),
+  ];
+  const key = candidates.find((candidate) => candidate);
+  if (key) return key;
+  throw new HttpError(500, "MISCONFIGURED", `no ${kind} key is set`);
+}
+
+/** A platform key dictionary's `default` entry; nothing when absent or unreadable. */
+function namedDefault(dictionary: string | undefined): string | undefined {
+  if (!dictionary) return undefined;
+  try {
+    const value = (JSON.parse(dictionary) as Record<string, unknown>)?.["default"];
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  } catch {
+    return undefined;
   }
-  throw new HttpError(500, "MISCONFIGURED", `none of ${names.join(", ")} is set`);
 }
 
 /** Bypasses RLS. Only for writes the user must not control (entitlements, usage). */
 export function adminClient(): SupabaseClient {
   return createClient(
     requireEnv("SUPABASE_URL"),
-    requireEnv("ALBUS_SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"),
+    resolveKey("secret"),
     { auth: { persistSession: false, autoRefreshToken: false } },
   );
 }
@@ -55,7 +91,7 @@ export async function requireUser(req: Request): Promise<Caller> {
   // so even a bug in a function cannot read another user's rows.
   const db = createClient(
     requireEnv("SUPABASE_URL"),
-    requireEnv("ALBUS_SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"),
+    resolveKey("publishable"),
     {
       global: { headers: { Authorization: authHeader } },
       auth: { persistSession: false, autoRefreshToken: false },

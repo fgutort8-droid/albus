@@ -54,17 +54,24 @@ subscription or usage enumeration.
 | Secret | Location | Property |
 |---|---|---|
 | Supabase publishable key | iOS app | public by design; RLS applies |
-| `ALBUS_SUPABASE_SECRET_KEY` | Edge secrets | bypasses RLS; never in client/repo |
+| Supabase secret key | Edge Functions, injected by the platform | bypasses RLS; never in client/repo |
 | `ANTHROPIC_API_KEY` | Edge secrets | pays for model calls |
 | RevenueCat webhook secrets | Edge secrets | authenticate and sign payment events |
 | `ALBUS_SIGNAL_PEPPER` | Edge secrets | makes stored signal hashes non-reversible |
+
+Functions take their Supabase keys from `resolveKey` in `_shared/auth.ts`: a
+hand-set `ALBUS_SUPABASE_*_KEY` override first, then the platform's
+`SUPABASE_SECRET_KEYS` / `SUPABASE_PUBLISHABLE_KEYS` (entry `default`), then the
+single key a local stack injects, and the legacy `service_role` / `anon` JWT
+keys last. The legacy keys stop working at the end of 2026; once the functions
+run this order in production they can be deactivated in the dashboard.
 
 Student functions have gateway JWT verification enabled and call `requireUser`
 again. The RevenueCat webhook is the sole no-JWT function because RevenueCat is
 not an Albus user; it has two independent checks described below.
 
 Bodies are streamed through byte ceilings before JSON parsing: 16 KiB for plan
-generation, 32 KiB for chat, 128 KiB for grading, and 64 KiB for RevenueCat.
+generation, 128 KiB for grading, and 64 KiB for RevenueCat.
 Field-level limits then bound prompt content. A declared or streamed oversized
 body is cancelled before full allocation.
 
@@ -258,6 +265,14 @@ containers only when migrations/security tests change to keep GitHub cost low.
   verify purchase, renewal, cancellation, expiry, refund, replay, and conflict
   in Sandbox before enabling Production products.
 - Enable MFA on Supabase, GitHub, Apple, Anthropic, and RevenueCat accounts.
-- Remove temporary Pro grants and old deployed Apple Edge Functions.
-- Apply migrations/functions to production, run the live RLS/advisor audit, and
-  test the AI emergency stop and budget alerts.
+- ~~Remove temporary Pro grants and old deployed Apple Edge Functions.~~ Done:
+  on 29 Sep 2026 every entitlement row was Free and only `breakdown`, `grade`
+  and `revenuecat-webhook` were deployed, byte-identical to `main`.
+- Apply migrations/functions to production and test the AI emergency stop and
+  budget alerts. The live advisor audit ran on 29 Sep 2026: no table without
+  RLS, no client grant on server-only tables, no function callable by `anon`,
+  and the six client RPCs each pinned to an empty `search_path` and scoped to
+  `auth.uid()`.
+- Deploy the functions that read the new Supabase keys, then deactivate the
+  legacy `anon` / `service_role` keys before they stop working at the end of
+  2026.
