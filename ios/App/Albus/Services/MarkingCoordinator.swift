@@ -14,8 +14,9 @@ import UIKit
 /// It also covers the answer that never comes back. The server saves every
 /// grading it produces, so when the connection drops or times out after the
 /// work was sent, this looks for the saved grading rather than reporting a
-/// failure for work that was marked. The work is never sent twice: a second
-/// send could start a second, paid marking while the first is still running.
+/// failure for work that was marked. The work is sent a second time only
+/// once the server cannot still be marking the first: sooner, it could start
+/// a second, paid marking beside it.
 @Observable
 @MainActor
 final class MarkingCoordinator {
@@ -110,7 +111,12 @@ final class MarkingCoordinator {
             outcome = await recover(job, inputChars: work.count,
                                     workLength: GradingService.serverLength(of: work),
                                     assignmentID: assignmentID, assignmentRemoteID: assignmentRemoteID,
-                                    context: context, mayStore: mayStore)
+                                    context: context, mayStore: mayStore,
+                                    askAgain: { [service] in
+                                        try await service.grade(work: work, rubricID: rubricID,
+                                                                assignmentID: assignmentRemoteID,
+                                                                presentation: presentation, title: title)
+                                    })
         } catch let failure as GradingService.Failure {
             outcome = .failed(failure)
         } catch {
@@ -175,10 +181,14 @@ final class MarkingCoordinator {
 
     /// Looks for the grading the server saved for a job whose answer was lost,
     /// until the server can no longer be working on it.
+    ///
+    /// - Parameter askAgain: the same request, sent again. Only once the
+    ///   window has passed, and only if nothing new was found in it.
     private func recover(_ job: Job, inputChars: Int, workLength: Int,
                          assignmentID: UUID?, assignmentRemoteID: UUID?,
                          context: ModelContext,
-                         mayStore: @MainActor () -> Bool) async -> Outcome {
+                         mayStore: @MainActor () -> Bool,
+                         askAgain: () async throws -> GradingService.Result) async -> Outcome {
         let giveUpAt = job.startedAt.addingTimeInterval(recoveryWindow)
         let since = job.startedAt.addingTimeInterval(-clockSkew)
         var offline = false
@@ -189,7 +199,7 @@ final class MarkingCoordinator {
                 if let saved = try await service.recover(since: since,
                                                          assignmentID: assignmentRemoteID,
                                                          workLength: workLength),
-                   !isStored(remoteID: saved.id, context: context) {
+                   storedGrading(remoteID: saved.id, context: context) == nil {
                     return store(saved, inputChars: inputChars, fallbackTitle: job.title,
                                  assignmentID: assignmentID, context: context, mayStore: mayStore)
                 }
@@ -202,7 +212,25 @@ final class MarkingCoordinator {
             if Date.now >= giveUpAt { break }
             try? await Task.sleep(for: pollInterval)
         }
-        return .failed(offline ? .offline : .unavailable)
+        guard !offline else { return .failed(.offline) }
+        // Nothing new was saved in the window. The server keeps one result per
+        // piece of work and hands it back, free, for the same request, so a
+        // marking it answered from an earlier result left no new row to find.
+        // Asked again now, past the longest the server can spend marking, it
+        // returns that saved result; had the first marking failed, it was
+        // handed back, and this is the retry the student would make.
+        do {
+            let answer = try await askAgain()
+            if let local = storedGrading(remoteID: answer.id, context: context) {
+                return mayStore() ? .marked(local) : .discarded
+            }
+            return store(answer, inputChars: inputChars, fallbackTitle: job.title,
+                         assignmentID: assignmentID, context: context, mayStore: mayStore)
+        } catch let failure as GradingService.Failure where failure != .answerLost {
+            return .failed(failure)
+        } catch {
+            return .failed(.unavailable)
+        }
     }
 
     /// The assignment, if it is still on the phone.
@@ -212,12 +240,12 @@ final class MarkingCoordinator {
         return try? context.fetch(descriptor).first
     }
 
-    /// Whether a grading the server holds is already on this phone: an earlier
-    /// one, found before the one being looked for has been saved.
-    private func isStored(remoteID: UUID, context: ModelContext) -> Bool {
+    /// The grading the server holds, if it is already on this phone: an
+    /// earlier one, or the one a repeated request was answered with.
+    private func storedGrading(remoteID: UUID, context: ModelContext) -> UUID? {
         var descriptor = FetchDescriptor<Grading>(predicate: #Predicate { $0.remoteID == remoteID })
         descriptor.fetchLimit = 1
-        return ((try? context.fetchCount(descriptor)) ?? 0) > 0
+        return (try? context.fetch(descriptor).first)?.id
     }
 
     private func announce(_ id: UUID, title: String?) {

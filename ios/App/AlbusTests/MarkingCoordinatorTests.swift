@@ -127,7 +127,7 @@ struct MarkingCoordinatorTests {
         #expect(coordinator.ready == grading.id)
     }
 
-    @Test("a lost answer with nothing saved fails after the window, still sent once")
+    @Test("a lost answer with nothing saved is asked for once more after the window, then fails")
     func lostAnswerWithNothingSavedFails() async throws {
         MarkingServer.state.reset(grade: .loseAnswer, saved: [[]])
         let context = try store(), announcer = RecordingAnnouncer()
@@ -137,9 +137,59 @@ struct MarkingCoordinatorTests {
 
         #expect(outcome == .failed(.unavailable))
         #expect(try stored(context).isEmpty)
-        #expect(MarkingServer.state.gradeRequests == 1)
+        #expect(MarkingServer.state.gradeRequests == 2, "once, then once more after the window, never sooner")
         #expect(MarkingServer.state.lookups > 1, "it kept looking until the window closed")
         #expect(coordinator.ready == nil)
+    }
+
+    /// The reported bug: the server answers identical work from the result it
+    /// already holds, which may be old and for another assignment, so no new
+    /// row appears for recovery to find. Asked again, it answers from it free.
+    @Test("a lost answer the server gave from a saved result is recovered by asking again")
+    func reusedResultFoundByAskingAgain() async throws {
+        MarkingServer.state.reset(grade: .loseAnswer, then: .answer, saved: [[]])
+        let context = try store(), announcer = RecordingAnnouncer()
+        let coordinator = coordinator(announcer, recoveryWindow: 0.3)
+
+        let outcome = await mark(coordinator, context: context)
+
+        let grading = try #require(try stored(context).first)
+        #expect(outcome == .marked(grading.id))
+        #expect(grading.remoteID == Self.markedID)
+        #expect(MarkingServer.state.gradeRequests == 2)
+        #expect(coordinator.ready == grading.id)
+    }
+
+    @Test("a result already on the phone is opened, not stored twice")
+    func askingAgainFindsAResultAlreadyKept() async throws {
+        MarkingServer.state.reset(grade: .loseAnswer, then: .answer, saved: [[]])
+        let context = try store(), announcer = RecordingAnnouncer()
+        let kept = Grading(remoteID: Self.markedID, model: "claude-opus-5", inputChars: 300,
+                           overallMarks: 6, totalMarks: 7, gradeLabel: nil, gradeNote: nil,
+                           workTitle: "History essay", criteria: [], feedback: "A strong draft.",
+                           improvements: [], basis: .personal, assignment: nil)
+        context.insert(kept)
+        try context.save()
+        let coordinator = coordinator(announcer, recoveryWindow: 0.3)
+
+        let outcome = await mark(coordinator, context: context)
+
+        #expect(outcome == .marked(kept.id))
+        #expect(try stored(context).count == 1)
+    }
+
+    @Test("offline through the window, the work is not sent again")
+    func offlineRecoveryDoesNotAskAgain() async throws {
+        MarkingServer.state.reset(grade: .loseAnswer, then: .answer, saved: [[]])
+        MarkingServer.state.lookupsOffline(true)
+        defer { MarkingServer.state.lookupsOffline(false) }
+        let context = try store(), announcer = RecordingAnnouncer()
+        let coordinator = coordinator(announcer, recoveryWindow: 0.3)
+
+        let outcome = await mark(coordinator, context: context)
+
+        #expect(outcome == .failed(.offline))
+        #expect(MarkingServer.state.gradeRequests == 1)
     }
 
     @Test("with no connection at all, the answer is offline and nothing is looked up")
@@ -355,11 +405,17 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
 
         /// `saved` are this work's gradings, appearing read by read; `others`
         /// are newer gradings of other work, there from the start.
-        func reset(grade: Grade, saved: [[UUID]] = [[]], others: [Other] = []) {
+        /// `then`, when given, answers every marking after the first.
+        func reset(grade: Grade, then: Grade? = nil, saved: [[UUID]] = [[]], others: [Other] = []) {
             lock.lock(); defer { lock.unlock() }
-            self.grade = grade; self.saved = saved; grades = 0; reads = 0; held = []
-            self.others = others; filters = []
+            self.grade = grade; self.later = then; self.saved = saved; grades = 0; reads = 0; held = []
+            self.others = others; filters = []; offlineLookups = false
         }
+        private var later: Grade?
+        private var offlineLookups = false
+        /// Reads of `gradings` fail as they do with no signal.
+        func lookupsOffline(_ offline: Bool) { lock.lock(); defer { lock.unlock() }; offlineLookups = offline }
+        var lookupsAreOffline: Bool { lock.lock(); defer { lock.unlock() }; return offlineLookups }
         var otherGradings: [Other] { lock.lock(); defer { lock.unlock() }; return others }
         func record(_ query: [String: String]) {
             lock.lock(); defer { lock.unlock() }
@@ -390,7 +446,7 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
         func nextGrade() -> Grade {
             lock.lock(); defer { lock.unlock() }
             grades += 1
-            return grade
+            return grades > 1 ? (later ?? grade) : grade
         }
         /// The last set repeats once the list runs out.
         func nextSaved() -> [UUID] {
@@ -444,6 +500,10 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
                 Self.state.hold(self)
             }
         } else if path.hasSuffix("/rest/v1/gradings") {
+            if Self.state.lookupsAreOffline {
+                client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+                return
+            }
             // As PostgREST would: newest first, then the filters, then one.
             var query: [String: String] = [:]
             for item in URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? [] {
