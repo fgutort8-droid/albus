@@ -112,7 +112,10 @@ struct AlbusApp: App {
                 .task {
                     guard !deletion.requiresCleanup else { return }
                     // Before anything async, so the plan is already correct by
-                    // the time the first screen draws.
+                    // the time the first screen draws. Refused assignments kept
+                    // while in use go first: nothing can be showing them yet.
+                    coordinator.removeRefusedAssignments(context: container.mainContext,
+                                                         availability: preferences.availability)
                     catchUp()
                     wireNotifications()
                     // Restores a stored session. It no longer *creates* one:

@@ -487,7 +487,7 @@ struct SessionStorageTests {
         #expect(!session.awaitingRenewal)
     }
 
-    private func session(stored: Data, transport: URLProtocol.Type) throws -> SessionService {
+    @MainActor private func session(stored: Data, transport: URLProtocol.Type) throws -> SessionService {
         let keychain = MemoryKeychain()
         try keychain.store(key: "sb-session-unit-auth-token", value: stored)
         let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)

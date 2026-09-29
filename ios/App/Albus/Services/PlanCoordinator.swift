@@ -106,6 +106,8 @@ final class PlanCoordinator {
     }
 
     private let plans: PlanService
+    /// Where refused assignments still in use are remembered until launch.
+    private let defaults: UserDefaults
     private let assignments: AssignmentService
     /// How long step titles stay skeletons while the AI writes them. After
     /// that the phone's own titles show, and a late answer still replaces a
@@ -116,10 +118,12 @@ final class PlanCoordinator {
 
     init(plans: PlanService = PlanService(),
          assignments: AssignmentService = AssignmentService(),
-         refiningDisplayLimit: Duration = .seconds(8)) {
+         refiningDisplayLimit: Duration = .seconds(8),
+         defaults: UserDefaults = .standard) {
         self.plans = plans
         self.assignments = assignments
         self.refiningDisplayLimit = refiningDisplayLimit
+        self.defaults = defaults
     }
 
     /// Adds an assignment with its plan in the week at once, and returns once
@@ -223,17 +227,24 @@ final class PlanCoordinator {
             guard !accountWasDeleted else { return }
             // Refused outright, over the open-task cap or as a request that
             // needs correcting: the server holds no copy and never will, so
-            // the phone's copy goes too rather than sit in the week. Unless the
-            // student has started using it in the meantime, by any route:
-            // removing a plan from under an open step or a running timer would
-            // lose their work, so theirs stays, as a plan made on the phone.
-            if failure.refusesAssignment, !claimed.contains(id),
-               let current = existing(id, in: context), snapshot(of: current) == localPlan {
-                context.delete(current)
-                save(context, "remove refused assignment")
-                reschedule(context: context, availability: availability, now: now)
+            // the phone's copy goes too rather than sit in the week, outlasting
+            // the limit that refused it.
+            let refusal = failure.errorDescription ?? "Couldn't plan that."
+            if failure.refusesAssignment, let current = existing(id, in: context) {
+                if !claimed.contains(id), snapshot(of: current) == localPlan {
+                    context.delete(current)
+                    save(context, "remove refused assignment")
+                    reschedule(context: context, availability: availability, now: now)
+                } else {
+                    // Started on already, by any route. Removed now, it could go
+                    // from under an open step or a running timer, so it goes at
+                    // the next launch instead, before any screen can show it.
+                    RefusedAssignments.record(id, defaults: defaults)
+                    status = .failed(refusal + " The one you just added stays until Albus next opens, as you've started on it.")
+                    return
+                }
             }
-            status = .failed(failure.errorDescription ?? "Couldn't plan that.")
+            status = .failed(refusal)
         } catch {
             guard !accountWasDeleted else { return }
             status = .plannedLocally(note: PlanService.Failure.unavailable.localPlanNote,
@@ -311,6 +322,22 @@ final class PlanCoordinator {
                                    assignment: assignment))
         }
         save(context, "insert local plan")
+        reschedule(context: context, availability: availability, now: now)
+    }
+
+    /// Removes the assignments the server refused while they were in use,
+    /// now that no screen can be showing them. Called at launch, before
+    /// anything is drawn.
+    func removeRefusedAssignments(context: ModelContext,
+                                  availability: Availability = .default,
+                                  now: Date = .now) {
+        let refused = RefusedAssignments.all(defaults: defaults)
+        guard !refused.isEmpty else { return }
+        for id in refused {
+            if let assignment = existing(id, in: context) { context.delete(assignment) }
+        }
+        save(context, "remove refused assignments")
+        RefusedAssignments.clear(defaults: defaults)
         reschedule(context: context, availability: availability, now: now)
     }
 
@@ -650,5 +677,27 @@ final class PlanCoordinator {
             status = .failed("Couldn't save.")
             print("save failed during \(what)")
         }
+    }
+}
+
+/// Assignments the server refused after the student had started on them,
+/// kept until the next launch removes them. Refused ones never reach the
+/// server, so there is nothing to delete there.
+enum RefusedAssignments {
+    private static let key = "albus.refusedAssignments"
+
+    static func record(_ id: UUID, defaults: UserDefaults = .standard) {
+        var ids = all(defaults: defaults)
+        guard !ids.contains(id) else { return }
+        ids.append(id)
+        defaults.set(ids.map(\.uuidString), forKey: key)
+    }
+
+    static func all(defaults: UserDefaults = .standard) -> [UUID] {
+        (defaults.stringArray(forKey: key) ?? []).compactMap(UUID.init(uuidString:))
+    }
+
+    static func clear(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: key)
     }
 }

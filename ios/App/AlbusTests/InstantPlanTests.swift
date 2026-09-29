@@ -44,8 +44,12 @@ struct InstantPlanTests {
                            global: .init(session: URLSession(configuration: config))))
         return PlanCoordinator(plans: PlanService(client: client),
                                assignments: AssignmentService(client: client),
-                               refiningDisplayLimit: limit)
+                               refiningDisplayLimit: limit,
+                               defaults: refusedList)
     }
+
+    /// Where refused assignments in use wait for launch: this test's own.
+    private let refusedList = UserDefaults(suiteName: "albus.tests.refused.\(UUID().uuidString)")!
 
     private func eventually(within limit: Duration = .seconds(3),
                             _ condition: () throws -> Bool) async rethrows -> Bool {
@@ -263,7 +267,9 @@ struct InstantPlanTests {
         if error == "REFUSED" { #expect(why == message, "the server's reason, in its words") }
     }
 
-    @Test("a refused assignment the student has started on stays, as theirs")
+    /// Refused while in use: it stays while it might be on screen, and the
+    /// next launch removes it, so the limit that refused it is not outlived.
+    @Test("a refused assignment the student has started on stays until the next launch, then goes")
     func refusedButInUseStays() async throws {
         let context = try store()
         let coordinator = coordinator()
@@ -284,14 +290,22 @@ struct InstantPlanTests {
         #expect(try assignment(in: context)?.id == added.id, "not taken from under the timer")
         #expect(titles(added) == theirs)
         #expect(first.sessions.contains { $0.id == timer.id })
-        if case .failed = coordinator.status {} else {
+        guard case .failed(let why) = coordinator.status else {
             Issue.record("the refusal is still shown, got \(coordinator.status)")
+            return
         }
+        #expect(why.contains("stays until Albus next opens"))
+
+        // The next launch, before anything is drawn.
+        coordinator.removeRefusedAssignments(context: context, availability: availability, now: now)
+        #expect(try assignment(in: context) == nil, "not a plan the limit never counts")
+        #expect(try context.fetch(FetchDescriptor<PlanSessionRecord>()).isEmpty)
+        #expect(RefusedAssignments.all(defaults: refusedList).isEmpty)
     }
 
     /// A timer can start without passing through the coordinator; what it
     /// changes is enough on its own to keep the plan.
-    @Test("a refused assignment whose session has begun by any route stays")
+    @Test("a refused assignment whose session has begun by any route stays until the next launch")
     func refusedAfterAnyStartStays() async throws {
         let context = try store()
         let coordinator = coordinator()
@@ -307,6 +321,19 @@ struct InstantPlanTests {
 
         HeldPlanTransport.state.release()
         await adding.value
+        #expect(try assignment(in: context)?.id == added.id)
+        coordinator.removeRefusedAssignments(context: context, availability: availability, now: now)
+        #expect(try assignment(in: context) == nil, "and it goes at the next launch")
+    }
+
+    @Test("a launch with nothing refused changes nothing")
+    func launchWithNothingRefused() async throws {
+        let context = try store()
+        let coordinator = coordinator()
+        HeldPlanTransport.state.release()
+        await coordinator.addAssignment(essay(), context: context, availability: availability, now: now)
+        let added = try #require(try assignment(in: context))
+        coordinator.removeRefusedAssignments(context: context, availability: availability, now: now)
         #expect(try assignment(in: context)?.id == added.id)
     }
 

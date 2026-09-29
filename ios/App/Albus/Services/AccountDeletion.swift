@@ -206,6 +206,7 @@ enum AccountLocalData {
         preferences.resetAfterAccountDeletion()
         PendingDeletions.clear(defaults: defaults)
         PendingRubricDeletions.clear(defaults: defaults)
+        RefusedAssignments.clear(defaults: defaults)
     }
 
     static func removeQuarantinedStores(at store: URL, includingOriginal: Bool = false) throws {
