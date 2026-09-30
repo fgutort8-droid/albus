@@ -6,7 +6,7 @@ Deno.test("signed transfer delivery preserves ordering inputs and all authorizat
     REVENUECAT_WEBHOOK_SIGNING_SECRET: "unit-signing",
     REVENUECAT_APP_IDS: "unit-app",
     SUPABASE_URL: "https://unit.invalid",
-    SUPABASE_SERVICE_ROLE_KEY: "unit-service",
+    ALBUS_SUPABASE_SECRET_KEY: "unit-service",
   };
   const previous = Object.fromEntries(Object.keys(env).map((key) => [key, Deno.env.get(key)]));
   const originalServe = Deno.serve;
@@ -30,9 +30,16 @@ Deno.test("signed transfer delivery preserves ordering inputs and all authorizat
         throw new Error("Unexpected network request");
       }
       calls.push({ name: url.pathname.split("/").at(-1)!, args: JSON.parse(String(init?.body)) });
-      return new Response(JSON.stringify(result), {
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify(
+          url.pathname.endsWith("enqueue_revenuecat_event")
+            ? "e0000000-0000-4000-8000-000000000001"
+            : result,
+        ),
+        {
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     };
     await import("../revenuecat-webhook/index.ts");
     const base = {
@@ -74,22 +81,39 @@ Deno.test("signed transfer delivery preserves ordering inputs and all authorizat
     await t.step("omitted metadata uses verified stored purchase scope", async () => {
       const response = await deliver();
       assertEquals(response.status, 200);
-      assertEquals(calls.at(-1)?.name, "transfer_verified_subscriptions");
-      assertEquals(calls.at(-1)?.args.p_allowed_app_ids, ["unit-app"]);
-      assertEquals(calls.at(-1)?.args.p_store, null);
-      assertEquals(calls.at(-1)?.args.p_environment, null);
+      assertEquals(calls.at(-1)?.name, "process_financial_event");
+      assertEquals(
+        (calls.at(-2)?.args.p_payload as { transfer: Record<string, unknown> }).transfer
+          .p_allowed_app_ids,
+        ["unit-app"],
+      );
+      assertEquals(
+        (calls.at(-2)?.args.p_payload as { transfer: Record<string, unknown> }).transfer.p_store,
+        null,
+      );
+      assertEquals(
+        (calls.at(-2)?.args.p_payload as { transfer: Record<string, unknown> }).transfer
+          .p_environment,
+        null,
+      );
     });
     await t.step("out-of-order timestamps reach the database unchanged", async () => {
       await deliver({ id: "newer", event_timestamp_ms: 2_000_000 });
       await deliver({ id: "older", event_timestamp_ms: 1_000_000 });
-      assertEquals(calls.at(-2)?.args.p_event_at, new Date(2_000_000).toISOString());
-      assertEquals(calls.at(-1)?.args.p_event_at, new Date(1_000_000).toISOString());
+      assertEquals(
+        (calls.at(-4)?.args.p_payload as { transfer: Record<string, unknown> }).transfer.p_event_at,
+        new Date(2_000_000).toISOString(),
+      );
+      assertEquals(
+        (calls.at(-2)?.args.p_payload as { transfer: Record<string, unknown> }).transfer.p_event_at,
+        new Date(1_000_000).toISOString(),
+      );
     });
     await t.step("duplicate deliveries preserve identity and database stale result", async () => {
       result = "stale";
       const response = await deliver();
       assertEquals(await response.json(), { ok: true, result: "stale" });
-      assertEquals(calls.at(-1)?.args.p_event_id, "unit-transfer");
+      assertEquals(calls.at(-2)?.args.p_event_id, "unit-transfer");
     });
     for (
       const [name, extra, options, expected] of [
@@ -139,6 +163,14 @@ Deno.test("signed transfer delivery preserves ordering inputs and all authorizat
         console.warn = originalWarn;
       },
     );
+    await t.step("accepted retry and dead letter are never acknowledged as success", async () => {
+      for (const pending of ["retry", "dead"]) {
+        result = pending;
+        assertEquals((await deliver()).status, 503);
+        assertEquals(calls.at(-1)?.name, "process_financial_event");
+      }
+      result = "transferred";
+    });
     await t.step("missing app configuration remains closed", async () => {
       Deno.env.delete("REVENUECAT_APP_IDS");
       const count = calls.length;

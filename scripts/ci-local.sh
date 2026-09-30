@@ -19,17 +19,9 @@ bad()  { printf '  \033[31m✗\033[0m %s\n' "$1"; fail=1; }
 hdr()  { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 hdr "No secrets committed"
-PATTERN='sb_secret_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|-----BEGIN (EC |RSA )?PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{30,}\.[A-Za-z0-9_-]{30,}'
-# Tracked files only. CI scans a fresh checkout, which by definition contains
-# nothing gitignored — scanning the working tree instead finds your real .env
-# and prints your live keys to the terminal, which is a worse outcome than the
-# one it is guarding against.
-if git ls-files -z | grep -zZv '^\.env\.example$' \
-     | xargs -0 grep -EnI "$PATTERN" 2>/dev/null; then
-  bad "a live credential appears to be committed — rotate it, then remove it"
-else
-  pass "clean (tracked files only)"
-fi
+export PATH="${ALBUS_TOOLS_DIR:-/tmp/albus-security-tools}:$PATH"
+if scripts/security/scan-secrets.sh history; then pass "redacted full-history scan"
+else bad "secret scan failed; rotate any exposed credential"; fi
 
 hdr "Every table has RLS"
 rls=0
@@ -65,6 +57,7 @@ hdr "Database security tests"
 if command -v supabase >/dev/null && supabase status >/dev/null 2>&1; then
   supabase test db --local >/dev/null 2>&1 \
     && scripts/security-concurrency-local.sh >/dev/null 2>&1 \
+    && python3 scripts/security/financial-concurrency.py >/dev/null 2>&1 \
     && pass "pgTAP policy checks plus real multi-connection races" \
     || bad "database security gate failed"
 else

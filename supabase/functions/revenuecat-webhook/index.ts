@@ -17,7 +17,7 @@
 // purchases count is decided there too, by `app_config.allow_sandbox_subscriptions`:
 // App Review and TestFlight buy in the sandbox against this backend.
 
-import { adminClient } from "../_shared/auth.ts";
+import { persistFinancialEvent } from "../_shared/financial.ts";
 import { readRawBody } from "../_shared/body.ts";
 import { peppered } from "../_shared/signals.ts";
 import { errorResponse, HttpError, jsonResponse } from "../_shared/http.ts";
@@ -157,7 +157,7 @@ async function applyTransfer(
     return jsonResponse({ ok: true, ignored: "transfer_destination" });
   }
 
-  const { data, error } = await adminClient().rpc("transfer_verified_subscriptions", {
+  const transfer = {
     p_from: from,
     p_to: to[0],
     p_event_id: eventID,
@@ -168,11 +168,11 @@ async function applyTransfer(
     p_environment: event.environment == null
       ? null
       : normaliseRevenueCatEnvironment(event.environment),
+  };
+  const data = await persistFinancialEvent(configuredAppIDs, eventID, {
+    operation: "transfer",
+    transfer,
   });
-  if (error) {
-    console.error("transfer_subscriptions failed");
-    throw new HttpError(500, "INTERNAL_ERROR");
-  }
   if (data === "invalid") {
     // The destination account does not exist any more.
     console.error("transfer refused", { correlation: await peppered(`webhook-event|${eventID}`) });
@@ -267,11 +267,10 @@ Deno.serve(async (req) => {
     // Only EXPIRATION means access ends now. CANCELLATION runs to the paid
     // period's expiry, and SUBSCRIPTION_PAUSED merely schedules a pause at that
     // boundary. RevenueCat sends EXPIRATION when either has actually ended.
-    const revokedAt = revokesImmediately(type) ? new Date().toISOString() : null;
+    const revokedAt = revokesImmediately(type) ? eventAt : null;
     const productID = asString(event.product_id);
 
-    const admin = adminClient();
-    const { data, error } = await admin.rpc("apply_verified_subscription_state", {
+    const subscription = {
       p_original_transaction_id: originalID,
       p_user_id: userID,
       p_latest_transaction_id: asString(event.transaction_id),
@@ -284,13 +283,27 @@ Deno.serve(async (req) => {
       p_event_at: eventAt,
       p_store: event.store,
       p_app_id: event.app_id,
+    };
+    const revenue = MAY_CARRY_REVENUE.has(type)
+      ? {
+        p_event_id: eventID,
+        p_event_type: type,
+        p_user_id: userID,
+        p_original_transaction_id: originalID,
+        p_product_id: productID,
+        p_environment: environment,
+        p_price_usd: finiteOrNull(event.price),
+        p_tax_fraction: finiteOrNull(event.tax_percentage),
+        p_commission_fraction: finiteOrNull(event.commission_percentage),
+        p_cancel_reason: asString(event.cancel_reason, 64),
+        p_occurred_at: eventAt,
+      }
+      : undefined;
+    const data = await persistFinancialEvent(configuredAppIDs, eventID, {
+      operation: "subscription",
+      subscription,
+      ...(revenue ? { revenue } : {}),
     });
-
-    if (error) {
-      // Do not leak the database's words to a caller we do not fully trust.
-      console.error("apply_subscription_state failed");
-      throw new HttpError(500, "INTERNAL_ERROR");
-    }
 
     // What the database decided is classified in one place, so this function
     // only has to carry it out. See `classifySubscriptionResult`.
@@ -309,30 +322,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // The money, recorded whatever the plan outcome: it moved either way, and
-    // it is what lets the paid AI fuse grow. Keyed on the event id, so a
-    // redelivery records nothing twice.
-    if (MAY_CARRY_REVENUE.has(type)) {
-      const { error: revenueError } = await admin.rpc("record_subscription_revenue", {
-        p_event_id: eventID,
-        p_event_type: type,
-        p_user_id: userID,
-        p_original_transaction_id: originalID,
-        p_product_id: productID,
-        p_environment: environment,
-        p_price_usd: finiteOrNull(event.price),
-        p_tax_fraction: finiteOrNull(event.tax_percentage),
-        p_commission_fraction: finiteOrNull(event.commission_percentage),
-        p_cancel_reason: asString(event.cancel_reason, 64),
-        p_occurred_at: eventAt,
-      });
-      if (revenueError) {
-        // Retried: the plan change above is idempotent and will read `stale`.
-        console.error("record_subscription_revenue failed");
-        throw new HttpError(500, "INTERNAL_ERROR");
-      }
-    }
-
     // 503 so RevenueCat retries with backoff and marks the integration
     // unhealthy. The only retryable outcome is `unknown_product`, where the fix
     // is a row in `subscription_products` and redelivery then grants the
@@ -343,6 +332,9 @@ Deno.serve(async (req) => {
 
     return jsonResponse({ ok: true, result: data ?? "unknown" });
   } catch (e) {
+    if (e instanceof HttpError && e.status === 401) {
+      console.warn("financial_webhook_rejected", { code: e.code });
+    }
     return errorResponse(e);
   }
 });
