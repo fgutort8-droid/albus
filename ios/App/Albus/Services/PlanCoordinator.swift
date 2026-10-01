@@ -113,17 +113,21 @@ final class PlanCoordinator {
     /// that the phone's own titles show, and a late answer still replaces a
     /// plan nobody has touched.
     private let refiningDisplayLimit: Duration
+    /// Writes changes to the phone. A seam for the test of a failed write.
+    private let persist: @MainActor (ModelContext) throws -> Void
     private let scheduler = Scheduler()
     private let estimator = Estimator()
 
     init(plans: PlanService = PlanService(),
          assignments: AssignmentService = AssignmentService(),
          refiningDisplayLimit: Duration = .seconds(8),
-         defaults: UserDefaults = .standard) {
+         defaults: UserDefaults = .standard,
+         persist: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }) {
         self.plans = plans
         self.assignments = assignments
         self.refiningDisplayLimit = refiningDisplayLimit
         self.defaults = defaults
+        self.persist = persist
     }
 
     /// Adds an assignment with its plan in the week at once, and returns once
@@ -146,7 +150,7 @@ final class PlanCoordinator {
         // this, an offline student could plan past the cap on the phone.
         if let taskLimit,
            let open = try? context.fetch(FetchDescriptor<Assignment>())
-               .count(where: { !$0.isComplete }),
+               .count(where: { !$0.isComplete && !$0.isArchived }),
            open >= taskLimit {
             status = .failed(PlanService.Failure.quotaReached.errorDescription ?? "")
             return
@@ -231,16 +235,18 @@ final class PlanCoordinator {
             // the limit that refused it.
             let refusal = failure.errorDescription ?? "Couldn't plan that."
             if failure.refusesAssignment, let current = existing(id, in: context) {
-                if !claimed.contains(id), snapshot(of: current) == localPlan {
+                if !claimed.contains(id), current.gradings.isEmpty, snapshot(of: current) == localPlan {
                     context.delete(current)
                     save(context, "remove refused assignment")
                     reschedule(context: context, availability: availability, now: now)
                 } else {
-                    // Started on already, by any route. Removed now, it could go
-                    // from under an open step or a running timer, so it goes at
-                    // the next launch instead, before any screen can show it.
+                    // Started on already, by any route, or marked against.
+                    // Removed now, it could go from under an open step or a
+                    // running timer, and a marking would go with it, so the
+                    // next launch takes its plan out of the week instead,
+                    // before any screen can show it, and keeps the work.
                     RefusedAssignments.record(id, defaults: defaults)
-                    status = .failed(refusal + " The one you just added stays until Albus next opens, as you've started on it.")
+                    status = .failed(refusal + " The one you just added stays until Albus next opens, as you've started on it. The work you do on it is kept.")
                     return
                 }
             }
@@ -325,20 +331,76 @@ final class PlanCoordinator {
         reschedule(context: context, availability: availability, now: now)
     }
 
-    /// Removes the assignments the server refused while they were in use,
-    /// now that no screen can be showing them. Called at launch, before
+    /// Takes the plans the server refused while they were in use out of the
+    /// week, now that no screen can be showing them. Called at launch, before
     /// anything is drawn.
+    ///
+    /// The plan goes; what the student did on it stays. An assignment with
+    /// nothing recorded on it is deleted. One with a finished step, measured
+    /// focus time or a marking is archived instead (see `archive`), so the
+    /// refusal neither outlives the limit that made it nor takes their work.
+    /// The list is cleared only once this is saved: a failed save is undone
+    /// in memory and tried again at the next launch.
     func removeRefusedAssignments(context: ModelContext,
                                   availability: Availability = .default,
                                   now: Date = .now) {
         let refused = RefusedAssignments.all(defaults: defaults)
         guard !refused.isEmpty else { return }
         for id in refused {
-            if let assignment = existing(id, in: context) { context.delete(assignment) }
+            guard let assignment = existing(id, in: context) else { continue }
+            if Self.hasRecordedWork(assignment) {
+                archive(assignment, context: context, now: now)
+            } else {
+                context.delete(assignment)
+            }
         }
-        save(context, "remove refused assignments")
+        guard save(context, "remove refused assignments") else {
+            context.rollback()
+            return
+        }
         RefusedAssignments.clear(defaults: defaults)
         reschedule(context: context, availability: availability, now: now)
+    }
+
+    /// Keeps the record of a refused assignment and removes its plan. Steps
+    /// with nothing recorded go, and so do blocks that never ran; blocks that
+    /// did run move to when they actually happened, so none is left ahead in
+    /// the week. Archived, it is never scheduled, listed or counted against
+    /// the open-task cap, and its markings stay in the marking history.
+    private func archive(_ assignment: Assignment, context: ModelContext, now: Date) {
+        for step in Array(assignment.subtasks) {
+            guard Self.hasRecordedWork(step) else {
+                context.delete(step)
+                continue
+            }
+            for session in Array(step.sessions) {
+                guard Self.wasRun(session) else {
+                    context.delete(session)
+                    continue
+                }
+                let began = session.startedAt ?? session.startsAt
+                let ended = session.endedAt
+                    ?? began.addingTimeInterval(TimeInterval(session.focusedSeconds ?? 0))
+                session.startsAt = began
+                session.endsAt = max(ended, began.addingTimeInterval(60))
+            }
+        }
+        assignment.statusValue = .archived
+        assignment.updatedAt = now
+    }
+
+    /// Something the student did, rather than something planned for them.
+    private static func hasRecordedWork(_ assignment: Assignment) -> Bool {
+        !assignment.gradings.isEmpty || assignment.subtasks.contains(where: hasRecordedWork)
+    }
+
+    private static func hasRecordedWork(_ step: Subtask) -> Bool {
+        step.completedAt != nil || step.sessions.contains(where: wasRun)
+    }
+
+    /// A block a timer actually ran on, as opposed to one only planned.
+    private static func wasRun(_ session: PlanSessionRecord) -> Bool {
+        session.startedAt != nil || (session.focusedSeconds ?? 0) > 0
     }
 
     /// Removes an assignment and everything that came from it.
@@ -416,7 +478,7 @@ final class PlanCoordinator {
         // Finishing the last step closes the assignment, which is what frees a
         // slot against the free-tier active-plan cap.
         if let assignment = subtask.assignment {
-            assignment.statusValue = assignment.isComplete ? .completed : .active
+            settleStatus(of: assignment)
         }
 
         save(context, "toggle step")
@@ -480,6 +542,7 @@ final class PlanCoordinator {
             where session.sessionState == .scheduled
                 && session.endsAt <= now
                 && session.subtask?.completedAt == nil
+                && session.subtask?.assignment?.isArchived != true
                 && !session.isFixed {
                 session.sessionState = .missed
                 missed += 1
@@ -536,7 +599,7 @@ final class PlanCoordinator {
         assignment.updatedAt = now
         // A hand-written step can reopen a finished assignment, which is what
         // frees or consumes a slot against the free-tier cap.
-        assignment.statusValue = assignment.isComplete ? .completed : .active
+        settleStatus(of: assignment)
         save(context, "add step")
         reschedule(context: context, availability: availability, now: now)
     }
@@ -551,7 +614,7 @@ final class PlanCoordinator {
         save(context, "delete step")
         if let assignment {
             renumber(assignment)
-            assignment.statusValue = assignment.isComplete ? .completed : .active
+            settleStatus(of: assignment)
             save(context, "renumber after delete")
         }
         reschedule(context: context, availability: availability, now: now)
@@ -568,6 +631,14 @@ final class PlanCoordinator {
         assignment.updatedAt = now
         save(context, "reorder steps")
         reschedule(context: context, availability: availability, now: now)
+    }
+
+    /// Completed once every step is done, active otherwise. Archived stays
+    /// archived: it is a record of work now, and a change to it must not turn
+    /// it back into a plan.
+    private func settleStatus(of assignment: Assignment) {
+        guard !assignment.isArchived else { return }
+        assignment.statusValue = assignment.isComplete ? .completed : .active
     }
 
     /// Ordinals must stay contiguous: the scheduler places work in ordinal
@@ -671,11 +742,16 @@ final class PlanCoordinator {
         return PlanBridge.completionLogs(from: records)
     }
 
-    private func save(_ context: ModelContext, _ what: StaticString) {
-        do { try context.save() } catch {
+    @discardableResult
+    private func save(_ context: ModelContext, _ what: StaticString) -> Bool {
+        do {
+            try persist(context)
+            return true
+        } catch {
             // Losing a write silently is worse than a visible failure.
             status = .failed("Couldn't save.")
             print("save failed during \(what)")
+            return false
         }
     }
 }
