@@ -11,6 +11,7 @@ on:
       - 'supabase/tests/**'
       - 'supabase/config.toml'
       - 'scripts/security-concurrency-local.sh'
+      - 'scripts/security/financial-concurrency.py'
       - '.github/workflows/database-security.yml'
 
 permissions:
@@ -34,6 +35,8 @@ jobs:
         run: supabase test db --local
       - name: Race the last available slots
         run: scripts/security-concurrency-local.sh
+      - name: Race payment events, processors and account cleanup
+        run: python3 scripts/security/financial-concurrency.py
       - name: Stop local services
         if: always()
         run: supabase stop --no-backup

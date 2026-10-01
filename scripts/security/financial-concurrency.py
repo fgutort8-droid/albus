@@ -44,7 +44,24 @@ try:
     check(sql(f"select count(*) from private.financial_audit where event_ref='{identifier}' and action='provider_event.processed';")=='1','Concurrent processing wrote more than one audit record')
     check(sql("select count(*) from public.subscription_revenue where event_id='financial-race-event';")=='1','Concurrent processing recorded the money more than once')
     print('PASS: 12 acceptors -> one inbox row; rollback preserves pending work; 12 processors -> one effect, one revenue row and one audit record.')
+    # Cleanup racing a payment that is being recorded: the payment holds its
+    # account, so cleanup spares it, while an idle account beside it goes.
+    held,idle='f8000000-0000-4000-8000-000000000002','f8000000-0000-4000-8000-000000000003'
+    for account in (held,idle):
+        sql(f"insert into auth.users(id,instance_id,aud,role,encrypted_password,raw_app_meta_data,raw_user_meta_data,created_at,updated_at,is_anonymous) values ('{account}','00000000-0000-0000-0000-000000000000','authenticated','authenticated','','{{}}','{{}}',now()-interval '40 days',now()-interval '40 days',true) on conflict do nothing;")
+    race=json.loads(json.dumps(payload)); race['subscription']['p_user_id']=held; race['revenue']['p_user_id']=held
+    for part in ('subscription','revenue'): race[part]['p_event_id']='financial-race-held'
+    enqueue="begin;select public.enqueue_revenuecat_event('financial-race-app','financial-race-held',$event$"+json.dumps(race)+"$event$::jsonb);select pg_sleep(3);commit;"
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        recording=pool.submit(sql,enqueue)
+        import time; time.sleep(1)
+        sql("select public.reap_abandoned_anonymous_users(30);")
+        recording.result()
+    check(sql(f"select count(*) from auth.users where id='{held}';")=='1','Cleanup removed an account while its payment was being recorded')
+    check(sql(f"select count(*) from auth.users where id='{idle}';")=='0','Cleanup no longer removes idle accounts')
+    check(sql(f"select user_id from private.financial_inbox where event_id='financial-race-held';")==held,'The recorded payment lost its account')
+    print('PASS: cleanup spares an account whose payment is being recorded, and still removes an idle one.')
 finally:
     if scheduled:sql("select cron.alter_job(jobid, active:=true) from cron.job where jobname='albus-financial-drain';")
     # Local fixture only; immutable audit evidence remains until test DB cleanup.
-    sql(f"delete from public.subscription_revenue where event_id='financial-race-event';delete from public.subscription_transactions where original_transaction_id='financial-race';delete from private.financial_inbox where event_id='financial-race-event';delete from auth.users where id='{user}';")
+    sql(f"delete from public.subscription_revenue where event_id='financial-race-event';delete from public.subscription_transactions where original_transaction_id='financial-race';delete from private.financial_inbox where event_id in ('financial-race-event','financial-race-held');delete from auth.users where id in ('{user}','f8000000-0000-4000-8000-000000000002','f8000000-0000-4000-8000-000000000003');")

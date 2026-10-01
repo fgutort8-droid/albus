@@ -13,7 +13,7 @@ import { mapPostgresError } from "../_shared/http.ts";
 // environment that will not exist on a runner.
 Deno.env.set("ALBUS_SIGNAL_PEPPER", "test-pepper-not-a-real-secret");
 
-const { deviceId, ipPrefix, peppered } = await import("../_shared/signals.ts");
+const { deviceId, ipPrefix, peppered, pepperMaterial } = await import("../_shared/signals.ts");
 
 const req = (headers: Record<string, string>) => new Request("https://example.test", { headers });
 
@@ -162,4 +162,20 @@ Deno.test("an unmapped Postgres error reaches the client as nothing at all", () 
 Deno.test("the old FREE_PLAN_LIMIT_REACHED name still maps", () => {
   // Rows and clients predating migration 0034 can still raise it.
   assertEquals(mapPostgresError("FREE_PLAN_LIMIT_REACHED").code, "PLAN_TASK_LIMIT_REACHED");
+});
+
+Deno.test("the pepper survives the legacy keys being switched off", () => {
+  const envOf = (values: Record<string, string>) => (name: string) => values[name];
+  // The explicit secret always wins, so production's hashes never move.
+  assertEquals(pepperMaterial(envOf({ ALBUS_SIGNAL_PEPPER: "p", SUPABASE_SERVICE_ROLE_KEY: "legacy" })), "p");
+  // Derived from the legacy key exactly as before...
+  assertEquals(pepperMaterial(envOf({ SUPABASE_SERVICE_ROLE_KEY: "legacy" })), "albus-signal-pepper|legacy");
+  // ...and from the platform's own secret key once the legacy one is gone.
+  assertEquals(
+    pepperMaterial(envOf({ SUPABASE_SECRET_KEYS: JSON.stringify({ default: "sb_secret_x" }) })),
+    "albus-signal-pepper|sb_secret_x",
+  );
+  // Nothing usable is nothing, never a constant.
+  assertEquals(pepperMaterial(envOf({})), undefined);
+  assertEquals(pepperMaterial(envOf({ ALBUS_SIGNAL_PEPPER: "", SUPABASE_SECRET_KEYS: "{}" })), undefined);
 });
