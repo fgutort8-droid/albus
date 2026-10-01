@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Scans staged changes for secrets before each commit. CI scans the whole
+# history on every push, so a missing local Gitleaks warns instead of blocking.
+set -euo pipefail
+export PATH="${ALBUS_TOOLS_DIR:-/tmp/albus-security-tools}:$PATH"
+if ! command -v gitleaks >/dev/null; then
+  echo "pre-commit: Gitleaks not installed; skipping the local secret scan (CI still runs it)." >&2
+  echo "  install: python3 scripts/security/install-tool.py gitleaks" >&2
+  exit 0
+fi
+exec "$(git rev-parse --show-toplevel)/scripts/security/scan-secrets.sh" staged

@@ -31,6 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Verify dependency controls
         run: |
           python3 scripts/check-dependency-controls.py
@@ -38,17 +41,17 @@ jobs:
           python3 scripts/test-deployment-preview.py
           bash scripts/tests/deploy-subscriptions-dry-run.sh
           python3 scripts/tools/test_fetch_logos.py
-      - name: Scan for live credentials
+      - name: Install checksum-pinned Gitleaks
+        env:
+          ALBUS_TOOLS_DIR: ${{ runner.temp }}/security-tools
+        run: python3 scripts/security/install-tool.py gitleaks
+      - name: Scan complete history with redacted output
+        env:
+          ALBUS_TOOLS_DIR: ${{ runner.temp }}/security-tools
         run: |
-          set -euo pipefail
-          # Real key shapes. .env.example uses xxxx placeholders and is exempt.
-          PATTERN='sb_secret_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|-----BEGIN (EC |RSA )?PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{30,}\.[A-Za-z0-9_-]{30,}'
-          if grep -rEn "$PATTERN" . \
-               --exclude-dir=.git --exclude=.env.example --exclude=ci.yml; then
-            echo "::error::A live credential appears to be committed. Rotate it, then remove it."
-            exit 1
-          fi
-          echo "clean"
+          export PATH="$ALBUS_TOOLS_DIR:$PATH"
+          scripts/security/scan-secrets.sh history
+          python3 -m unittest discover -s tests/security -p test_secret_detection.py -v
 
   rls-guard:
     name: Every table has RLS

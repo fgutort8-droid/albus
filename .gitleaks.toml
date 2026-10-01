@@ -1,0 +1,26 @@
+title = "Albus secret detection"
+[extend]
+useDefault = true
+
+[[rules]]
+id = "albus-assigned-secret"
+description = "High entropy webhook or pepper secret assignment"
+regex = '''(?i)(?:REVENUECAT_WEBHOOK_(?:SIGNING_)?SECRET|ALBUS_SIGNAL_PEPPER)[ \t]*[:=][ \t]*["']?([A-Za-z0-9_+/=-]{24,})'''
+secretGroup = 1
+entropy = 3.5
+
+[[rules]]
+id = "albus-database-credential"
+description = "High entropy password in PostgreSQL connection URL"
+regex = '''(?i)postgres(?:ql)?://[^:\s/@]+:([^@\s]{16,})@'''
+secretGroup = 1
+entropy = 3.5
+
+[[rules]]
+id = "albus-supabase-secret"
+regex = '''sb_secret_[A-Za-z0-9_-]{20,}'''
+
+[[allowlists]]
+description = "Exact documented synthetic placeholders only"
+regexTarget = "match"
+regexes = [ '''^(?:sb_secret_x{20}|sk-ant-x{20})$''' ]

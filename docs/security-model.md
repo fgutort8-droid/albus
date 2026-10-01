@@ -212,6 +212,22 @@ Purchase, renewal and refund events record their proceeds in the server-only
 estimates (25% and 30% when missing), with the gross capped at US$1,000 so a
 malformed event cannot open the fuse. Refunds count against.
 
+Verified events are saved before they change anything. The webhook writes the
+event's allowlisted arguments, never the raw body, to `private.financial_inbox`,
+keyed by the signed event id, then processes it in a separate transaction that
+applies the subscription change, records revenue, writes audit rows and marks
+the event done, all or nothing. A duplicate or concurrent delivery gets the
+first result instead of a second effect, and an event id reused with different
+contents is refused. If processing fails, nothing it did survives, the event
+stays queued, the webhook answers 503, and `albus-financial-drain` retries it
+every five minutes with backoff. A product with no plan mapping is the one
+exception: the money it moved is recorded at once, as it always was, and only
+the plan change waits in the queue. After ten failures an event becomes a dead
+letter that only the database owner can requeue, with a ticket reference. A
+queued or dead event names its account in a `user_id` column, so account
+cleanup keeps that account. See
+[the payment event runbook](security/financial-security-runbook.md).
+
 App Store products, the webhook secrets and `REVENUECAT_APP_IDS` are not
 configured yet, so the webhook answers 503 and nothing can be bought. The
 removed direct Apple receipt endpoints must not be redeployed.
@@ -223,6 +239,12 @@ hours, failed/abandoned AI attempts after 30 days, identity links after at least
 90 days, and security events after at least 180 days. Successful AI rows remain
 for cost reconciliation but contain counts and model names, not submitted work.
 The Grader stores result/feedback and a content hash; it never stores the essay.
+
+`albus-financial-payload-retention` runs daily: after 30 days a completed
+payment event keeps only its id, hash and result, which is enough to refuse a
+replay. Every change to entitlements, subscription transactions, revenue,
+products and `app_config` is written to `private.financial_audit`, which refuses
+updates, deletes and truncation and names accounts only by a SHA-256 hash.
 
 Production operators must keep Supabase/GitHub MFA enabled, rotate any exposed
 provider key, review security events and circuit-breaker usage, and test a kill
