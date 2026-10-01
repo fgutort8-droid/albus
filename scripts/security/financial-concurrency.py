@@ -51,10 +51,16 @@ try:
         sql(f"insert into auth.users(id,instance_id,aud,role,encrypted_password,raw_app_meta_data,raw_user_meta_data,created_at,updated_at,is_anonymous) values ('{account}','00000000-0000-0000-0000-000000000000','authenticated','authenticated','','{{}}','{{}}',now()-interval '40 days',now()-interval '40 days',true) on conflict do nothing;")
     race=json.loads(json.dumps(payload)); race['subscription']['p_user_id']=held; race['revenue']['p_user_id']=held
     for part in ('subscription','revenue'): race[part]['p_event_id']='financial-race-held'
-    enqueue="begin;select public.enqueue_revenuecat_event('financial-race-app','financial-race-held',$event$"+json.dumps(race)+"$event$::jsonb);select pg_sleep(3);commit;"
+    enqueue="set application_name='albus-race-held';begin;select public.enqueue_revenuecat_event('financial-race-app','financial-race-held',$event$"+json.dumps(race)+"$event$::jsonb);select pg_sleep(5);commit;"
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         recording=pool.submit(sql,enqueue)
-        import time; time.sleep(1)
+        # Cleanup starts only once the enqueue has returned and its session is
+        # asleep inside the open transaction, i.e. holding the account's lock.
+        import time
+        for _ in range(100):
+            if sql("select count(*) from pg_stat_activity where application_name='albus-race-held' and query like '%pg_sleep%' and state='active';")=='1':break
+            time.sleep(0.1)
+        else:raise SystemExit('FAIL: the payment never reached its open transaction')
         sql("select public.reap_abandoned_anonymous_users(30);")
         recording.result()
     check(sql(f"select count(*) from auth.users where id='{held}';")=='1','Cleanup removed an account while its payment was being recorded')

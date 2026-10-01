@@ -137,6 +137,7 @@ supabase functions deploy revenuecat-webhook --project-ref "$REF" --no-verify-jw
 # Unsigned, so refused; starting it is the point. Its log line names the
 # source of each key ("platform" for both is what lets the legacy keys go).
 STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/functions/v1/revenuecat-webhook" -d '{}' || true)
-echo "Webhook woken (answered $STATUS, as an unsigned request should be refused)."
+[ "$STATUS" = 401 ] || stop "deployed, but the webhook answered $STATUS instead of refusing an unsigned request (401); tell Claude before anything else"
+echo "Webhook woken (answered 401, as an unsigned request should be refused)."
 echo 'DONE: payment recording now holds its account, checks pass, all three reviewed functions deployed. No secrets changed.'
 echo 'Tell Claude, who checks that the webhook log says "platform" for both keys.'
