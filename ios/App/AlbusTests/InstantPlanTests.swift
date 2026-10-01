@@ -358,6 +358,10 @@ struct InstantPlanTests {
             run.endedAt = now.addingTimeInterval(1_200)
             run.focusedSeconds = 1_200
             run.sessionState = .scheduled
+            // A later block on the same step that never ran: plan, not work.
+            context.insert(PlanSessionRecord(startsAt: now.addingTimeInterval(2 * 86_400),
+                                             endsAt: now.addingTimeInterval(2 * 86_400 + 1_800),
+                                             subtask: first))
         case "finish":
             coordinator.setCompleted(first, true, context: context,
                                      availability: availability, now: now)
@@ -444,6 +448,8 @@ struct InstantPlanTests {
         let all = try context.fetch(FetchDescriptor<PlanSessionRecord>())
         #expect(all.count == 2)
         #expect(PlanBridge.inPlan(all).map { $0.subtask?.assignment?.id } == [open.id])
+        #expect(PlanBridge.plannedSessions(from: all).map(\.assignmentID) == [open.id],
+                "and the scheduler is never handed them")
     }
 
     @Test("an archived assignment does not count against the open-task cap")
