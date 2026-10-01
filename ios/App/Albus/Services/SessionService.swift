@@ -163,23 +163,29 @@ final class SessionService {
     /// app. Always with the server, even for a pass in date: what is awaited is
     /// its answer. A refused pass is handled exactly as at launch; a network
     /// failure changes nothing, and the next return to the app tries again.
-    func revalidate() async {
-        guard awaitingRenewal, !renewing, let client, case .signedIn = state else { return }
+    ///
+    /// - Returns: when the renewal was asked for, if the server renewed the pass.
+    @discardableResult
+    func revalidate() async -> Date? {
+        guard awaitingRenewal, !renewing, let client, case .signedIn = state else { return nil }
         let shown = state
         renewing = true
         defer { renewing = false }
+        let began = Date.now
         do {
             try storage.beginAttempt()
             let (session, _) = try await Self.validatedSession(client, storage: storage, renew: true)
             // Signed out while this was in flight: the sign-out stands, and
             // an answer for the old pass must not bring the account back.
-            guard state == shown else { return }
+            guard state == shown else { return nil }
             try storage.checkHealth()
             state = .signedIn(userID: session.user.id, isAnonymous: session.user.isAnonymous)
             awaitingRenewal = false
+            return began
         } catch {
-            guard state == shown else { return }
+            guard state == shown else { return nil }
             settle(restoreFailure: error)
+            return nil
         }
     }
 
@@ -262,19 +268,32 @@ final class SessionService {
         }
     }
 
-    /// Asks the auth server whether this account still exists, deleting
-    /// nothing: the pass is renewed even when still in date, which only the
-    /// server can do. With no signal this fails before anything that could
-    /// delete the account has left the phone; a refused pass throws
-    /// `AccountUnreachable`, as it does everywhere else.
-    func confirmAccountWithServer() async throws {
+    /// Asks the server something that changes nothing, before anything that
+    /// could delete the account is sent: with no signal this fails, and
+    /// nothing has left the phone.
+    ///
+    /// Never renews a pass still in date. A renewal the server refused would
+    /// make the SDK drop the pass, though the deletion itself could still have
+    /// used it, and the phone would be cleared as if the account had gone
+    /// while it stayed on the server. An expired pass is renewed, as for any
+    /// request, and one refused then throws `AccountUnreachable`, as ever.
+    func reachServer() async throws {
         guard let client else { throw Backend.ConfigError.missing("Supabase") }
         try storage.beginAttempt()
         // As below: probe storage first, so a failed read cannot pass for an
         // absent session.
         _ = client.auth.currentSession
         try storage.checkHealth()
-        _ = try await Self.validatedSession(client, storage: storage, renew: true)
+        try await Self.readNothing(client, storage: storage)
+    }
+
+    /// One of the student's own assignments, which row security limits the
+    /// read to, fetched and thrown away. Outside the main actor for the reason
+    /// `requestDeletion` gives.
+    private nonisolated static func readNothing(_ client: SupabaseClient, storage: ResilientAuthStorage) async throws {
+        _ = try await validatedSession(client, storage: storage)
+        try await client.from("assignments").select("id").limit(1).execute()
+        try storage.checkHealth()
     }
 
     func deleteRemoteAccount() async throws {

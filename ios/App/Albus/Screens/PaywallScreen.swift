@@ -398,10 +398,13 @@ struct PaywallScreen: View {
                             radius: 14, x: 0, y: 10)
                 }
                 .buttonStyle(.plain)
-                .disabled(isCurrentPlan || isBusy)
-                .accessibilityLabel(isBusy ? "Working" : callToAction)
+                // Nothing to buy while the price is on its way: dimmed, so
+                // it does not invite a tap that could only be refused.
+                .opacity(isPriceLoading ? 0.5 : 1)
+                .disabled(isCurrentPlan || isBusy || isPriceLoading)
+                .accessibilityLabel(isBusy ? "Working" : isPriceLoading ? "Loading prices" : callToAction)
 
-                if !isCurrentPlan && showsPriceSkeleton(for: plan) {
+                if isPriceLoading {
                     // The terms quote the billed price, and until the App Store
                     // answers the only price to hand is display copy that may be
                     // in the wrong currency. Its shape, then the real line.
@@ -456,21 +459,23 @@ struct PaywallScreen: View {
 
     private var isBusy: Bool { isConfirming || purchases.isWorking }
 
+    /// The chosen plan's price is still on its way from the App Store.
+    private var isPriceLoading: Bool { !isCurrentPlan && showsPriceSkeleton(for: plan) }
+
     /// Whether a paid plan shows the shape of its price instead of a price.
     ///
-    /// Only while the App Store has not answered *and* this plan has no
-    /// storefront price yet. A reload keeps the prices it already fetched, and
-    /// those stay on screen with their terms, because they can still be
-    /// bought: a purchase is never offered without its price beside it. A
-    /// build that cannot buy is never loading, and shows the display copy.
-    static func showsPriceSkeleton(isFree: Bool, availability: PurchaseService.Availability,
-                                   hasOffer: Bool) -> Bool {
-        !isFree && availability == .loading && !hasOffer
+    /// While the App Store is being asked, first time or again. A price kept
+    /// from an earlier answer may no longer be the App Store's, so it is not
+    /// shown as one, and `PurchaseService.purchase` sells nothing until the
+    /// answer is in: a purchase is never offered beside a price that may be
+    /// wrong, or beside no price at all. A build that cannot buy is never
+    /// loading, and shows the display copy.
+    static func showsPriceSkeleton(isFree: Bool, availability: PurchaseService.Availability) -> Bool {
+        !isFree && availability == .loading
     }
 
     private func showsPriceSkeleton(for option: Plan) -> Bool {
-        Self.showsPriceSkeleton(isFree: option == .free, availability: purchases.availability,
-                                hasOffer: option != .free && purchases.option(option.tier, selectedPeriod) != nil)
+        Self.showsPriceSkeleton(isFree: option == .free, availability: purchases.availability)
     }
 
     /// Yearly is offered only once the App Store has priced it for every paid

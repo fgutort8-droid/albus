@@ -152,10 +152,14 @@ struct HomeScreen: View {
                 freeLimitNotice
 
                 if let next = upNext(now: now) {
-                    UpNextCard(record: next, now: now) { focusing = next }
+                    UpNextCard(record: next, now: now) {
+                        // The timer holds this step: it stays.
+                        coordinator.claim(next.subtask?.assignment)
+                        focusing = next
+                    }
                 }
 
-                WeekStrip(sessions: sessions, now: now) { destination = .month }
+                WeekStrip(sessions: PlanBridge.inPlan(sessions), now: now) { destination = .month }
 
                 if let fit {
                     weekFitNotice(fit)
@@ -176,7 +180,8 @@ struct HomeScreen: View {
                                     NavigationLink {
                                         Screen { TaskDetailScreen(assignment: assignment) }
                                     } label: {
-                                        AssignmentCard(assignment: assignment, now: now)
+                                        AssignmentCard(assignment: assignment, now: now,
+                                                       isRefining: coordinator.isRefining(assignment))
                                     }
                                     .buttonStyle(.plain)
                                     // The up-next card shows the same title, so
@@ -210,7 +215,7 @@ struct HomeScreen: View {
     // MARK: - Selection
 
     private func group(for assignment: Assignment, now: Date) -> Group {
-        if assignment.isComplete { return .done }
+        if assignment.isComplete || assignment.isArchived { return .done }
         let cal = Calendar.current
         if assignment.deadline < now { return .overdue }
         if cal.isDateInToday(assignment.deadline) { return .today }
@@ -220,15 +225,22 @@ struct HomeScreen: View {
     }
 
     private func matches(_ assignment: Assignment, now: Date, needsTimeIDs: Set<UUID>) -> Bool {
+        Self.shows(assignment, in: filter, now: now, needsTimeIDs: needsTimeIDs)
+    }
+
+    /// Whether a filter lists an assignment. An archived one is a closed
+    /// record of work rather than open work, so it is listed under Done only.
+    static func shows(_ assignment: Assignment, in filter: Filter, now: Date,
+                      needsTimeIDs: Set<UUID>) -> Bool {
+        let open = !assignment.isComplete && !assignment.isArchived
         switch filter {
-        case .all: !assignment.isComplete
-        case .dueSoon: !assignment.isComplete
+        case .all: return open
+        case .dueSoon: return open
             && assignment.deadline >= now
             && assignment.deadline <= (Calendar.current.date(byAdding: .day, value: 7, to: now) ?? now)
-        case .overdue: !assignment.isComplete && assignment.deadline < now
-        case .needsTime:
-            !assignment.isComplete && needsTimeIDs.contains(assignment.id)
-        case .done: assignment.isComplete
+        case .overdue: return open && assignment.deadline < now
+        case .needsTime: return open && needsTimeIDs.contains(assignment.id)
+        case .done: return !open
         }
     }
 
@@ -264,7 +276,7 @@ struct HomeScreen: View {
 
     /// The block happening now, or the next one due. Nil once everything is done.
     private func upNext(now: Date) -> PlanSessionRecord? {
-        let live = sessions.filter { $0.subtask?.completedAt == nil }
+        let live = PlanBridge.inPlan(sessions).filter { $0.subtask?.completedAt == nil }
         return live.first { $0.startsAt <= now && $0.endsAt > now }
             ?? live.first { $0.startsAt > now }
     }
@@ -322,7 +334,9 @@ struct HomeScreen: View {
 
     @ViewBuilder private var status: some View {
         if coordinator.status == .planning {
-            StatusBanner(tone: .working, message: "Albus is planning…")
+            // The plan is already in the week; what is still coming is the
+            // detail of each step.
+            StatusBanner(tone: .working, message: "Albus is writing the steps…")
         }
         if case .plannedLocally(let note, let suggestsUpgrade) = coordinator.status {
             StatusBanner(tone: .working, message: note,
@@ -347,7 +361,7 @@ struct HomeScreen: View {
     @ViewBuilder private var freeLimitNotice: some View {
         let tasks = entitlements.plan.tasks
         if let limit = tasks.limit, limit > 0,
-           assignments.count(where: { !$0.isComplete }) >= limit {
+           assignments.count(where: { !$0.isComplete && !$0.isArchived }) >= limit {
             StatusBanner(
                 tone: .warning,
                 message: "\(entitlements.plan.displayName) keeps \(limit) "
@@ -390,6 +404,9 @@ struct HomeScreen: View {
 private struct AssignmentCard: View {
     let assignment: Assignment
     let now: Date
+    /// The phone's plan is in place and the AI is still writing the steps, so
+    /// the step count is about to change: its shape, not a number.
+    var isRefining = false
 
     private var subject: Tokens.SubjectColor {
         assignment.course?.subjectColor ?? .violet
@@ -415,7 +432,14 @@ private struct AssignmentCard: View {
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if assignment.subtasks.isEmpty {
+                    if isRefining {
+                        HStack(spacing: Tokens.Spacing.s + 2) {
+                            SkeletonBar(height: 6, cornerRadius: 3)
+                            SkeletonBar(width: 28, height: 10)
+                                .frame(minWidth: 34, alignment: .trailing)
+                        }
+                        .skeleton(label: "Albus is writing the steps")
+                    } else if assignment.subtasks.isEmpty {
                         Text("No plan yet")
                             .font(Tokens.Typography.micro)
                             .foregroundStyle(Tokens.Palette.inkMuted)

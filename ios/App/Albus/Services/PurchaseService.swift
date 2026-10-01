@@ -152,6 +152,12 @@ final class PurchaseService {
         guard let store, isIdentified, !isWorking else {
             return .failed("Purchases aren't available right now.")
         }
+        // Never while the App Store is being asked again: an offer kept from
+        // the last answer may not be its price now, and the paywall shows the
+        // shape of a price, not that one, until the answer is in.
+        guard availability != .loading else {
+            return .failed("Still loading prices. Try again in a moment.")
+        }
         isWorking = true
         defer { isWorking = false }
         do {

@@ -487,32 +487,59 @@ struct SessionStorageTests {
         #expect(!session.awaitingRenewal)
     }
 
-    /// A pass in date is used without asking the server, so only the server
-    /// can say whether the account still exists. Deletion asks it first.
-    @MainActor @Test("asking whether an account exists goes to the server, even with a pass in date")
-    func confirmationAsksTheServer() async throws {
-        func session(_ transport: URLProtocol.Type) throws -> SessionService {
-            let keychain = MemoryKeychain()
-            try keychain.store(key: "sb-session-unit-auth-token", value: SessionTestTransport.sessionData)
-            let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
-            return SessionService(client: Self.client(storage, transport: transport), storage: storage)
-        }
+    @MainActor private func session(stored: Data, transport: URLProtocol.Type) throws -> SessionService {
+        let keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: stored)
+        let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
+        return SessionService(client: Self.client(storage, transport: transport), storage: storage)
+    }
 
-        // Refused: only the server could have said so, the pass being in date.
-        do {
-            try await session(RejectedRefreshTransport.self).confirmAccountWithServer()
-            Issue.record("a refused pass must not confirm the account")
-        } catch {
-            #expect(error is AccountUnreachable)
-        }
+    @MainActor @Test("the question before a deletion reaches the server without renewing a pass in date")
+    func questionKeepsAPassInDate() async throws {
+        RevokedSessionTransport.paths.reset()
+        try await session(stored: SessionTestTransport.sessionData, transport: RevokedSessionTransport.self)
+            .reachServer()
+        let asked = RevokedSessionTransport.paths.all
+        #expect(asked.contains { $0.hasSuffix("/rest/v1/assignments") }, "the server was asked")
+        #expect(!asked.contains { $0.hasSuffix("/auth/v1/token") }, "the pass was left as it was")
+
         // No signal: an error, and never read as the account being gone.
         do {
-            try await session(OfflineRefreshTransport.self).confirmAccountWithServer()
-            Issue.record("offline must not confirm the account")
+            try await session(stored: SessionTestTransport.sessionData, transport: OfflineRefreshTransport.self)
+                .reachServer()
+            Issue.record("no signal must not pass for an answer")
         } catch {
             #expect(!(error is AccountUnreachable))
         }
-        try await session(SessionTestTransport.self).confirmAccountWithServer()
+        // An expired pass is renewed, as for any request, and a refusal then
+        // means the account cannot be reached from this phone, as ever.
+        do {
+            try await session(stored: Self.expiredSessionData(), transport: RejectedRefreshTransport.self)
+                .reachServer()
+            Issue.record("a refused expired pass must not pass for an answer")
+        } catch {
+            #expect(error is AccountUnreachable)
+        }
+    }
+
+    /// The reported bug: asking first renewed a pass in date, the server
+    /// refused the renewal, the SDK dropped the pass the deletion could still
+    /// have used, and the phone was cleared while the account stayed.
+    @MainActor @Test("a pass the server will not renew still carries the deletion")
+    func refusedRenewalNeverStandsInForDeletion() async throws {
+        RevokedSessionTransport.paths.reset()
+        let session = try session(stored: SessionTestTransport.sessionData, transport: RevokedSessionTransport.self)
+        let deletion = AccountDeletion(defaults: isolated())
+        var cleared = false
+
+        let done = await deletion.perform(reachServer: { try await session.reachServer() },
+                                          deleteRemote: { try await session.deleteRemoteAccount() },
+                                          clearLocal: { cleared = true }, signOut: {})
+
+        let asked = RevokedSessionTransport.paths.all
+        #expect(asked.contains { $0.hasSuffix("/rest/v1/rpc/delete_my_account") }, "the deletion was sent")
+        #expect(!asked.contains { $0.hasSuffix("/auth/v1/token") })
+        #expect(done && cleared)
     }
 
     @MainActor @Test("launch notes when the server renewed the pass, and only then")
@@ -548,7 +575,7 @@ struct SessionStorageTests {
             let defaults = isolated(), keychain = MemoryKeychain()
             try keychain.store(key: "sb-session-unit-auth-token", value: Self.expiredSessionData())
             let deletion = AccountDeletion(defaults: defaults)
-            #expect(await !deletion.perform(confirmAccount: {},
+            #expect(await !deletion.perform(reachServer: {},
                                             deleteRemote: { throw URLError(.networkConnectionLost) },
                                             clearLocal: {}, signOut: {}))
             #expect(deletion.hasUnansweredRequest)
@@ -585,7 +612,7 @@ struct SessionStorageTests {
         let defaults = isolated(), keychain = MemoryKeychain()
         try keychain.store(key: "sb-session-unit-auth-token", value: Self.expiredSessionData())
         let deletion = AccountDeletion(defaults: defaults)
-        #expect(await !deletion.perform(confirmAccount: {},
+        #expect(await !deletion.perform(reachServer: {},
                                         deleteRemote: { throw URLError(.timedOut) },
                                         clearLocal: {}, signOut: {}))
         let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
@@ -644,6 +671,32 @@ struct SessionStorageTests {
         #expect(deletion.requiresCleanup)
     }
 
+    @MainActor @Test("a return to the app whose renewal the server answers settles an old request",
+                     arguments: [(3600.0, true), (60.0, false)])
+    func foregroundRenewalSettles(askedAgo: TimeInterval, settles: Bool) async throws {
+        RecoveringRefreshTransport.online.set(false)
+        defer { RecoveringRefreshTransport.online.set(false) }
+        let defaults = isolated(), keychain = MemoryKeychain()
+        try keychain.store(key: "sb-session-unit-auth-token", value: SessionTestTransport.sessionData)
+        defaults.set(true, forKey: "albus.accountDeletion.requested")
+        defaults.set(Date.now.addingTimeInterval(-askedAgo), forKey: "albus.accountDeletion.requestedAt")
+        let storage = ResilientAuthStorage(fallback: defaults, keychain: keychain)
+        let session = SessionService(client: Self.client(storage, transport: RecoveringRefreshTransport.self),
+                                     storage: storage)
+        let deletion = AccountDeletion(defaults: defaults)
+
+        await session.start(settling: deletion)
+        #expect(session.awaitingRenewal, "launch had no answer")
+        #expect(deletion.hasUnansweredRequest)
+
+        RecoveringRefreshTransport.online.set(true)
+        await session.revalidate(settling: deletion)
+        #expect(!session.awaitingRenewal)
+        #expect(deletion.hasUnansweredRequest == !settles,
+                settles ? "an hour on: the request deleted nothing" : "a minute on: it might yet")
+        #expect(!deletion.requiresCleanup)
+    }
+
     /// With nothing outstanding the app opens at once, so a student can ask
     /// for a deletion before launch's renewal is answered. That renewal began
     /// before the request, so it proves nothing about it.
@@ -658,7 +711,7 @@ struct SessionStorageTests {
         try await Task.sleep(for: .milliseconds(500))
         #expect(session.userID == Self.storedUserID, "opened before the 1.5 s renewal")
 
-        #expect(await !deletion.perform(confirmAccount: {},
+        #expect(await !deletion.perform(reachServer: {},
                                         deleteRemote: { throw URLError(.networkConnectionLost) },
                                         clearLocal: {}, signOut: {}))
         #expect(deletion.hasUnansweredRequest)
@@ -837,6 +890,40 @@ private final class RecoveringRefreshTransport: URLProtocol, @unchecked Sendable
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
             headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: SessionTestTransport.sessionData)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// The server after a session is revoked: a pass still in date is accepted,
+/// renewing it is refused, and deleting the account succeeds. Records every
+/// path asked for.
+private final class RevokedSessionTransport: URLProtocol, @unchecked Sendable {
+    final class PathLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: [String] = []
+        func reset() { lock.lock(); defer { lock.unlock() }; value = [] }
+        func add(_ path: String) { lock.lock(); defer { lock.unlock() }; value.append(path) }
+        var all: [String] { lock.lock(); defer { lock.unlock() }; return value }
+    }
+    static let paths = PathLog()
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url?.path ?? ""
+        Self.paths.add(path)
+        if path.hasSuffix("/auth/v1/token") {
+            respond(status: 400, body: #"{"error_code":"refresh_token_not_found","msg":"Revoked"}"#)
+        } else if path.hasSuffix("/rpc/delete_my_account") {
+            respond(status: 204, body: "")
+        } else {
+            respond(status: 200, body: "[]")
+        }
+    }
+    private func respond(status: Int, body: String) {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}

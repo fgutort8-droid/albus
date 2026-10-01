@@ -10,7 +10,9 @@ struct MonthCalendarScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(PlanCoordinator.self) private var coordinator
 
-    @Query(sort: \PlanSessionRecord.startsAt) private var sessions: [PlanSessionRecord]
+    @Query(sort: \PlanSessionRecord.startsAt) private var stored: [PlanSessionRecord]
+    /// The plan's blocks: an archived assignment's are not planned work.
+    private var sessions: [PlanSessionRecord] { PlanBridge.inPlan(stored) }
 
     @State private var month: Date = .now
     @State private var selectedDay: Date?
@@ -234,6 +236,7 @@ private struct DaySheet: View {
 
     private struct DayRow: View {
         let session: PlanSessionRecord
+        @Environment(PlanCoordinator.self) private var coordinator
 
         private var subject: Tokens.SubjectColor {
             session.subtask?.assignment?.course?.subjectColor ?? .violet
@@ -245,11 +248,18 @@ private struct DaySheet: View {
                     Text("\(session.startsAt, format: .dateTime.hour().minute()) – \(session.endsAt, format: .dateTime.hour().minute())")
                         .font(Tokens.Typography.mono)
                         .foregroundStyle(Tokens.Palette.inkSecondary)
-                    Text(session.subtask?.title ?? "Study session")
-                        .font(Tokens.Typography.cardTitle)
-                        .foregroundStyle(Tokens.Palette.ink)
-                        .strikethrough(session.subtask?.completedAt != nil)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if coordinator.isRefining(session.subtask?.assignment) {
+                        // The time is placed; the step's name is still being written.
+                        SkeletonBar(width: 150, height: 14)
+                            .frame(height: 20, alignment: .leading)
+                            .skeleton(label: "Albus is writing this step")
+                    } else {
+                        Text(session.subtask?.title ?? "Study session")
+                            .font(Tokens.Typography.cardTitle)
+                            .foregroundStyle(Tokens.Palette.ink)
+                            .strikethrough(session.subtask?.completedAt != nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if let assignment = session.subtask?.assignment {
                         Text(assignment.title)
                             .font(Tokens.Typography.caption)

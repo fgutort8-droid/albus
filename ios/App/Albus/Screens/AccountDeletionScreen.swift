@@ -55,7 +55,7 @@ struct AccountDeletionScreen: View {
 
     private func removeAccount() async {
         _ = await deletion.perform(
-            confirmAccount: { try await session.confirmAccountWithServer() },
+            reachServer: { try await session.reachServer() },
             deleteRemote: { try await session.deleteRemoteAccount() },
             clearLocal: {
                 coordinator.invalidateForAccountDeletion()

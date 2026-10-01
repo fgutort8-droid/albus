@@ -51,8 +51,23 @@ struct TaskDetailScreen: View {
         steps.filter { $0.completedAt == nil }.reduce(0) { $0 + $1.estimatedMinutes }
     }
     /// The first unfinished step. Everything before it is history; this is the
-    /// one the screen argues for.
-    private var nextStepID: UUID? { steps.first { $0.completedAt == nil }?.id }
+    /// one the screen argues for. A record argues for nothing.
+    private var nextStepID: UUID? {
+        isRecord ? nil : steps.first { $0.completedAt == nil }?.id
+    }
+
+    /// An archived assignment: the server refused it after work was done on
+    /// it, so the screen shows that work and offers nothing that would plan,
+    /// mark or change it. Deleting it is still offered.
+    private var isRecord: Bool { assignment.isArchived }
+
+    /// What a record says was done, rather than what is left: nothing more
+    /// will be planned for it.
+    private var recordLine: String {
+        let focused = steps.flatMap(\.sessions).reduce(0) { $0 + ($1.focusedSeconds ?? 0) } / 60
+        let done = "\(doneCount) of \(steps.count) steps done"
+        return focused > 0 ? "\(done) · \(DurationText.short(minutes: focused)) focused" : done
+    }
 
     var body: some View {
         // A deleted assignment can still be rendered once before the navigation
@@ -239,7 +254,9 @@ struct TaskDetailScreen: View {
                 if !steps.isEmpty {
                     VStack(spacing: Tokens.Spacing.s) {
                         HStack(alignment: .firstTextBaseline) {
-                            Text("\(doneCount) of \(steps.count) steps · \(DurationText.short(minutes: remainingMinutes)) left of \(DurationText.short(minutes: totalMinutes))")
+                            Text(isRecord
+                                 ? recordLine
+                                 : "\(doneCount) of \(steps.count) steps · \(DurationText.short(minutes: remainingMinutes)) left of \(DurationText.short(minutes: totalMinutes))")
                                 .font(Tokens.Typography.caption)
                                 .foregroundStyle(Tokens.Palette.inkSecondary)
                             Spacer()
@@ -255,7 +272,11 @@ struct TaskDetailScreen: View {
     }
 
     @ViewBuilder private var albusNote: some View {
-        if steps.isEmpty {
+        if isRecord {
+            AlbusNote("Albus couldn't add this one to your plan. **What you did on it is kept here.**")
+        } else if isWritingSteps {
+            AlbusNote("Albus is writing more specific steps. **You can start on these now.**", isBusy: true)
+        } else if steps.isEmpty {
             StatusBanner(tone: .warning,
                          message: "This assignment has no plan yet. Albus couldn't reach the planner when you added it.",
                          retryTitle: "Add a step") { addingStep = true }
@@ -280,6 +301,8 @@ struct TaskDetailScreen: View {
     @ViewBuilder private var gradeEntry: some View {
         let previous = assignment.gradings.sorted { $0.createdAt > $1.createdAt }
 
+        // A record keeps its markings to read, and is not marked again.
+        if !isRecord || !previous.isEmpty {
         GlassCard {
             VStack(alignment: .leading, spacing: Tokens.Spacing.m) {
                     VStack(alignment: .leading, spacing: Tokens.Spacing.xs) {
@@ -288,21 +311,25 @@ struct TaskDetailScreen: View {
                             .font(Tokens.Typography.overline)
                             .tracking(Tokens.Tracking.overline)
                             .foregroundStyle(Tokens.Palette.inkMuted)
-                        Text(assignment.rubric == nil
-                             ? "Mark it against a rubric"
-                             : "Mark it against \(assignment.rubric!.name)")
-                            .font(Tokens.Typography.cardTitle)
-                            .foregroundStyle(Tokens.Palette.ink)
-                        Text("Albus reads what you wrote and says what to change, in the order worth changing it.")
-                            .font(Tokens.Typography.caption)
-                            .foregroundStyle(Tokens.Palette.inkSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        if !isRecord {
+                            Text(assignment.rubric == nil
+                                 ? "Mark it against a rubric"
+                                 : "Mark it against \(assignment.rubric!.name)")
+                                .font(Tokens.Typography.cardTitle)
+                                .foregroundStyle(Tokens.Palette.ink)
+                            Text("Albus reads what you wrote and says what to change, in the order worth changing it.")
+                                .font(Tokens.Typography.caption)
+                                .foregroundStyle(Tokens.Palette.inkSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
 
-                    PrimaryButton(title: previous.isEmpty ? "Mark my work" : "Mark it again") {
-                        grading = true
+                    if !isRecord {
+                        PrimaryButton(title: previous.isEmpty ? "Mark my work" : "Mark it again") {
+                            grading = true
+                        }
+                        .accessibilityIdentifier("markMyWork")
                     }
-                    .accessibilityIdentifier("markMyWork")
 
                     if !previous.isEmpty {
                         VStack(spacing: Tokens.Spacing.xs) {
@@ -335,6 +362,7 @@ struct TaskDetailScreen: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        }
     }
 
     /// What the card calls itself, which depends on where the work has got to.
@@ -347,15 +375,18 @@ struct TaskDetailScreen: View {
 
     @ViewBuilder private var plan: some View {
         if !steps.isEmpty {
-            SectionHeader(label: "Albus's plan", count: steps.count) {
+            SectionHeader(label: isRecord ? "Steps" : "Albus's plan", count: steps.count) {
                 HStack(spacing: Tokens.Spacing.m) {
                     Text(DurationText.short(minutes: totalMinutes))
                         .font(Tokens.Typography.mono)
                         .foregroundStyle(Tokens.Palette.inkMuted)
+                    if !isRecord {
                     Menu {
                         Button("Add a step", systemImage: "plus") { addingStep = true }
                         if steps.count > 1 {
                             Button("Reorder", systemImage: "arrow.up.arrow.down") {
+                                // The reorder sheet holds these steps: they stay.
+                                coordinator.claim(assignment)
                                 reordering = true
                             }
                         }
@@ -367,6 +398,7 @@ struct TaskDetailScreen: View {
                             .contentShape(Rectangle())
                     }
                     .accessibilityLabel("Edit plan")
+                    }
                 }
             }
             .padding(.top, Tokens.Spacing.xs)
@@ -384,6 +416,8 @@ struct TaskDetailScreen: View {
                 .padding(.top, Tokens.Spacing.xs)
             }
 
+            // Usable from the first moment, even while the AI is still
+            // writing steps of its own.
             VStack(spacing: 0) {
                 let tools = toolsByStep
                 ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
@@ -394,13 +428,18 @@ struct TaskDetailScreen: View {
                         isLast: index == steps.count - 1,
                         isNext: step.id == nextStepID,
                         isExpanded: expanded == step.id,
+                        isReadOnly: isRecord,
                         subject: subject,
                         onToggleDone: {
                             coordinator.setCompleted(step, step.completedAt == nil, context: context,
                                      availability: preferences.availability)
                         },
                         onStartSession: { start(step) },
-                        onEdit: { editing = StepDraft(step) },
+                        onEdit: {
+                            // The editor holds this step: it stays.
+                            coordinator.claim(assignment)
+                            editing = StepDraft(step)
+                        },
                         onTap: {
                             withAnimation(Tokens.Motion.quick) {
                                 expanded = expanded == step.id ? nil : step.id
@@ -411,6 +450,9 @@ struct TaskDetailScreen: View {
             }
         }
     }
+
+    /// The phone's steps are in place, and the AI's could still replace them.
+    private var isWritingSteps: Bool { coordinator.isWritingSteps(assignment) }
 }
 
 /// One step on the rail.
@@ -422,6 +464,8 @@ private struct StepRow: View {
     let isLast: Bool
     let isNext: Bool
     let isExpanded: Bool
+    /// A record's step: shown, never ticked, started or edited.
+    let isReadOnly: Bool
     let subject: Tokens.SubjectColor
     let onToggleDone: () -> Void
     let onStartSession: () -> Void
@@ -442,6 +486,7 @@ private struct StepRow: View {
         HStack(alignment: .top, spacing: Tokens.Spacing.m) {
             VStack(spacing: Tokens.Spacing.xs) {
                 StepNode(number: number, isComplete: isDone, isNext: isNext, action: onToggleDone)
+                    .disabled(isReadOnly)
                 if !isLast { StepRailConnector(isComplete: isDone) }
             }
             .frame(width: 24)
@@ -564,7 +609,7 @@ private struct StepRow: View {
             .padding(.top, Tokens.Spacing.xs)
         }
 
-        if showsCard {
+        if showsCard && !isReadOnly {
             Button(action: onEdit) {
                 Label("Edit step", systemImage: "pencil")
                     .font(Tokens.Typography.micro)

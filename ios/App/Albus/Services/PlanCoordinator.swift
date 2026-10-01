@@ -66,19 +66,79 @@ final class PlanCoordinator {
         onScheduleChanged = nil
     }
 
+    /// Assignments whose plan the phone made and the AI is still writing, for
+    /// at most `refiningDisplayLimit`. Home and the month sketch their step
+    /// titles meanwhile; see `isRefining(_:)`. The task screen never does: its
+    /// steps can be used from the first moment.
+    private(set) var refining: Set<UUID> = []
+
+    func isRefining(_ assignment: Assignment?) -> Bool {
+        guard let assignment else { return false }
+        return refining.contains(assignment.id)
+    }
+
+    /// Assignments whose AI answer has not arrived yet, however long it takes.
+    private var pending: Set<UUID> = []
+
+    /// The AI is still writing this assignment's steps and they would replace
+    /// the ones shown: the student has not started using them.
+    func isWritingSteps(_ assignment: Assignment?) -> Bool {
+        guard let id = assignment?.id else { return false }
+        return pending.contains(id) && !claimed.contains(id)
+    }
+    /// Pending assignments the student has started using: the AI's answer no
+    /// longer replaces their steps.
+    private var claimed: Set<UUID> = []
+
+    /// The student is acting on this assignment's steps as they stand, so the
+    /// AI's answer, when it comes, must not replace them.
+    ///
+    /// Every change made through the coordinator claims the assignment. Screens
+    /// also claim before anything that holds on to a step without changing it
+    /// yet, such as the step editor or a focus session being opened: replacing
+    /// the step underneath would lose what the student does there. Only while
+    /// the AI's answer is pending; afterwards there is nothing to replace.
+    func claim(_ assignment: Assignment?) {
+        guard let id = assignment?.id, pending.contains(id) else { return }
+        claimed.insert(id)
+        // The steps shown are the ones that stay: nothing left to sketch.
+        refining.remove(id)
+    }
+
     private let plans: PlanService
+    /// Where refused assignments still in use are remembered until launch.
+    private let defaults: UserDefaults
+    private let assignments: AssignmentService
+    /// How long step titles stay skeletons while the AI writes them. After
+    /// that the phone's own titles show, and a late answer still replaces a
+    /// plan nobody has touched.
+    private let refiningDisplayLimit: Duration
+    /// Writes changes to the phone. A seam for the test of a failed write.
+    private let persist: @MainActor (ModelContext) throws -> Void
     private let scheduler = Scheduler()
     private let estimator = Estimator()
 
-    init(plans: PlanService = PlanService()) {
+    init(plans: PlanService = PlanService(),
+         assignments: AssignmentService = AssignmentService(),
+         refiningDisplayLimit: Duration = .seconds(8),
+         defaults: UserDefaults = .standard,
+         persist: @escaping @MainActor (ModelContext) throws -> Void = { try $0.save() }) {
         self.plans = plans
+        self.assignments = assignments
+        self.refiningDisplayLimit = refiningDisplayLimit
+        self.defaults = defaults
+        self.persist = persist
     }
 
-    /// Adds an assignment and returns with its plan placed in time.
+    /// Adds an assignment with its plan in the week at once, and returns once
+    /// the AI has written the steps or declined to.
     ///
-    /// The assignment is saved *before* the network call. If generation fails
-    /// the student keeps their work and a deadline, which is the difference
-    /// between a slow moment and losing what they typed.
+    /// The assignment is saved, and planned on the phone, *before* the network
+    /// call. The student sees it in their week the moment they add it, rather
+    /// than after the AI's three to fifteen seconds, and a failed generation
+    /// still leaves them a working plan and everything they typed. The AI's
+    /// steps then replace the phone's, unless the student has already started
+    /// on them: a plan they have begun is theirs.
     func addAssignment(_ draft: NewAssignment,
                        context: ModelContext,
                        availability: Availability = .default,
@@ -90,7 +150,7 @@ final class PlanCoordinator {
         // this, an offline student could plan past the cap on the phone.
         if let taskLimit,
            let open = try? context.fetch(FetchDescriptor<Assignment>())
-               .count(where: { !$0.isComplete }),
+               .count(where: { !$0.isComplete && !$0.isArchived }),
            open >= taskLimit {
             status = .failed(PlanService.Failure.quotaReached.errorDescription ?? "")
             return
@@ -107,6 +167,27 @@ final class PlanCoordinator {
         context.insert(assignment)
         save(context, "insert assignment")
 
+        // The phone's plan, straight away, in the student's own week. Its step
+        // titles show as skeletons until the AI's arrive, for at most
+        // `refiningDisplayLimit`.
+        planLocally(assignment, context: context, availability: availability, now: now)
+        let localPlan = snapshot(of: assignment)
+        let id = assignment.id
+        pending.insert(id)
+        refining.insert(id)
+        let limit = refiningDisplayLimit
+        let reveal = Task { [weak self] in
+            try? await Task.sleep(for: limit)
+            guard !Task.isCancelled else { return }
+            self?.refining.remove(id)
+        }
+        defer {
+            reveal.cancel()
+            refining.remove(id)
+            pending.remove(id)
+            claimed.remove(id)
+        }
+
         do {
             let result = try await plans.breakdown(
                 title: draft.title, taskType: draft.taskType,
@@ -119,44 +200,117 @@ final class PlanCoordinator {
             )
 
             guard !accountWasDeleted else { return }
+            guard let current = existing(id, in: context) else {
+                // Deleted while the AI worked. The server made the assignment
+                // too, and the phone never learnt its id to delete it there.
+                await deleteRemote(result.assignmentID)
+                status = .idle
+                return
+            }
             // Server-assigned id, so a later sync can match rows rather than
             // guessing by title.
-            assignment.remoteID = result.assignmentID
+            current.remoteID = result.assignmentID
 
-            for (i, step) in result.steps.enumerated() {
-                context.insert(Subtask(
-                    title: step.title,
-                    guidance: step.guidance.isEmpty ? nil : step.guidance,
-                    ordinal: i,
-                    estimatedMinutes: step.estimatedMinutes,
-                    criterionCode: step.criterionCode,
-                    toolNeed: step.toolNeed,
-                    assignment: assignment
-                ))
+            if !result.steps.isEmpty, !claimed.contains(id), snapshot(of: current) == localPlan {
+                replaceSteps(of: current, with: result.steps, context: context)
+                save(context, "insert steps")
+                reschedule(context: context, availability: availability, now: now)
+            } else {
+                // The student has started on the phone's plan, opened a step,
+                // or edited it. Theirs stands.
+                save(context, "link assignment")
             }
-            save(context, "insert steps")
-            reschedule(context: context, availability: availability, now: now)
             status = .idle
 
         } catch let failure as PlanService.Failure where failure.plansLocally {
             guard !accountWasDeleted else { return }
-            planLocally(assignment, context: context, availability: availability, now: now)
+            // The phone's plan is already in place.
             status = .plannedLocally(note: failure.localPlanNote,
                                      suggestsUpgrade: failure.suggestsUpgrade)
         } catch let failure as PlanService.Failure {
             guard !accountWasDeleted else { return }
-            // Over the open-task cap: the server refused the assignment itself,
-            // so keeping it here would leave an unplanned copy nobody can act on.
-            if failure == .quotaReached {
-                context.delete(assignment)
-                save(context, "remove refused assignment")
+            // Refused outright, over the open-task cap or as a request that
+            // needs correcting: the server holds no copy and never will, so
+            // the phone's copy goes too rather than sit in the week, outlasting
+            // the limit that refused it.
+            let refusal = failure.errorDescription ?? "Couldn't plan that."
+            if failure.refusesAssignment, let current = existing(id, in: context) {
+                if !claimed.contains(id), current.gradings.isEmpty, snapshot(of: current) == localPlan {
+                    context.delete(current)
+                    save(context, "remove refused assignment")
+                    reschedule(context: context, availability: availability, now: now)
+                } else {
+                    // Started on already, by any route, or marked against.
+                    // Removed now, it could go from under an open step or a
+                    // running timer, and a marking would go with it, so the
+                    // next launch takes its plan out of the week instead,
+                    // before any screen can show it, and keeps the work.
+                    RefusedAssignments.record(id, defaults: defaults)
+                    status = .failed(refusal + " The one you just added stays until Albus next opens, as you've started on it. The work you do on it is kept.")
+                    return
+                }
             }
-            status = .failed(failure.errorDescription ?? "Couldn't plan that.")
+            status = .failed(refusal)
         } catch {
             guard !accountWasDeleted else { return }
-            planLocally(assignment, context: context, availability: availability, now: now)
             status = .plannedLocally(note: PlanService.Failure.unavailable.localPlanNote,
                                      suggestsUpgrade: false)
+        }
+    }
+
+    /// What the student could have changed about a plan: which steps it has,
+    /// what they say, and whether any has been started or finished.
+    private struct StepSnapshot: Equatable {
+        let id: UUID
+        let title: String
+        let minutes: Int
+        let ordinal: Int
+        let started: Bool
+    }
+
+    private func snapshot(of assignment: Assignment) -> [StepSnapshot] {
+        assignment.subtasks
+            .map { step in
+                StepSnapshot(
+                    id: step.id, title: step.title, minutes: step.estimatedMinutes,
+                    ordinal: step.ordinal,
+                    started: step.completedAt != nil || step.sessions.contains {
+                        $0.startedAt != nil || ($0.focusedSeconds ?? 0) > 0
+                    })
+            }
+            .sorted { $0.ordinal < $1.ordinal }
+    }
+
+    /// The assignment, if it is still on the phone.
+    private func existing(_ id: UUID, in context: ModelContext) -> Assignment? {
+        var descriptor = FetchDescriptor<Assignment>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first
+    }
+
+    /// Swaps the phone's steps for the AI's. Their sessions go with them, and
+    /// the re-flow that follows places the new ones.
+    private func replaceSteps(of assignment: Assignment, with steps: [PlanService.Step],
+                              context: ModelContext) {
+        for old in Array(assignment.subtasks) { context.delete(old) }
+        for (i, step) in steps.enumerated() {
+            context.insert(Subtask(
+                title: step.title,
+                guidance: step.guidance.isEmpty ? nil : step.guidance,
+                ordinal: i,
+                estimatedMinutes: step.estimatedMinutes,
+                criterionCode: step.criterionCode,
+                toolNeed: step.toolNeed,
+                assignment: assignment
+            ))
+        }
+    }
+
+    /// Removes a server row the phone holds no copy of, retrying later if the
+    /// server cannot be reached now.
+    private func deleteRemote(_ remoteID: UUID) async {
+        if await !assignments.delete(remoteID: remoteID), !accountWasDeleted {
+            PendingDeletions.record(remoteID)
         }
     }
 
@@ -175,6 +329,78 @@ final class PlanCoordinator {
         }
         save(context, "insert local plan")
         reschedule(context: context, availability: availability, now: now)
+    }
+
+    /// Takes the plans the server refused while they were in use out of the
+    /// week, now that no screen can be showing them. Called at launch, before
+    /// anything is drawn.
+    ///
+    /// The plan goes; what the student did on it stays. An assignment with
+    /// nothing recorded on it is deleted. One with a finished step, measured
+    /// focus time or a marking is archived instead (see `archive`), so the
+    /// refusal neither outlives the limit that made it nor takes their work.
+    /// The list is cleared only once this is saved: a failed save is undone
+    /// in memory and tried again at the next launch.
+    func removeRefusedAssignments(context: ModelContext,
+                                  availability: Availability = .default,
+                                  now: Date = .now) {
+        let refused = RefusedAssignments.all(defaults: defaults)
+        guard !refused.isEmpty else { return }
+        for id in refused {
+            guard let assignment = existing(id, in: context) else { continue }
+            if Self.hasRecordedWork(assignment) {
+                archive(assignment, context: context, now: now)
+            } else {
+                context.delete(assignment)
+            }
+        }
+        guard save(context, "remove refused assignments") else {
+            context.rollback()
+            return
+        }
+        RefusedAssignments.clear(defaults: defaults)
+        reschedule(context: context, availability: availability, now: now)
+    }
+
+    /// Keeps the record of a refused assignment and removes its plan. Steps
+    /// with nothing recorded go, and so do blocks that never ran; blocks that
+    /// did run move to when they actually happened, so none is left ahead in
+    /// the week. Archived, it is never scheduled, listed or counted against
+    /// the open-task cap, and its markings stay in the marking history.
+    private func archive(_ assignment: Assignment, context: ModelContext, now: Date) {
+        for step in Array(assignment.subtasks) {
+            guard Self.hasRecordedWork(step) else {
+                context.delete(step)
+                continue
+            }
+            for session in Array(step.sessions) {
+                guard Self.wasRun(session) else {
+                    context.delete(session)
+                    continue
+                }
+                let began = session.startedAt ?? session.startsAt
+                let ended = session.endedAt
+                    ?? began.addingTimeInterval(TimeInterval(session.focusedSeconds ?? 0))
+                session.startsAt = began
+                session.endsAt = max(ended, began.addingTimeInterval(60))
+            }
+        }
+        assignment.statusValue = .archived
+        assignment.updatedAt = now
+    }
+
+    /// Something the student did, rather than something planned for them.
+    private static func hasRecordedWork(_ assignment: Assignment) -> Bool {
+        !assignment.gradings.isEmpty || assignment.subtasks.contains(where: hasRecordedWork)
+    }
+
+    private static func hasRecordedWork(_ step: Subtask) -> Bool {
+        step.completedAt != nil || step.sessions.contains(where: wasRun)
+    }
+
+    /// A block a timer actually ran on, as opposed to one only planned.
+    private static func wasRun(_ session: PlanSessionRecord) -> Bool {
+        session.startedAt != nil || (session.focusedSeconds ?? 0) > 0
     }
 
     /// Removes an assignment and everything that came from it.
@@ -209,13 +435,11 @@ final class PlanCoordinator {
         }
 
         // Fire-and-forget with a retry queue behind it: the row is gone from the
-        // device the moment the student asks, and the server catches up.
+        // device the moment the student asks, and the server catches up. With
+        // no remote id yet, the AI is still writing the plan, and
+        // `addAssignment` deletes the server's copy when its answer arrives.
         if let remoteID = assignment.remoteID {
-            Task {
-                if await !AssignmentService().delete(remoteID: remoteID), !accountWasDeleted {
-                    PendingDeletions.record(remoteID)
-                }
-            }
+            Task { await deleteRemote(remoteID) }
         }
 
         context.delete(assignment)
@@ -239,6 +463,7 @@ final class PlanCoordinator {
                       availability: Availability = .default,
                       now: Date = .now) {
         guard (subtask.completedAt != nil) != completed else { return }
+        claim(subtask.assignment)
 
         if completed {
             subtask.completedAt = now
@@ -253,7 +478,7 @@ final class PlanCoordinator {
         // Finishing the last step closes the assignment, which is what frees a
         // slot against the free-tier active-plan cap.
         if let assignment = subtask.assignment {
-            assignment.statusValue = assignment.isComplete ? .completed : .active
+            settleStatus(of: assignment)
         }
 
         save(context, "toggle step")
@@ -317,6 +542,7 @@ final class PlanCoordinator {
             where session.sessionState == .scheduled
                 && session.endsAt <= now
                 && session.subtask?.completedAt == nil
+                && session.subtask?.assignment?.isArchived != true
                 && !session.isFixed {
                 session.sessionState = .missed
                 missed += 1
@@ -346,6 +572,7 @@ final class PlanCoordinator {
                     now: Date = .now) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        claim(subtask.assignment)
 
         let clamped = max(5, min(600, minutes))
         guard subtask.title != trimmed || subtask.estimatedMinutes != clamped else { return }
@@ -363,6 +590,7 @@ final class PlanCoordinator {
                  now: Date = .now) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        claim(assignment)
 
         let ordinal = (assignment.subtasks.map(\.ordinal).max() ?? -1) + 1
         context.insert(Subtask(title: trimmed, ordinal: ordinal,
@@ -371,7 +599,7 @@ final class PlanCoordinator {
         assignment.updatedAt = now
         // A hand-written step can reopen a finished assignment, which is what
         // frees or consumes a slot against the free-tier cap.
-        assignment.statusValue = assignment.isComplete ? .completed : .active
+        settleStatus(of: assignment)
         save(context, "add step")
         reschedule(context: context, availability: availability, now: now)
     }
@@ -380,12 +608,13 @@ final class PlanCoordinator {
                     availability: Availability = .default,
                     now: Date = .now) {
         let assignment = subtask.assignment
+        claim(assignment)
         context.delete(subtask)
         assignment?.updatedAt = now
         save(context, "delete step")
         if let assignment {
             renumber(assignment)
-            assignment.statusValue = assignment.isComplete ? .completed : .active
+            settleStatus(of: assignment)
             save(context, "renumber after delete")
         }
         reschedule(context: context, availability: availability, now: now)
@@ -395,12 +624,21 @@ final class PlanCoordinator {
                    context: ModelContext,
                    availability: Availability = .default,
                    now: Date = .now) {
+        claim(assignment)
         var ordered = assignment.subtasks.sorted { $0.ordinal < $1.ordinal }
         ordered.move(fromOffsets: source, toOffset: destination)
         for (index, step) in ordered.enumerated() { step.ordinal = index }
         assignment.updatedAt = now
         save(context, "reorder steps")
         reschedule(context: context, availability: availability, now: now)
+    }
+
+    /// Completed once every step is done, active otherwise. Archived stays
+    /// archived: it is a record of work now, and a change to it must not turn
+    /// it back into a plan.
+    private func settleStatus(of assignment: Assignment) {
+        guard !assignment.isArchived else { return }
+        assignment.statusValue = assignment.isComplete ? .completed : .active
     }
 
     /// Ordinals must stay contiguous: the scheduler places work in ordinal
@@ -420,6 +658,7 @@ final class PlanCoordinator {
     /// that sometimes silently does nothing.
     func session(toStart subtask: Subtask, context: ModelContext,
                  now: Date = .now) -> PlanSessionRecord? {
+        claim(subtask.assignment)
         let candidates = subtask.sessions
             .filter { $0.sessionState == .scheduled || $0.sessionState == .missed }
             .sorted { $0.startsAt < $1.startsAt }
@@ -503,11 +742,38 @@ final class PlanCoordinator {
         return PlanBridge.completionLogs(from: records)
     }
 
-    private func save(_ context: ModelContext, _ what: StaticString) {
-        do { try context.save() } catch {
+    @discardableResult
+    private func save(_ context: ModelContext, _ what: StaticString) -> Bool {
+        do {
+            try persist(context)
+            return true
+        } catch {
             // Losing a write silently is worse than a visible failure.
             status = .failed("Couldn't save.")
             print("save failed during \(what)")
+            return false
         }
+    }
+}
+
+/// Assignments the server refused after the student had started on them,
+/// kept until the next launch removes them. Refused ones never reach the
+/// server, so there is nothing to delete there.
+enum RefusedAssignments {
+    private static let key = "albus.refusedAssignments"
+
+    static func record(_ id: UUID, defaults: UserDefaults = .standard) {
+        var ids = all(defaults: defaults)
+        guard !ids.contains(id) else { return }
+        ids.append(id)
+        defaults.set(ids.map(\.uuidString), forKey: key)
+    }
+
+    static func all(defaults: UserDefaults = .standard) -> [UUID] {
+        (defaults.stringArray(forKey: key) ?? []).compactMap(UUID.init(uuidString:))
+    }
+
+    static func clear(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: key)
     }
 }
