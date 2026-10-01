@@ -90,7 +90,7 @@ export function keySources(
 console.info("supabase keys", keySources());
 
 /** A platform key dictionary's `default` entry; nothing when absent or unreadable. */
-function namedDefault(dictionary: string | undefined): string | undefined {
+export function namedDefault(dictionary: string | undefined): string | undefined {
   if (!dictionary) return undefined;
   try {
     const value = (JSON.parse(dictionary) as Record<string, unknown>)?.["default"];
