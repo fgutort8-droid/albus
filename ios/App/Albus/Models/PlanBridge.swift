@@ -99,6 +99,7 @@ enum PlanBridge {
         records.compactMap { record in
             guard let subtask = record.subtask,
                   let assignment = subtask.assignment,
+                  !assignment.isArchived,
                   record.endsAt > record.startsAt,
                   !record.isFixed
             else { return nil }
@@ -179,7 +180,8 @@ enum PlanBridge {
             guard record.sessionState == .scheduled,
                   let subtask = record.subtask,
                   subtask.completedAt == nil,
-                  let assignment = subtask.assignment
+                  let assignment = subtask.assignment,
+                  !assignment.isArchived
             else { return nil }
             return NotificationBlock(
                 assignmentID: assignment.id,
@@ -239,9 +241,11 @@ enum PlanBridge {
         }
 
         // Anything scheduled that no longer appears was re-planned away.
-        // Fixed commitments and history are never touched.
+        // Fixed commitments and history are never touched, and an archived
+        // assignment's blocks are all history.
         for record in existing where !keptIDs.contains(record.id) {
-            guard !record.isFixed, !record.sessionState.isImmutable else { continue }
+            guard !record.isFixed, !record.sessionState.isImmutable,
+                  record.subtask?.assignment?.isArchived != true else { continue }
             context.delete(record)
         }
     }
