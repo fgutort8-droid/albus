@@ -8,6 +8,11 @@ create table private.financial_inbox (
   event_id text not null check (length(event_id) between 1 and 255),
   payload jsonb not null check (octet_length(payload::text) <= 16384),
   payload_hash text not null,
+  -- The account the event is for, outside the payload so account cleanup
+  -- (which spares any account named in a user_id column) keeps an account
+  -- whose payment is still queued. Not a foreign key: an event for an
+  -- account deleted since must still be accepted, as revenue is.
+  user_id uuid,
   state text not null default 'pending' check (state in ('pending','retry','completed','dead')),
   attempts integer not null default 0,
   received_at timestamptz not null default now(),
@@ -19,6 +24,8 @@ create table private.financial_inbox (
 );
 create index financial_inbox_pending_idx on private.financial_inbox(available_at,received_at)
   where state in ('pending','retry');
+-- Account cleanup asks this once per candidate account.
+create index financial_inbox_user_idx on private.financial_inbox(user_id) where user_id is not null;
 alter table private.financial_inbox enable row level security;
 revoke all on private.financial_inbox from public,anon,authenticated,service_role;
 
@@ -80,10 +87,10 @@ begin
     else 'verified_provider_event' end;
   perform private.append_financial_audit(tg_table_name||'.'||lower(tg_op),v_key,'committed',v_reason,
     jsonb_build_object('before',jsonb_strip_nulls(jsonb_build_object(
-      'tier',v_old->'tier','expires_at',v_old->'expires_at','revoked_at',v_old->'revoked_at',
+      'tier',v_old->'tier','active',v_old->'active','expires_at',v_old->'expires_at','revoked_at',v_old->'revoked_at',
       'environment',v_old->'environment','net_microusd',v_old->'net_microusd','int_value',v_old->'int_value')),
       'after',jsonb_strip_nulls(jsonb_build_object(
-      'tier',v_new->'tier','expires_at',v_new->'expires_at','revoked_at',v_new->'revoked_at',
+      'tier',v_new->'tier','active',v_new->'active','expires_at',v_new->'expires_at','revoked_at',v_new->'revoked_at',
       'environment',v_new->'environment','net_microusd',v_new->'net_microusd','int_value',v_new->'int_value'))));
   return coalesce(new,old);
 end $$;
@@ -122,7 +129,7 @@ create trigger config_financial_truncate before truncate on public.app_config
 
 create function public.enqueue_revenuecat_event(p_scope text,p_event_id text,p_payload jsonb)
 returns uuid language plpgsql security definer set search_path='' as $$
-declare v_id uuid; v_hash text; v_existing text;
+declare v_id uuid; v_hash text; v_existing text; v_user text;
 begin
   if p_scope is null or length(p_scope) not between 1 and 2048 or p_event_id is null
     or length(p_event_id) not between 1 and 255 or p_payload is null
@@ -134,8 +141,11 @@ begin
     raise exception 'INVALID_FINANCIAL_EVENT' using errcode='22023';
   end if;
   v_hash := encode(extensions.digest(p_payload::text,'sha256'),'hex');
-  insert into private.financial_inbox(scope,event_id,payload,payload_hash)
-    values(p_scope,p_event_id,p_payload,v_hash) on conflict(provider,scope,event_id) do nothing
+  -- The account it would benefit: the subscriber, or a transfer's destination.
+  v_user := coalesce(p_payload#>>'{subscription,p_user_id}',p_payload#>>'{transfer,p_to}');
+  if v_user !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then v_user := null; end if;
+  insert into private.financial_inbox(scope,event_id,payload,payload_hash,user_id)
+    values(p_scope,p_event_id,p_payload,v_hash,v_user::uuid) on conflict(provider,scope,event_id) do nothing
     returning id into v_id;
   if v_id is null then
     select id,payload_hash into v_id,v_existing from private.financial_inbox
@@ -150,7 +160,7 @@ grant execute on function public.enqueue_revenuecat_event(text,text,jsonb) to se
 create function public.process_financial_event(p_id uuid) returns text
 language plpgsql security definer set search_path='' as $$
 declare v private.financial_inbox%rowtype; s jsonb; r jsonb; t jsonb; v_result text;
-  v_code text; v_previous text := current_setting('albus.financial_event',true);
+  v_code text; v_deferred boolean := false; v_previous text := current_setting('albus.financial_event',true);
 begin
   select * into v from private.financial_inbox where id=p_id for update;
   if not found then raise exception 'FINANCIAL_EVENT_NOT_FOUND' using errcode='22023'; end if;
@@ -174,7 +184,9 @@ begin
         s->>'p_product_id',s->>'p_environment',(s->>'p_purchase_date')::timestamptz,
         (s->>'p_expires_at')::timestamptz,(s->>'p_revoked_at')::timestamptz,
         s->>'p_event_id',(s->>'p_event_at')::timestamptz,s->>'p_store',s->>'p_app_id');
-      if v_result='unknown_product' then raise exception 'PRODUCT_NOT_MAPPED' using errcode='Q0020'; end if;
+      -- Money moved whether or not the product maps to a plan, so revenue is
+      -- recorded either way, as before this queue existed. Keyed on the event
+      -- id, a retry records nothing twice.
       r:=v.payload->'revenue';
       if r is not null then
         perform public.record_subscription_revenue(r->>'p_event_id',r->>'p_event_type',(r->>'p_user_id')::uuid,
@@ -182,10 +194,20 @@ begin
           (r->>'p_price_usd')::numeric,(r->>'p_tax_fraction')::numeric,
           (r->>'p_commission_fraction')::numeric,r->>'p_cancel_reason',(r->>'p_occurred_at')::timestamptz);
       end if;
+      -- Only the plan waits for the product's mapping: the event stays queued.
+      v_deferred := v_result='unknown_product';
     end if;
     if v_result is null then raise exception 'UNCLASSIFIED_FINANCIAL_RESULT'; end if;
-    perform private.append_financial_audit('provider_event.processed',v.event_id,v_result,'verified_provider_event');
-    update private.financial_inbox set state='completed',completed_at=now(),result=v_result,error_code=null where id=p_id;
+    if v_deferred then
+      update private.financial_inbox set state=case when attempts>=10 then 'dead' else 'retry' end,
+        error_code='Q0020',available_at=now()+make_interval(secs=>least(3600,30*(2^least(attempts,7))::integer))
+        where id=p_id;
+      perform private.append_financial_audit('provider_event.deferred',v.event_id,'retry','PRODUCT_NOT_MAPPED');
+      v_result:='retry';
+    else
+      perform private.append_financial_audit('provider_event.processed',v.event_id,v_result,'verified_provider_event');
+      update private.financial_inbox set state='completed',completed_at=now(),result=v_result,error_code=null where id=p_id;
+    end if;
   exception when others then
     -- Exception block rolls back ALL business effects and their audit rows.
     -- Persist only a machine code, never database error text or the payload.
@@ -232,9 +254,11 @@ create function public.prune_financial_inbox() returns integer
 language plpgsql security definer set search_path='' as $$
 declare v_count integer;
 begin
-  -- Keep identity/hash/result tombstones for replay prevention, erase payload.
-  update private.financial_inbox set payload='{}'::jsonb where state='completed'
-    and completed_at<now()-interval '30 days' and payload<>'{}'::jsonb;
+  -- Keep identity/hash/result tombstones for replay prevention, erase the
+  -- payload and the account. What the event recorded keeps the account from
+  -- then on; queued and dead events are never pruned.
+  update private.financial_inbox set payload='{}'::jsonb,user_id=null where state='completed'
+    and completed_at<now()-interval '30 days' and (payload<>'{}'::jsonb or user_id is not null);
   get diagnostics v_count=row_count; return v_count;
 end $$;
 revoke all on function public.prune_financial_inbox() from public,anon,authenticated;

@@ -21,7 +21,11 @@ payload={'operation':'subscription','subscription':{'p_original_transaction_id':
     'p_user_id':user,'p_latest_transaction_id':'financial-race-tx','p_product_id':'com.felipegutierrez.albus.plus.monthly',
     'p_environment':'Production','p_purchase_date':'2026-09-30T00:00:00Z','p_expires_at':'2030-01-01T00:00:00Z',
     'p_revoked_at':None,'p_event_id':'financial-race-event','p_event_at':'2026-09-30T00:00:00Z',
-    'p_store':'APP_STORE','p_app_id':'financial-race-app'}}
+    'p_store':'APP_STORE','p_app_id':'financial-race-app'},
+    'revenue':{'p_event_id':'financial-race-event','p_event_type':'INITIAL_PURCHASE','p_user_id':user,
+    'p_original_transaction_id':'financial-race','p_product_id':'com.felipegutierrez.albus.plus.monthly',
+    'p_environment':'Production','p_price_usd':10,'p_tax_fraction':0,'p_commission_fraction':0.3,
+    'p_cancel_reason':None,'p_occurred_at':'2026-09-30T00:00:00Z'}}
 scheduled=sql("select active from cron.job where jobname='albus-financial-drain';")=='t'
 sql("select cron.alter_job(jobid, active:=false) from cron.job where jobname='albus-financial-drain';")
 try:
@@ -38,8 +42,9 @@ try:
     check(set(results)=={'active_plus'},'Concurrent processing returned '+repr(set(results)))
     check(sql(f"select attempts from private.financial_inbox where id='{identifier}';")=='1','Concurrent processing made more than one attempt')
     check(sql(f"select count(*) from private.financial_audit where event_ref='{identifier}' and action='provider_event.processed';")=='1','Concurrent processing wrote more than one audit record')
-    print('PASS: 12 acceptors -> one inbox row; rollback preserves pending work; 12 processors -> one effect and audit record.')
+    check(sql("select count(*) from public.subscription_revenue where event_id='financial-race-event';")=='1','Concurrent processing recorded the money more than once')
+    print('PASS: 12 acceptors -> one inbox row; rollback preserves pending work; 12 processors -> one effect, one revenue row and one audit record.')
 finally:
     if scheduled:sql("select cron.alter_job(jobid, active:=true) from cron.job where jobname='albus-financial-drain';")
     # Local fixture only; immutable audit evidence remains until test DB cleanup.
-    sql(f"delete from public.subscription_transactions where original_transaction_id='financial-race';delete from private.financial_inbox where event_id='financial-race-event';delete from auth.users where id='{user}';")
+    sql(f"delete from public.subscription_revenue where event_id='financial-race-event';delete from public.subscription_transactions where original_transaction_id='financial-race';delete from private.financial_inbox where event_id='financial-race-event';delete from auth.users where id='{user}';")

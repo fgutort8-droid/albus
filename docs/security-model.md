@@ -220,8 +220,12 @@ the event done, all or nothing. A duplicate or concurrent delivery gets the
 first result instead of a second effect, and an event id reused with different
 contents is refused. If processing fails, nothing it did survives, the event
 stays queued, the webhook answers 503, and `albus-financial-drain` retries it
-every five minutes with backoff. After ten failures it becomes a dead letter
-that only the database owner can requeue, with a ticket reference. See
+every five minutes with backoff. A product with no plan mapping is the one
+exception: the money it moved is recorded at once, as it always was, and only
+the plan change waits in the queue. After ten failures an event becomes a dead
+letter that only the database owner can requeue, with a ticket reference. A
+queued or dead event names its account in a `user_id` column, so account
+cleanup keeps that account. See
 [the payment event runbook](security/financial-security-runbook.md).
 
 App Store products, the webhook secrets and `REVENUECAT_APP_IDS` are not
