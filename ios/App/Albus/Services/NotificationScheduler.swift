@@ -122,6 +122,21 @@ struct NotificationScheduler: Sendable, NotificationCenterClient {
         center.removePendingNotificationRequests(withIdentifiers: [Self.completionID])
     }
 
+    /// Fires now: a marking finished while Albus was in the background.
+    ///
+    /// The thread names the grading, which is how a tap opens it
+    /// (`NotificationRouter.gradingID(fromThread:)`). No `kind`, so in the
+    /// foreground the system shows nothing and the app's own banner speaks.
+    func markingReady(gradingID: UUID, title: String?) {
+        let content = UNMutableNotificationContent()
+        content.title = "Your feedback is ready"
+        content.body = title.map { "Albus has marked \($0)." } ?? "Albus has marked your work."
+        content.sound = .default
+        content.threadIdentifier = "albus.grading.\(gradingID.uuidString)"
+        center.add(UNNotificationRequest(identifier: "albus.marking.\(gradingID.uuidString)",
+                                         content: content, trigger: nil))
+    }
+
     // MARK: - NotificationCenterClient
 
     func add(_ notification: PlannedNotification, artwork: URL?) async {

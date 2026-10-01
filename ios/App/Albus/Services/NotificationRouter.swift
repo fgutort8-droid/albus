@@ -15,6 +15,9 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
 
     /// The assignment a tap asked for. A screen observes this and navigates.
     var requestedAssignment: UUID?
+    /// The grading a "feedback is ready" tap asked for, as the local
+    /// `Grading.id`. The app shell observes this and opens it.
+    var requestedGrading: UUID?
     /// True when the tap came from "Start it", so the destination can go
     /// straight into Focus Mode rather than to the plan.
     var wantsFocus = false
@@ -56,9 +59,21 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
             // "Not today" is a deliberate dismissal: acknowledged, no navigation.
             guard action != NotificationActions.ID.notToday else { return }
 
+            if let grading = Self.gradingID(fromThread: thread) {
+                requestedGrading = grading
+                return
+            }
             wantsFocus = action == NotificationActions.ID.start
             requestedAssignment = Self.assignmentID(fromThread: thread)
         }
+    }
+
+    /// Thread identifiers for finished markings are `albus.grading.<uuid>`,
+    /// parsed as strictly as the assignment ones.
+    static func gradingID(fromThread thread: String) -> UUID? {
+        let prefix = "albus.grading."
+        guard thread.hasPrefix(prefix) else { return nil }
+        return UUID(uuidString: String(thread.dropFirst(prefix.count)))
     }
 
     /// Thread identifiers are `albus.assignment.<uuid>`.
@@ -74,5 +89,9 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     func clearRoute() {
         requestedAssignment = nil
         wantsFocus = false
+    }
+
+    func clearGradingRoute() {
+        requestedGrading = nil
     }
 }

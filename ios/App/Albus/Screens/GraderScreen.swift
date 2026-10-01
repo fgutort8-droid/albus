@@ -20,6 +20,8 @@ struct GraderScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(AccountDeletion.self) private var accountDeletion
     @Environment(\.dismiss) private var dismiss
+    /// Owns the marking, so it carries on if the student leaves this screen.
+    @Environment(MarkingCoordinator.self) private var marking
 
     /// Opened from an assignment rather than from Tools.
     ///
@@ -74,6 +76,9 @@ struct GraderScreen: View {
     /// Which line the marking screen is on, and whether the cactus is breathing.
     @State private var beat = 0
     @State private var breathing = false
+    /// This screen opened on a marking another one started, and the student
+    /// came back to watch it finish.
+    @State private var resumedJob = false
 
     private var wordCount: Int {
         work.split(whereSeparator: \.isWhitespace).count
@@ -94,6 +99,16 @@ struct GraderScreen: View {
     /// picked none, or the assignment they chose has none on file.
     private var isBlind: Bool {
         chosenRubric == nil && (chosenAssignment?.rubric == nil)
+    }
+
+    /// What the waiting screen describes: the marking this screen started, or,
+    /// back on one already running, that one.
+    private var markingIsBlind: Bool {
+        resumedJob ? (marking.current?.isBlind ?? isBlind) : isBlind
+    }
+
+    private var markingWordCount: Int {
+        resumedJob ? (marking.current?.wordCount ?? 0) : wordCount
     }
 
     /// How many criterion cards the waiting screen sketches: one per criterion
@@ -126,6 +141,13 @@ struct GraderScreen: View {
         .navigationTitle("Albus Grader")
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            // Back while a marking is still running: watch that one finish
+            // rather than start a new flow beside it.
+            if marking.current != nil, stage == .start {
+                resumedJob = true
+                stage = .marking
+                return
+            }
             // Arriving from an assignment answers "what am I marking?" already,
             // so the flow starts at the next real question rather than showing
             // a chooser with one obvious answer pre-ticked.
@@ -134,6 +156,15 @@ struct GraderScreen: View {
                 if stage == .start { stage = .work }
             }
             await entitlements.refresh()
+        }
+        .onAppear { marking.isWatched = true }
+        .onDisappear { marking.isWatched = false }
+        .onChange(of: marking.lastOutcome) { _, outcome in
+            // Only for a marking this screen came back to. One it started
+            // itself is finished by `submit()`.
+            guard resumedJob, stage == .marking, let outcome else { return }
+            resumedJob = false
+            Task { await finish(outcome) }
         }
         .animation(.spring(response: 0.38, dampingFraction: 0.86), value: stage)
         .sheet(isPresented: $showingPaywall) { PaywallScreen() }
@@ -558,7 +589,7 @@ struct GraderScreen: View {
     /// progress claim — the model does not report progress, so neither does
     /// this.
     private var markingBeats: [String] {
-        isBlind
+        markingIsBlind
             ? ["Reading it through.",
                "Working out what it is trying to do.",
                "Finding the parts that are carrying it.",
@@ -580,7 +611,7 @@ struct GraderScreen: View {
                 .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true),
                            value: breathing)
 
-            Text(isBlind ? "Reading your work." : "Marking against your rubric.")
+            Text(markingIsBlind ? "Reading your work." : "Marking against your rubric.")
                 .font(Tokens.Typography.cardTitle)
                 .foregroundStyle(Tokens.Palette.ink)
 
@@ -591,13 +622,24 @@ struct GraderScreen: View {
                 .id(beat)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
 
-            Text("\(wordCount) words. About half a minute.")
+            Text("\(markingWordCount) words. About half a minute.")
                 .font(Tokens.Typography.micro)
                 .foregroundStyle(Tokens.Palette.inkMuted)
 
+            // Nobody has to watch it: the marking carries on without this
+            // screen, and the student hears when it is done.
+            VStack(spacing: Tokens.Spacing.xs) {
+                SecondaryButton(title: "Keep using Albus") { dismiss() }
+                Text("We'll tell you when your feedback is ready.")
+                    .font(Tokens.Typography.micro)
+                    .foregroundStyle(Tokens.Palette.inkMuted)
+            }
+            .padding(.top, Tokens.Spacing.xs)
+
             // Where the feedback will land, instead of a spinner: every
-            // section of the result, in the places they will appear.
-            GradeResultSkeleton(criteria: skeletonCriteria, isBlind: isBlind)
+            // section of the result, in the places they will appear. Blind as
+            // the marking under way is, which may be one this screen resumed.
+            GradeResultSkeleton(criteria: skeletonCriteria, isBlind: markingIsBlind)
                 .padding(.top, Tokens.Spacing.s)
         }
         .frame(maxWidth: .infinity)
@@ -908,52 +950,39 @@ struct GraderScreen: View {
         stage = .marking
         failure = nil
 
-        do {
-            let marked = try await GradingService().grade(
-                work: work,
-                rubricID: chosenRubric?.remoteID,
-                assignmentID: chosenAssignment?.remoteID,
-                presentation: presentation,
-                title: workTitle
-            )
+        // The coordinator marks, stores and announces. It carries on if the
+        // student leaves this screen, and finds the result if the answer is
+        // lost on the way back.
+        let outcome = await marking.mark(
+            work: work,
+            rubricID: chosenRubric?.remoteID,
+            assignment: chosenAssignment,
+            presentation: presentation,
+            title: workTitle,
+            isBlind: isBlind,
+            context: context,
+            mayStore: { [accountDeletion] in
+                !accountDeletion.requiresCleanup && accountDeletion.generation == accountGeneration
+            })
 
-            guard !accountDeletion.requiresCleanup, accountDeletion.generation == accountGeneration else { return }
+        // Dropped once marked: holding an essay in memory behind a visible
+        // result serves nobody.
+        if case .marked = outcome { work = "" }
+        await finish(outcome)
+    }
 
-            let grading = Grading(
-                remoteID: marked.id,
-                model: marked.model,
-                inputChars: work.count,
-                overallMarks: marked.overallMarks,
-                totalMarks: marked.totalMarks,
-                gradeLabel: marked.gradeLabel,
-                gradeNote: marked.gradeNote,
-                // The server's title wins: it resolves the assignment's real
-                // name when there is one, and echoing back what we sent would
-                // label a grading with a filename the student has forgotten.
-                workTitle: marked.title ?? workTitle,
-                criteria: marked.criteria.map {
-                    GradedCriterion(code: $0.code, name: $0.name, marks: $0.marks,
-                                    outOf: $0.outOf, comment: $0.comment,
-                                    quote: $0.quote, whereFound: $0.whereFound)
-                },
-                feedback: marked.feedback,
-                improvements: marked.improvements.map {
-                    GradedImprovement(change: $0.change, why: $0.why)
-                },
-                basis: marked.basis,
-                assignment: chosenAssignment
-            )
-            context.insert(grading)
-            try? context.save()
-
-            // Dropped once stored: the work has been marked, and holding an
-            // essay in memory behind a visible result serves nobody.
-            work = ""
-            result = grading
+    /// Shows how a marking ended: its result, or why there is none.
+    private func finish(_ outcome: MarkingCoordinator.Outcome) async {
+        switch outcome {
+        case .discarded:
+            return
+        case .marked(let id):
+            var descriptor = FetchDescriptor<Grading>(predicate: #Predicate { $0.id == id })
+            descriptor.fetchLimit = 1
+            result = try? context.fetch(descriptor).first
             await entitlements.refresh()
             stage = .result
-
-        } catch let error as GradingService.Failure {
+        case .failed(let error):
             failure = error
 
             // Running out is not something the student did wrong, so it opens
@@ -972,9 +1001,6 @@ struct GraderScreen: View {
                 }
                 showingPaywall = true
             }
-            stage = .result
-        } catch {
-            failure = .unavailable
             stage = .result
         }
     }

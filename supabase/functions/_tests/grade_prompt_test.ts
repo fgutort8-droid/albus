@@ -644,3 +644,35 @@ Deno.test("a grade label carries the grade and not the marks", () => {
   assertEquals(graded.gradeLabel, "6");
   assertEquals(graded.gradeLabel!.includes("/"), false);
 });
+
+/**
+ * The iOS app finds a marking whose answer was lost by the length the server
+ * stored for it (`input_chars`), so it repeats `normaliseWork` step for step:
+ * `GradingService.serverNormalised` in the app, pinned there to these same
+ * cases (`ServerLengthTests`). A change here that moves any of them must be
+ * made there too, or recovery stops finding markings.
+ */
+const MIRRORED_IN_THE_APP: [string, string, number][] = [
+  ["Plain text.", "Plain text.", 11],
+  ["  Leading and trailing  \n\n", "Leading and trailing", 20],
+  ["Windows\r\nline\rendings\r\n", "Windows\nline\nendings", 20],
+  ["soft\u00ADhyphen", "softhyphen", 10],
+  ["Para one.\n12\nPara two.\n  3  \nPara three.", "Para one.\n\nPara two.\n\nPara three.", 33],
+  ["The year\n2024 was\nlong.", "The year\n2024 was\nlong.", 23],
+  ["Tabs\t\tand   spaces", "Tabs and spaces", 15],
+  ["Line one  \n   Line two", "Line one\nLine two", 17],
+  ["One\n\n\n\n\nTwo", "One\n\nTwo", 8],
+  ["\u00A0\uFEFFBOM and NBSP\u00A0", "BOM and NBSP", 12],
+  ["Arabic digits\n\u0661\u0662\nstay", "Arabic digits\n\u0661\u0662\nstay", 21],
+  ["Emoji \u{1F600} and \u00E9\n\nnext", "Emoji \u{1F600} and \u00E9\n\nnext", 20],
+  ["Page\n12345\nfive digits stay", "Page\n12345\nfive digits stay", 27],
+  ["Sep\u2028line", "Sep\u2028line", 8],
+  ["\u0085Next line\u0085", "\u0085Next line\u0085", 11],
+];
+
+Deno.test("normaliseWork still matches the copy the iOS app keeps", () => {
+  for (const [input, output, length] of MIRRORED_IN_THE_APP) {
+    assertEquals(normaliseWork(input), output);
+    assertEquals(normaliseWork(input).length, length);
+  }
+});

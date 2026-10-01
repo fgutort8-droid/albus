@@ -1,5 +1,6 @@
 import SwiftUI
 import AlbusCore
+import SwiftData
 
 /// Owns the two things every screen sits inside: the full-screen gradient and
 /// the floating tab bar.
@@ -9,6 +10,11 @@ import AlbusCore
 /// in exactly one place and no screen adds padding of its own.
 struct AppShell: View {
     @State private var tab: Tab
+    @Environment(\.modelContext) private var context
+    @Environment(MarkingCoordinator.self) private var marking
+    @Environment(NotificationRouter.self) private var router
+    /// A finished marking opened from its banner or its notification.
+    @State private var openedGrading: Grading?
 
     init() {
 #if DEBUG
@@ -70,9 +76,99 @@ struct AppShell: View {
                 }
             }
 
-            AppTabBar(selection: $tab)
+            VStack(spacing: Tokens.Spacing.s) {
+                // A marking finished while the student was elsewhere in the
+                // app. The grader screen, when it is open, shows the result
+                // itself. Just above the tab bar, where it covers no back
+                // button, title or header, and what it sits over scrolls clear.
+                if let id = marking.ready, !marking.isWatched, let grading = grading(id) {
+                    MarkingReadyBanner(title: grading.workTitle) {
+                        marking.markSeen()
+                        openedGrading = grading
+                    } onDismiss: {
+                        marking.markSeen()
+                    }
+                    .padding(.horizontal, Tokens.Spacing.l)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                AppTabBar(selection: $tab)
+            }
         }
         .ignoresSafeArea(.keyboard)
+        .animation(Tokens.Motion.sheet, value: marking.ready)
+        .onChange(of: marking.ready) { _, id in
+            if id != nil {
+                AccessibilityNotification.Announcement("Your feedback is ready").post()
+            }
+        }
+        .sheet(item: $openedGrading) { GradeResultView(grading: $0) }
+        // A "feedback is ready" notification, tapped. `initial` covers a tap
+        // that launched the app, which sets the route before this appears.
+        .onChange(of: router.requestedGrading, initial: true) { _, id in
+            guard let id else { return }
+            router.clearGradingRoute()
+            marking.markSeen()
+            if let grading = grading(id) { openedGrading = grading }
+        }
+    }
+
+    private func grading(_ id: UUID) -> Grading? {
+        var descriptor = FetchDescriptor<Grading>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first
+    }
+}
+
+/// "Your feedback is ready", wherever the student is when a marking finishes.
+private struct MarkingReadyBanner: View {
+    let title: String?
+    let onOpen: () -> Void
+    let onDismiss: () -> Void
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: Tokens.Radius.glass, style: .continuous)
+    }
+
+    var body: some View {
+        HStack(spacing: Tokens.Spacing.m) {
+            AlbusCactus(size: 30, mood: .calm)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your feedback is ready")
+                    .font(Tokens.Typography.label)
+                    .foregroundStyle(Tokens.Palette.ink)
+                if let title {
+                    Text(title)
+                        .font(Tokens.Typography.caption)
+                        .foregroundStyle(Tokens.Palette.inkSecondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: Tokens.Spacing.s)
+            Button("View", action: onOpen)
+                .font(Tokens.Typography.label.weight(.semibold))
+                .foregroundStyle(Tokens.Palette.accent)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Tokens.Palette.inkMuted)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, Tokens.Spacing.m)
+        .padding(.vertical, Tokens.Spacing.s + 2)
+        // Frosted, then whitened: it floats over whatever screen is open, and
+        // a translucent card let that screen's headline show through the text.
+        .background {
+            shape.fill(.regularMaterial)
+            shape.fill(Tokens.Glass.fillProminent)
+        }
+        .overlay { shape.strokeBorder(Tokens.Glass.stroke) }
+        .shadow(color: Tokens.Glass.shadow, radius: Tokens.Glass.shadowRadius,
+                y: Tokens.Glass.shadowY)
     }
 }
 

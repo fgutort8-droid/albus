@@ -106,9 +106,22 @@ struct GradingService {
         case unusableResponse
         case unavailable
         case rejected(String)
+        /// The work was sent and the answer never came back: the connection
+        /// dropped or timed out mid-marking. The server may well have finished
+        /// and saved it, so `MarkingCoordinator` looks it up with
+        /// `recover(since:)` rather than reporting a failure. Never shown.
+        case answerLost
+        /// Marked, but the phone could not save the result. The server keeps
+        /// it, and marking the same work again returns it without charging.
+        case notSaved
 
         var errorDescription: String? {
             switch self {
+            case .answerLost:
+                Failure.unavailable.errorDescription
+            case .notSaved:
+                "Albus marked this but couldn't save it on this phone. "
+                + "Mark it again to see it — you won't be charged twice."
             case .notOnPlan:
                 "Marking is part of Albus Plus and Pro."
             case .allowanceUsed(let resetsAt):
@@ -239,9 +252,118 @@ struct GradingService {
         } catch let error as FunctionsError {
             throw Self.translate(error)
         } catch let error as URLError {
-            throw error.code == .notConnectedToInternet || error.code == .networkConnectionLost
-                ? Failure.offline
-                : Failure.unavailable
+            switch error.code {
+            // Never left the phone: nothing was marked, and saying so is honest.
+            case .notConnectedToInternet:
+                throw Failure.offline
+            // Left the phone, and the answer did not come back. The marking
+            // may have finished on the server anyway; see `answerLost`.
+            case .networkConnectionLost, .timedOut:
+                throw Failure.answerLost
+            default:
+                throw Failure.unavailable
+            }
+        }
+    }
+
+    /// The grading the server saved for this work at or after `since`, for a
+    /// marking whose answer never reached the phone.
+    ///
+    /// The server stores every grading it produces before answering, and row
+    /// security limits this to the caller's own. Reading it back costs nothing
+    /// and marks nothing, unlike sending the work again, which could start a
+    /// second, paid marking while the first is still running.
+    ///
+    /// Matched to the work, never just the newest: another marking saved in
+    /// the same minutes, from another device or an earlier try, must not be
+    /// taken for this one. The server records the assignment and the work's
+    /// length as it measured it (`serverLength(of:)`); both must agree.
+    func recover(since: Date, assignmentID: UUID?, workLength: Int) async throws -> Result? {
+        guard let client else { throw Failure.unavailable }
+        var query = client.from("gradings")
+            // One literal, as in `grade/index.ts`: these are the columns its
+            // own reuse path returns, in the shape the app already reads.
+            .select("id, overall_marks, total_marks, grade_label, grade_note, work_title, breakdown, feedback, improvements, model, basis")
+            .gte("created_at", value: ISO8601DateFormatter().string(from: since))
+            .eq("input_chars", value: workLength)
+        if let assignmentID {
+            query = query.eq("assignment_id", value: assignmentID.uuidString)
+        } else {
+            // PostgREST's documented spelling. The SDK's `is(_:value: nil)`
+            // sends `is.NULL`, which nothing here should need to rely on.
+            query = query.filter("assignment_id", operator: "is", value: "null")
+        }
+        let rows: [SavedGrading] = try await query
+            .order("created_at", ascending: false)
+            .limit(1)
+            .execute()
+            .value
+        return rows.first?.result
+    }
+
+    /// The work's length as the server records it in `input_chars`: what the
+    /// phone sends, after the server's `normaliseWork`, in UTF-16 units.
+    static func serverLength(of work: String) -> Int {
+        serverNormalised(work.trimmingCharacters(in: .whitespacesAndNewlines)).utf16.count
+    }
+
+    /// `normaliseWork` in `supabase/functions/_shared/grade_prompt.ts`, step
+    /// for step.
+    ///
+    /// Written to match JavaScript rather than to be idiomatic Swift: `\d`
+    /// there is ASCII digits only, and `trim()` has its own set of white space.
+    /// `ServerLengthTests` holds the server's own output for the awkward cases.
+    static func serverNormalised(_ raw: String) -> String {
+        var work = raw
+        for (pattern, replacement) in [
+            ("\r\n?", "\n"),
+            ("\u{00AD}", ""),
+            // A line that is nothing but a number is a page number.
+            ("\n[ \t]*[0-9]{1,4}[ \t]*(?=\n)", "\n"),
+            ("[ \t]+", " "),
+            (" *\n *", "\n"),
+            ("\n{3,}", "\n\n"),
+        ] {
+            work = work.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
+        }
+        return work.trimmingCharacters(in: javaScriptWhitespace)
+    }
+
+    /// What JavaScript's `String.prototype.trim` removes. Not Foundation's
+    /// white space: that adds U+0085 and leaves U+FEFF.
+    private static let javaScriptWhitespace = CharacterSet(charactersIn:
+        "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D}\u{0020}\u{00A0}\u{1680}"
+        + "\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}"
+        + "\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
+
+    /// A row of `gradings`: what `grade` returned, as the server keeps it.
+    private struct SavedGrading: Decodable {
+        let id: UUID
+        let overallMarks: Int?
+        let totalMarks: Int?
+        let gradeLabel: String?
+        let gradeNote: String?
+        let workTitle: String?
+        let breakdown: [Criterion]
+        let feedback: String
+        let improvements: [Improvement]
+        let model: String
+        let basis: GradingBasis
+
+        private enum CodingKeys: String, CodingKey {
+            case id, breakdown, feedback, improvements, model, basis
+            case overallMarks = "overall_marks"
+            case totalMarks = "total_marks"
+            case gradeLabel = "grade_label"
+            case gradeNote = "grade_note"
+            case workTitle = "work_title"
+        }
+
+        var result: Result {
+            Result(id: id, overallMarks: overallMarks, totalMarks: totalMarks,
+                   gradeLabel: gradeLabel, gradeNote: gradeNote, title: workTitle,
+                   criteria: breakdown, feedback: feedback, improvements: improvements,
+                   model: model, basis: basis, rubricName: nil, reused: true)
         }
     }
 
