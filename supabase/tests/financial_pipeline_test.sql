@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(52);
+select plan(53);
 insert into auth.users(id,instance_id,aud,role,encrypted_password,raw_app_meta_data,raw_user_meta_data,created_at,updated_at,is_anonymous)
 values('f9000000-0000-4000-8000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','','{}','{}',now(),now(),false);
 create function pg_temp.event_payload(p_id text,p_product text default 'com.felipegutierrez.albus.plus.monthly',
@@ -95,6 +95,9 @@ select lives_ok($$select public.enqueue_revenuecat_event('test-app','financial-t
   'p_to','f9000000-0000-4000-8000-000000000003','p_event_id','financial-transfer','p_event_at',now(),
   'p_allowed_app_ids',jsonb_build_array('financial-test-app'),'p_app_id','financial-test-app','p_store','APP_STORE',
   'p_environment','Production')))$$,'a transfer to an idle account is queued');
+select is((select user_id from private.financial_inbox where id=public.enqueue_revenuecat_event('test-app','financial-gone',
+  pg_temp.event_payload('financial-gone','unmapped','f9000000-0000-4000-8000-000000000009'))),null::uuid,
+  'an event for an account that no longer exists names none');
 select lives_ok($$select public.reap_abandoned_anonymous_users(30)$$,'account cleanup runs');
 select is((select count(*)::integer from auth.users where id='f9000000-0000-4000-8000-000000000002'),1,
 'a queued payment keeps its account');
