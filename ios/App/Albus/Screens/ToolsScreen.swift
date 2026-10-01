@@ -61,11 +61,9 @@ struct ToolsScreen: View {
                 } else {
                     ForEach(grouped, id: \.0) { key, tools in
                         // A chosen category is already named by its chip, lit
-                        // up just above. A heading under it would say it twice.
-                        if category == .all {
-                            SectionHeader(key.title, count: tools.count)
-                                .padding(.top, Tokens.Spacing.xs)
-                        }
+                        // up just above, so its header keeps only the count.
+                        SectionHeader(category == .all ? key.title : "", count: tools.count)
+                            .padding(.top, Tokens.Spacing.xs)
                         LazyVGrid(
                             columns: [GridItem(.flexible(), spacing: Tokens.Spacing.m),
                                       GridItem(.flexible(), spacing: Tokens.Spacing.m)],

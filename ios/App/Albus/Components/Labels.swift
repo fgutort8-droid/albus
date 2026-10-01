@@ -84,7 +84,9 @@ struct DeadlineLabel: View {
 }
 
 /// `ALBUS'S PLAN            7 steps · 4h 45m` — an uppercase section label with
-/// an optional count pill and an optional trailing detail.
+/// an optional count pill and an optional trailing detail. An empty label
+/// leaves the count alone, for a section something else on screen already
+/// names.
 struct SectionHeader<Trailing: View>: View {
     let label: String
     var count: Int?
@@ -98,11 +100,13 @@ struct SectionHeader<Trailing: View>: View {
             // the heading. A header must stay a header; a control must stay a
             // control.
             HStack(spacing: Tokens.Spacing.s) {
-                Text(label.uppercased())
-                    .font(Tokens.Typography.label)
-                    .fontWeight(.semibold)
-                    .tracking(Tokens.Tracking.sectionHeader)
-                    .foregroundStyle(Tokens.Palette.inkSecondary)
+                if !label.isEmpty {
+                    Text(label.uppercased())
+                        .font(Tokens.Typography.label)
+                        .fontWeight(.semibold)
+                        .tracking(Tokens.Tracking.sectionHeader)
+                        .foregroundStyle(Tokens.Palette.inkSecondary)
+                }
 
                 if let count {
                     Text("\(count)")

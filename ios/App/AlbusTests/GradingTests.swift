@@ -146,6 +146,13 @@ struct PricingTests {
         ("¥1,500", "¥0"),
         ("R$ 49,90", "R$ 0"),
         ("₹799.00", "₹0"),
+        // Thousands grouped with whatever the storefront uses: the whole
+        // amount goes, never just its first group.
+        ("€1\u{2009}234,56", "€0"),
+        ("1\u{2007}234,56\u{00A0}€", "0\u{00A0}€"),
+        ("CHF 1\u{2019}234.50", "CHF 0"),
+        ("₹1,23,456.00", "₹0"),
+        ("1.234,56 zł", "0 zł"),
     ])
     func zeroPriceKeepsTheStoreFormat(written: String, zero: String) {
         #expect(PaywallScreen.zeroPrice(like: written) == zero)
@@ -155,6 +162,16 @@ struct PricingTests {
     func zeroPriceNeedsAnAmount() {
         #expect(PaywallScreen.zeroPrice(like: "") == nil)
         #expect(PaywallScreen.zeroPrice(like: "Free") == nil)
+    }
+
+    /// Plus can be unpriced where Pro is not; Free then copies Pro's format
+    /// rather than falling back to display copy in another currency.
+    @Test("Free copies the first paid plan the App Store has priced")
+    func freeCopiesAnyPricedPlan() {
+        #expect(PaywallScreen.freePrice(copying: [nil, "$17.99"]) == "$0")
+        #expect(PaywallScreen.freePrice(copying: ["€9.99", "€17.99"]) == "€0")
+        #expect(PaywallScreen.freePrice(copying: ["Free", "17,99 €"]) == "0 €")
+        #expect(PaywallScreen.freePrice(copying: [nil, nil]) == nil)
     }
 
     /// `EntitlementService.Plan.freeFallback` is what the app shows before the
