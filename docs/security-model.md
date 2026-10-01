@@ -54,17 +54,33 @@ subscription or usage enumeration.
 | Secret | Location | Property |
 |---|---|---|
 | Supabase publishable key | iOS app | public by design; RLS applies |
-| `ALBUS_SUPABASE_SECRET_KEY` | Edge secrets | bypasses RLS; never in client/repo |
+| Supabase secret key | Edge Functions, injected by the platform | bypasses RLS; never in client/repo |
 | `ANTHROPIC_API_KEY` | Edge secrets | pays for model calls |
 | RevenueCat webhook secrets | Edge secrets | authenticate and sign payment events |
 | `ALBUS_SIGNAL_PEPPER` | Edge secrets | makes stored signal hashes non-reversible |
+
+Functions take their Supabase keys from `resolveKey` in `_shared/auth.ts`: a
+hand-set `ALBUS_SUPABASE_*_KEY` override first, then the platform's
+`SUPABASE_SECRET_KEYS` / `SUPABASE_PUBLISHABLE_KEYS` (entry `default`), then the
+single key a local stack injects, and the legacy `service_role` / `anon` JWT
+keys last. The legacy keys stop working at the end of 2026; once the functions
+run this order in production they can be deactivated in the dashboard.
+
+Each function logs `supabase keys` with the source of both keys as it starts,
+by name only (`override`, `platform`, `local`, `legacy`), never a key value.
+Before deactivating the legacy keys, call each deployed function once and check
+that its log says `platform` for both: an `ALBUS_SUPABASE_*_KEY` override, or
+dashboard keys not named `default`, would leave it on a legacy key. Supabase
+lets deactivated legacy keys be re-activated. Do that first if a function ever
+has to be rolled back to a version from before this order: those versions read
+only the override or the legacy keys, and fail to authenticate without them.
 
 Student functions have gateway JWT verification enabled and call `requireUser`
 again. The RevenueCat webhook is the sole no-JWT function because RevenueCat is
 not an Albus user; it has two independent checks described below.
 
 Bodies are streamed through byte ceilings before JSON parsing: 16 KiB for plan
-generation, 32 KiB for chat, 128 KiB for grading, and 64 KiB for RevenueCat.
+generation, 128 KiB for grading, and 64 KiB for RevenueCat.
 Field-level limits then bound prompt content. A declared or streamed oversized
 body is cancelled before full allocation.
 
@@ -212,6 +228,22 @@ Purchase, renewal and refund events record their proceeds in the server-only
 estimates (25% and 30% when missing), with the gross capped at US$1,000 so a
 malformed event cannot open the fuse. Refunds count against.
 
+Verified events are saved before they change anything. The webhook writes the
+event's allowlisted arguments, never the raw body, to `private.financial_inbox`,
+keyed by the signed event id, then processes it in a separate transaction that
+applies the subscription change, records revenue, writes audit rows and marks
+the event done, all or nothing. A duplicate or concurrent delivery gets the
+first result instead of a second effect, and an event id reused with different
+contents is refused. If processing fails, nothing it did survives, the event
+stays queued, the webhook answers 503, and `albus-financial-drain` retries it
+every five minutes with backoff. A product with no plan mapping is the one
+exception: the money it moved is recorded at once, as it always was, and only
+the plan change waits in the queue. After ten failures an event becomes a dead
+letter that only the database owner can requeue, with a ticket reference. A
+queued or dead event names its account in a `user_id` column, so account
+cleanup keeps that account. See
+[the payment event runbook](security/financial-security-runbook.md).
+
 App Store products, the webhook secrets and `REVENUECAT_APP_IDS` are not
 configured yet, so the webhook answers 503 and nothing can be bought. The
 removed direct Apple receipt endpoints must not be redeployed.
@@ -223,6 +255,12 @@ hours, failed/abandoned AI attempts after 30 days, identity links after at least
 90 days, and security events after at least 180 days. Successful AI rows remain
 for cost reconciliation but contain counts and model names, not submitted work.
 The Grader stores result/feedback and a content hash; it never stores the essay.
+
+`albus-financial-payload-retention` runs daily: after 30 days a completed
+payment event keeps only its id, hash and result, which is enough to refuse a
+replay. Every change to entitlements, subscription transactions, revenue,
+products and `app_config` is written to `private.financial_audit`, which refuses
+updates, deletes and truncation and names accounts only by a SHA-256 hash.
 
 Production operators must keep Supabase/GitHub MFA enabled, rotate any exposed
 provider key, review security events and circuit-breaker usage, and test a kill
@@ -258,6 +296,14 @@ containers only when migrations/security tests change to keep GitHub cost low.
   verify purchase, renewal, cancellation, expiry, refund, replay, and conflict
   in Sandbox before enabling Production products.
 - Enable MFA on Supabase, GitHub, Apple, Anthropic, and RevenueCat accounts.
-- Remove temporary Pro grants and old deployed Apple Edge Functions.
-- Apply migrations/functions to production, run the live RLS/advisor audit, and
-  test the AI emergency stop and budget alerts.
+- ~~Remove temporary Pro grants and old deployed Apple Edge Functions.~~ Done:
+  on 29 Sep 2026 every entitlement row was Free and only `breakdown`, `grade`
+  and `revenuecat-webhook` were deployed, byte-identical to `main`.
+- Apply migrations/functions to production and test the AI emergency stop and
+  budget alerts. The live advisor audit ran on 29 Sep 2026: no table without
+  RLS, no client grant on server-only tables, no function callable by `anon`,
+  and the six client RPCs each pinned to an empty `search_path` and scoped to
+  `auth.uid()`.
+- Deploy the functions that read the new Supabase keys, check their
+  `supabase keys` log lines say `platform`, then deactivate the legacy
+  `anon` / `service_role` keys before they stop working at the end of 2026.

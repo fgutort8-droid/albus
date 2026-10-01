@@ -6,6 +6,15 @@
 ./scripts/install-hooks.sh
 ```
 
+CI scans the whole history for secrets with Gitleaks on every push. To catch a secret before it is committed, install the checksum-pinned detector; the pre-commit hook then scans staged changes:
+
+```bash
+python3 scripts/security/install-tool.py gitleaks
+export PATH="${ALBUS_TOOLS_DIR:-/tmp/albus-security-tools}:$PATH"
+```
+
+Findings are redacted. Never skip the scan to commit a credential: rotate it instead. See [the payment event runbook](docs/security/financial-security-runbook.md) for rotating the RevenueCat secrets.
+
 **Do this in every clone.** `core.hooksPath` is local repository config — it is
 not committed and does not survive `git clone`, so a fresh clone has no
 protection against pushing straight to `main`. The script is idempotent.
