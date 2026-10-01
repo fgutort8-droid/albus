@@ -48,18 +48,46 @@ export function resolveKey(
   kind: "secret" | "publishable",
   env: Env = (name) => Deno.env.get(name),
 ): string {
-  const upper = kind === "secret" ? "SECRET" : "PUBLISHABLE";
-  const legacy = kind === "secret" ? "SUPABASE_SERVICE_ROLE_KEY" : "SUPABASE_ANON_KEY";
-  const candidates = [
-    env(`ALBUS_SUPABASE_${upper}_KEY`),
-    namedDefault(env(`SUPABASE_${upper}_KEYS`)),
-    env(`SUPABASE_${upper}_KEY`),
-    env(legacy),
-  ];
-  const key = candidates.find((candidate) => candidate);
-  if (key) return key;
+  const found = resolve(kind, env);
+  if (found) return found.key;
   throw new HttpError(500, "MISCONFIGURED", `no ${kind} key is set`);
 }
+
+/** Where `resolveKey` takes a key from, in its order. */
+type KeySource = "override" | "platform" | "local" | "legacy";
+
+function resolve(
+  kind: "secret" | "publishable",
+  env: Env,
+): { key: string; source: KeySource } | undefined {
+  const upper = kind === "secret" ? "SECRET" : "PUBLISHABLE";
+  const legacy = kind === "secret" ? "SUPABASE_SERVICE_ROLE_KEY" : "SUPABASE_ANON_KEY";
+  const candidates: [KeySource, string | undefined][] = [
+    ["override", env(`ALBUS_SUPABASE_${upper}_KEY`)],
+    ["platform", namedDefault(env(`SUPABASE_${upper}_KEYS`))],
+    ["local", env(`SUPABASE_${upper}_KEY`)],
+    ["legacy", env(legacy)],
+  ];
+  const found = candidates.find(([, key]) => key);
+  return found ? { source: found[0], key: found[1]! } : undefined;
+}
+
+/**
+ * Which source each key comes from, by name and never by value. Logged once
+ * as a function starts: before the legacy keys are switched off, the logs
+ * must say `platform` for both, since an override or a dictionary without a
+ * `default` entry would leave a function on a legacy key.
+ */
+export function keySources(
+  env: Env = (name) => Deno.env.get(name),
+): Record<"secret" | "publishable", KeySource | "missing"> {
+  return {
+    secret: resolve("secret", env)?.source ?? "missing",
+    publishable: resolve("publishable", env)?.source ?? "missing",
+  };
+}
+
+console.info("supabase keys", keySources());
 
 /** A platform key dictionary's `default` entry; nothing when absent or unreadable. */
 function namedDefault(dictionary: string | undefined): string | undefined {

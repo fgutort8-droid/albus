@@ -66,6 +66,15 @@ single key a local stack injects, and the legacy `service_role` / `anon` JWT
 keys last. The legacy keys stop working at the end of 2026; once the functions
 run this order in production they can be deactivated in the dashboard.
 
+Each function logs `supabase keys` with the source of both keys as it starts,
+by name only (`override`, `platform`, `local`, `legacy`), never a key value.
+Before deactivating the legacy keys, call each deployed function once and check
+that its log says `platform` for both: an `ALBUS_SUPABASE_*_KEY` override, or
+dashboard keys not named `default`, would leave it on a legacy key. Supabase
+lets deactivated legacy keys be re-activated. Do that first if a function ever
+has to be rolled back to a version from before this order: those versions read
+only the override or the legacy keys, and fail to authenticate without them.
+
 Student functions have gateway JWT verification enabled and call `requireUser`
 again. The RevenueCat webhook is the sole no-JWT function because RevenueCat is
 not an Albus user; it has two independent checks described below.
@@ -273,6 +282,6 @@ containers only when migrations/security tests change to keep GitHub cost low.
   RLS, no client grant on server-only tables, no function callable by `anon`,
   and the six client RPCs each pinned to an empty `search_path` and scoped to
   `auth.uid()`.
-- Deploy the functions that read the new Supabase keys, then deactivate the
-  legacy `anon` / `service_role` keys before they stop working at the end of
-  2026.
+- Deploy the functions that read the new Supabase keys, check their
+  `supabase keys` log lines say `platform`, then deactivate the legacy
+  `anon` / `service_role` keys before they stop working at the end of 2026.
