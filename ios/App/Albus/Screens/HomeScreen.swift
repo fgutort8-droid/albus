@@ -25,7 +25,12 @@ struct HomeScreen: View {
     @Query(sort: \Assignment.deadline) private var assignments: [Assignment]
     @Query(sort: \PlanSessionRecord.startsAt) private var sessions: [PlanSessionRecord]
 
-    @State private var filter: Filter = .all
+    @State private var filter: Filter
+
+    /// The app opens on All; a snapshot can open on another filter.
+    init(filter: Filter = .all) {
+        _filter = State(initialValue: filter)
+    }
     @State private var addingTask = false
     /// Where Home can push to, as one value.
     ///
@@ -413,7 +418,7 @@ private struct AssignmentCard: View {
                     HStack(spacing: Tokens.Spacing.s) {
                         CourseTag(code: assignment.course?.displayName ?? "General",
                                   kind: assignment.taskType, subject: subject)
-                        if assignment.priorityValue == .high, !assignment.isComplete {
+                        if assignment.priorityValue == .high, !assignment.isComplete, !assignment.isArchived {
                             PriorityFlag()
                         }
                     }
@@ -422,7 +427,7 @@ private struct AssignmentCard: View {
                         .font(Tokens.Typography.cardTitle)
                         .foregroundStyle(Tokens.Palette.ink)
                         .strikethrough(assignment.isComplete)
-                        .opacity(assignment.isComplete ? 0.55 : 1)
+                        .opacity(assignment.isComplete || assignment.isArchived ? 0.55 : 1)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -448,7 +453,14 @@ private struct AssignmentCard: View {
                     }
 
                     HStack(spacing: Tokens.Spacing.s) {
-                        DeadlineLabel(deadline: assignment.deadline, now: now)
+                        // A record of work, not work due: no deadline to chase.
+                        if assignment.isArchived {
+                            Text("Not in your plan")
+                                .font(Tokens.Typography.micro)
+                                .foregroundStyle(Tokens.Palette.inkMuted)
+                        } else {
+                            DeadlineLabel(deadline: assignment.deadline, now: now)
+                        }
                         if assignment.rubric != nil {
                             MetaDot()
                             Label("Rubric", systemImage: "list.bullet.rectangle.portrait")

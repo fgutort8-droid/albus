@@ -737,5 +737,7 @@ struct InstantPlanSnapshots {
         try context.save()
         try await render("4-task-refused-record",
                          dressed(NavigationStack { Screen { TaskDetailScreen(assignment: record) } }))
+        try await render("5-home-done-with-record",
+                         dressed(NavigationStack { Screen { HomeScreen(filter: .done) } }))
     }
 }
