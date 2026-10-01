@@ -28,7 +28,7 @@
 // thousands of people. Scoring the full address would produce a signal that is
 // simultaneously more invasive and less useful.
 
-import { adminClient } from "./auth.ts";
+import { adminClient, namedDefault } from "./auth.ts";
 
 export interface Signals {
   deviceHash: string | null;
@@ -48,6 +48,20 @@ export interface Signals {
  * with a constant, or skipping the feature until somebody remembers to set a
  * secret, would both be worse.
  */
+/**
+ * What the pepper is made from: the explicit secret, else one derived from the
+ * service key. The platform's own secret key comes last, so a project whose
+ * legacy keys are gone still hashes, and a project with them hashes exactly as
+ * before. Nothing at all means no hashing, never a constant.
+ */
+export function pepperMaterial(env: (name: string) => string | undefined): string | undefined {
+  const explicit = env("ALBUS_SIGNAL_PEPPER");
+  if (explicit) return explicit;
+  const derived = env("ALBUS_SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY") ||
+    namedDefault(env("SUPABASE_SECRET_KEYS"));
+  return derived ? `albus-signal-pepper|${derived}` : undefined;
+}
+
 let cachedPepper: Promise<CryptoKey> | null = null;
 
 function pepperKey(): Promise<CryptoKey> {
@@ -67,13 +81,10 @@ function pepperKey(): Promise<CryptoKey> {
         return undefined;
       }
     };
-    const explicit = env("ALBUS_SIGNAL_PEPPER");
-    const fallback = env("ALBUS_SUPABASE_SECRET_KEY") ??
-      env("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-    if (!explicit && !fallback) {
+    const material = pepperMaterial(env);
+    if (!material) {
       throw new Error("no pepper material available; refusing to hash unpeppered");
     }
-    const material = explicit ?? `albus-signal-pepper|${fallback}`;
     return await crypto.subtle.importKey(
       "raw",
       new TextEncoder().encode(material),
