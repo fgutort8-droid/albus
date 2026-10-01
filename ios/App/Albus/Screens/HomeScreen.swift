@@ -22,12 +22,8 @@ struct HomeScreen: View {
     @Environment(FocusSession.self) private var focusSession
     @Environment(NotificationRouter.self) private var router
 
-    @Query(sort: \Assignment.deadline) private var stored: [Assignment]
+    @Query(sort: \Assignment.deadline) private var assignments: [Assignment]
     @Query(sort: \PlanSessionRecord.startsAt) private var sessions: [PlanSessionRecord]
-
-    /// The student's tasks. An archived assignment is a record of work done,
-    /// not a task, so it is never listed, opened from here or counted.
-    private var assignments: [Assignment] { stored.filter { !$0.isArchived } }
 
     @State private var filter: Filter = .all
     @State private var addingTask = false
@@ -163,7 +159,7 @@ struct HomeScreen: View {
                     }
                 }
 
-                WeekStrip(sessions: sessions, now: now) { destination = .month }
+                WeekStrip(sessions: PlanBridge.inPlan(sessions), now: now) { destination = .month }
 
                 if let fit {
                     weekFitNotice(fit)
@@ -219,7 +215,7 @@ struct HomeScreen: View {
     // MARK: - Selection
 
     private func group(for assignment: Assignment, now: Date) -> Group {
-        if assignment.isComplete { return .done }
+        if assignment.isComplete || assignment.isArchived { return .done }
         let cal = Calendar.current
         if assignment.deadline < now { return .overdue }
         if cal.isDateInToday(assignment.deadline) { return .today }
@@ -229,15 +225,22 @@ struct HomeScreen: View {
     }
 
     private func matches(_ assignment: Assignment, now: Date, needsTimeIDs: Set<UUID>) -> Bool {
+        Self.shows(assignment, in: filter, now: now, needsTimeIDs: needsTimeIDs)
+    }
+
+    /// Whether a filter lists an assignment. An archived one is a closed
+    /// record of work rather than open work, so it is listed under Done only.
+    static func shows(_ assignment: Assignment, in filter: Filter, now: Date,
+                      needsTimeIDs: Set<UUID>) -> Bool {
+        let open = !assignment.isComplete && !assignment.isArchived
         switch filter {
-        case .all: !assignment.isComplete
-        case .dueSoon: !assignment.isComplete
+        case .all: return open
+        case .dueSoon: return open
             && assignment.deadline >= now
             && assignment.deadline <= (Calendar.current.date(byAdding: .day, value: 7, to: now) ?? now)
-        case .overdue: !assignment.isComplete && assignment.deadline < now
-        case .needsTime:
-            !assignment.isComplete && needsTimeIDs.contains(assignment.id)
-        case .done: assignment.isComplete
+        case .overdue: return open && assignment.deadline < now
+        case .needsTime: return open && needsTimeIDs.contains(assignment.id)
+        case .done: return !open
         }
     }
 
@@ -273,9 +276,7 @@ struct HomeScreen: View {
 
     /// The block happening now, or the next one due. Nil once everything is done.
     private func upNext(now: Date) -> PlanSessionRecord? {
-        let live = sessions.filter {
-            $0.subtask?.completedAt == nil && $0.subtask?.assignment?.isArchived != true
-        }
+        let live = PlanBridge.inPlan(sessions).filter { $0.subtask?.completedAt == nil }
         return live.first { $0.startsAt <= now && $0.endsAt > now }
             ?? live.first { $0.startsAt > now }
     }
@@ -354,7 +355,7 @@ struct HomeScreen: View {
     @ViewBuilder private var freeLimitNotice: some View {
         let tasks = entitlements.plan.tasks
         if let limit = tasks.limit, limit > 0,
-           assignments.count(where: { !$0.isComplete }) >= limit {
+           assignments.count(where: { !$0.isComplete && !$0.isArchived }) >= limit {
             StatusBanner(
                 tone: .warning,
                 message: "\(entitlements.plan.displayName) keeps \(limit) "

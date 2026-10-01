@@ -412,6 +412,40 @@ struct InstantPlanTests {
         }
     }
 
+    /// A record, not open work: Done lists it and can open it, nothing else does.
+    @Test("an archived assignment is listed under Done only")
+    func archivedIsDoneOnly() throws {
+        let record = Assignment(title: "Refused essay", deadline: now.addingTimeInterval(86_400),
+                                estimatedMinutes: 60, status: .archived)
+        let open = Assignment(title: "History essay", deadline: now.addingTimeInterval(86_400),
+                              estimatedMinutes: 60)
+        for filter in HomeScreen.Filter.allCases {
+            #expect(HomeScreen.shows(record, in: filter, now: now, needsTimeIDs: [record.id]) == (filter == .done),
+                    "\(filter)")
+        }
+        #expect(HomeScreen.shows(open, in: .all, now: now, needsTimeIDs: []))
+        #expect(!HomeScreen.shows(open, in: .done, now: now, needsTimeIDs: []))
+    }
+
+    @Test("an archived assignment's blocks are not part of the plan the calendar shows")
+    func planViewsLeaveOutArchivedBlocks() throws {
+        let context = try store()
+        let record = Assignment(title: "Refused essay", deadline: now, estimatedMinutes: 60,
+                                status: .archived)
+        let open = Assignment(title: "History essay", deadline: now, estimatedMinutes: 60)
+        context.insert(record)
+        context.insert(open)
+        for assignment in [record, open] {
+            let step = Subtask(title: "Draft", ordinal: 0, estimatedMinutes: 60, assignment: assignment)
+            context.insert(step)
+            context.insert(PlanSessionRecord(startsAt: now, endsAt: now.addingTimeInterval(3_600), subtask: step))
+        }
+        try context.save()
+        let all = try context.fetch(FetchDescriptor<PlanSessionRecord>())
+        #expect(all.count == 2)
+        #expect(PlanBridge.inPlan(all).map { $0.subtask?.assignment?.id } == [open.id])
+    }
+
     @Test("an archived assignment does not count against the open-task cap")
     func archivedIsNotCounted() async throws {
         let context = try store()
@@ -678,5 +712,30 @@ struct InstantPlanSnapshots {
         await adding.value
         try await render("3-task-after-ai",
                          dressed(NavigationStack { Screen { TaskDetailScreen(assignment: assignment) } }))
+
+        // A plan the server refused after work was done on it: what the
+        // student sees when they open it from Done.
+        let record = Assignment(title: "Biology lab report", taskType: "report",
+                                deadline: .now.addingTimeInterval(5 * 86_400), estimatedMinutes: 120,
+                                status: .archived)
+        context.insert(record)
+        let finished = Subtask(title: "Write up the method", ordinal: 0, estimatedMinutes: 45,
+                               assignment: record)
+        finished.completedAt = .now.addingTimeInterval(-7_200)
+        let focused = Subtask(title: "Analyse the results", ordinal: 1, estimatedMinutes: 60,
+                              assignment: record)
+        context.insert(finished)
+        context.insert(focused)
+        let block = PlanSessionRecord(startsAt: .now.addingTimeInterval(-3_600),
+                                      endsAt: .now.addingTimeInterval(-2_400), subtask: focused)
+        block.startedAt = block.startsAt
+        block.endedAt = block.endsAt
+        block.focusedSeconds = 1_200
+        context.insert(block)
+        context.insert(Grading(model: "snapshot", inputChars: 3_600, overallMarks: 14, totalMarks: 20,
+                               feedback: "A clear method.", assignment: record))
+        try context.save()
+        try await render("4-task-refused-record",
+                         dressed(NavigationStack { Screen { TaskDetailScreen(assignment: record) } }))
     }
 }

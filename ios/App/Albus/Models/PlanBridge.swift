@@ -193,6 +193,14 @@ enum PlanBridge {
         }
     }
 
+    /// The blocks that make up the plan, for the screens that show it. An
+    /// archived assignment's blocks are a record of work done rather than
+    /// planned work: its own screen shows them, and focus totals count them.
+    @MainActor
+    static func inPlan(_ records: [PlanSessionRecord]) -> [PlanSessionRecord] {
+        records.filter { $0.subtask?.assignment?.isArchived != true }
+    }
+
     /// Measured focus over a window, for the momentum line.
     ///
     /// Reads `focusedSeconds` — real time on a real timer — rather than planned
