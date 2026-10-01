@@ -32,7 +32,8 @@ struct InstantPlanTests {
                       estimatedMinutes: 240)
     }
 
-    private func coordinator(showingSkeletonsFor limit: Duration = .seconds(8)) -> PlanCoordinator {
+    private func coordinator(showingSkeletonsFor limit: Duration = .seconds(8),
+                             saves: SaveSwitch = SaveSwitch()) -> PlanCoordinator {
         HeldPlanTransport.state.reset()
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [HeldPlanTransport.self]
@@ -45,7 +46,11 @@ struct InstantPlanTests {
         return PlanCoordinator(plans: PlanService(client: client),
                                assignments: AssignmentService(client: client),
                                refiningDisplayLimit: limit,
-                               defaults: refusedList)
+                               defaults: refusedList,
+                               persist: { context in
+                                   if saves.fail { throw SaveSwitch.Failure() }
+                                   try context.save()
+                               })
     }
 
     /// Where refused assignments in use wait for launch: this test's own.
@@ -304,7 +309,8 @@ struct InstantPlanTests {
     }
 
     /// A timer can start without passing through the coordinator; what it
-    /// changes is enough on its own to keep the plan.
+    /// changes is enough on its own to keep the plan, and, being work, it
+    /// outlasts the plan at the next launch.
     @Test("a refused assignment whose session has begun by any route stays until the next launch")
     func refusedAfterAnyStartStays() async throws {
         let context = try store()
@@ -323,7 +329,131 @@ struct InstantPlanTests {
         await adding.value
         #expect(try assignment(in: context)?.id == added.id)
         coordinator.removeRefusedAssignments(context: context, availability: availability, now: now)
-        #expect(try assignment(in: context) == nil, "and it goes at the next launch")
+        let kept = try #require(try assignment(in: context), "begun, it is kept as a record")
+        #expect(kept.isArchived, "and is no longer a plan")
+        #expect(kept.subtasks.flatMap(\.sessions).map(\.id) == [session.id], "the plan around it goes")
+    }
+
+    /// The plan goes at the next launch; what the student did on it does not.
+    @Test("work done on a refused assignment is kept when its plan goes",
+          arguments: ["focus", "finish", "mark"])
+    func refusedWorkIsKept(work: String) async throws {
+        let context = try store()
+        let coordinator = coordinator()
+        HeldPlanTransport.state.refuse(status: 402, error: "PLAN_TASK_LIMIT_REACHED", message: "Limit.")
+        let adding = Task {
+            await coordinator.addAssignment(essay(), context: context,
+                                            availability: availability, now: now)
+        }
+        #expect(try await eventually { try assignment(in: context)?.subtasks.isEmpty == false })
+        let added = try #require(try assignment(in: context))
+        let ordered = added.subtasks.sorted { $0.ordinal < $1.ordinal }
+        #expect(ordered.count > 1, "steps with nothing on them, to be removed")
+        let first = try #require(ordered.first)
+        let run = try #require(first.sessions.first)
+        switch work {
+        case "focus":
+            // What `FocusSession` leaves when a timer is stopped part-way.
+            run.startedAt = now
+            run.endedAt = now.addingTimeInterval(1_200)
+            run.focusedSeconds = 1_200
+            run.sessionState = .scheduled
+        case "finish":
+            coordinator.setCompleted(first, true, context: context,
+                                     availability: availability, now: now)
+        default:
+            context.insert(Grading(model: "test", inputChars: 600,
+                                   feedback: "A clear argument.", assignment: added))
+        }
+        try context.save()
+
+        HeldPlanTransport.state.release()
+        await adding.value
+        #expect(RefusedAssignments.all(defaults: refusedList) == [added.id])
+
+        let later = now.addingTimeInterval(3_600)
+        coordinator.removeRefusedAssignments(context: context, availability: availability, now: later)
+        let kept = try #require(try assignment(in: context), "the work keeps its assignment")
+        #expect(kept.isArchived)
+        #expect(RefusedAssignments.all(defaults: refusedList).isEmpty)
+        let sessions = try context.fetch(FetchDescriptor<PlanSessionRecord>())
+        #expect(sessions.allSatisfy { $0.endsAt <= later }, "nothing of it is left ahead in the week")
+        #expect(PlanBridge.notificationBlocks(from: sessions).isEmpty, "nothing reminds the student about it")
+        switch work {
+        case "focus":
+            #expect(kept.subtasks.map(\.id) == [first.id], "steps with nothing recorded go")
+            #expect(sessions.map(\.id) == [run.id], "blocks that never ran go")
+            #expect(run.focusedSeconds == 1_200)
+            #expect(run.startsAt == now && run.endsAt == now.addingTimeInterval(1_200),
+                    "the block that ran sits where it happened")
+        case "finish":
+            #expect(kept.subtasks.map(\.id) == [first.id], "steps with nothing recorded go")
+            #expect(first.completedAt != nil)
+        default:
+            #expect(kept.gradings.count == 1, "the marking is kept")
+            #expect(kept.subtasks.isEmpty, "every step was plan")
+        }
+
+        // A record from now on: a re-plan, a change or a sweep leaves it as it is.
+        coordinator.reschedule(context: context, availability: availability, now: later)
+        coordinator.sweepMissedSessions(context: context, availability: availability,
+                                        now: later.addingTimeInterval(86_400))
+        if let step = kept.subtasks.first {
+            coordinator.setCompleted(step, step.completedAt == nil, context: context,
+                                     availability: availability, now: later)
+        }
+        #expect(kept.isArchived, "nothing turns it back into a plan")
+        if work == "focus" {
+            #expect(try context.fetch(FetchDescriptor<PlanSessionRecord>()).map(\.id) == [run.id],
+                    "recorded focus survives every re-plan")
+            #expect(run.startsAt == now && run.endsAt == now.addingTimeInterval(1_200),
+                    "and is never moved")
+            #expect(run.sessionState == .scheduled, "or relabelled as missed")
+        }
+    }
+
+    @Test("an archived assignment does not count against the open-task cap")
+    func archivedIsNotCounted() async throws {
+        let context = try store()
+        let coordinator = coordinator()
+        context.insert(Assignment(title: "Refused essay", deadline: now, estimatedMinutes: 60,
+                                  status: .archived))
+        try context.save()
+        HeldPlanTransport.state.release()
+        await coordinator.addAssignment(essay(), context: context, availability: availability,
+                                        taskLimit: 1, now: now)
+        #expect(try context.fetch(FetchDescriptor<Assignment>()).count == 2)
+        #expect(coordinator.status == .idle)
+    }
+
+    @Test("a launch whose removal fails to save keeps it listed, and the next launch removes it")
+    func failedRemovalIsRetried() async throws {
+        let context = try store()
+        let saves = SaveSwitch()
+        let coordinator = coordinator(saves: saves)
+        HeldPlanTransport.state.refuse(status: 422, error: "REFUSED",
+                                       message: "The assignment could not be planned.")
+        let adding = Task {
+            await coordinator.addAssignment(essay(), context: context,
+                                            availability: availability, now: now)
+        }
+        #expect(try await eventually { try assignment(in: context)?.subtasks.isEmpty == false })
+        let added = try #require(try assignment(in: context))
+        coordinator.claim(added)  // opened, with nothing recorded: deleted at launch
+        HeldPlanTransport.state.release()
+        await adding.value
+        #expect(try assignment(in: context)?.id == added.id)
+
+        saves.fail = true
+        coordinator.removeRefusedAssignments(context: context, availability: availability, now: now)
+        #expect(RefusedAssignments.all(defaults: refusedList) == [added.id], "still listed for the next launch")
+        #expect(try assignment(in: context)?.id == added.id, "nothing half-removed in memory")
+        #expect(coordinator.status == .failed("Couldn't save."))
+
+        saves.fail = false
+        coordinator.removeRefusedAssignments(context: context, availability: availability, now: now)
+        #expect(try assignment(in: context) == nil)
+        #expect(RefusedAssignments.all(defaults: refusedList).isEmpty)
     }
 
     @Test("a launch with nothing refused changes nothing")
@@ -351,6 +481,13 @@ struct InstantPlanTests {
             Issue.record("expected the phone's plan, got \(coordinator.status)")
         }
     }
+}
+
+/// Makes the coordinator's writes fail on demand, as a full disk would.
+@MainActor
+private final class SaveSwitch {
+    struct Failure: Error {}
+    var fail = false
 }
 
 /// The server, for these tests only: `breakdown` answers when released, and

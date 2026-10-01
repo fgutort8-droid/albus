@@ -114,6 +114,11 @@ final class Assignment {
         get { AssignmentStatus(rawValue: status) ?? .active }
         set { status = newValue.rawValue }
     }
+
+    /// Kept as a record of work done, no longer a plan: never scheduled,
+    /// listed or counted against the open-task cap. Only a plan the server
+    /// refused after the student had worked on it ends up here.
+    var isArchived: Bool { statusValue == .archived }
 }
 
 /// How urgent the student says this is.

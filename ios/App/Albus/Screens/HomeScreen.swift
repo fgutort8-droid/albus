@@ -22,8 +22,12 @@ struct HomeScreen: View {
     @Environment(FocusSession.self) private var focusSession
     @Environment(NotificationRouter.self) private var router
 
-    @Query(sort: \Assignment.deadline) private var assignments: [Assignment]
+    @Query(sort: \Assignment.deadline) private var stored: [Assignment]
     @Query(sort: \PlanSessionRecord.startsAt) private var sessions: [PlanSessionRecord]
+
+    /// The student's tasks. An archived assignment is a record of work done,
+    /// not a task, so it is never listed, opened from here or counted.
+    private var assignments: [Assignment] { stored.filter { !$0.isArchived } }
 
     @State private var filter: Filter = .all
     @State private var addingTask = false
@@ -269,7 +273,9 @@ struct HomeScreen: View {
 
     /// The block happening now, or the next one due. Nil once everything is done.
     private func upNext(now: Date) -> PlanSessionRecord? {
-        let live = sessions.filter { $0.subtask?.completedAt == nil }
+        let live = sessions.filter {
+            $0.subtask?.completedAt == nil && $0.subtask?.assignment?.isArchived != true
+        }
         return live.first { $0.startsAt <= now && $0.endsAt > now }
             ?? live.first { $0.startsAt > now }
     }
