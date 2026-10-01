@@ -143,8 +143,10 @@
     <li>The one-way codes made from device identifiers and IP addresses: removed by scheduled cleanup after 90 days without another observation. Security records: 180 days.</li>
     <li>Subscription records, and the log of changes to plans and payments: as long as accounting and tax law require.</li>
     <li>Payment events in the queue: their details for 30 days after they are applied; after that, only an identifier,
-        a fingerprint and the outcome, which stop the same event being applied twice. An account with a payment still
-        waiting in the queue is never removed as unused.</li>
+        a fingerprint and the outcome, which stop the same event being applied twice. An event that hasn't been
+        applied yet, including one that failed and is waiting for us to sort it out by hand, keeps its details until
+        it is applied, so the payment isn't lost; the 30 days start then. An account with a payment still waiting in
+        the queue is never removed as unused.</li>
   </ul>
 
   <h2>6. Your choices and rights</h2>
