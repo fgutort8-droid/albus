@@ -126,9 +126,52 @@ struct PricingTests {
             #expect(row.plan.priceCents == row.priceCents,
                     "\(row.plan.title): \(row.plan.priceCents)c on screen, \(row.priceCents)c in public.plans")
         }
-        #expect(PaywallScreen.Plan.free.price == "Free")
+        #expect(PaywallScreen.Plan.free.price == "€0")
         #expect(PaywallScreen.Plan.plus.price == "€9.99")
         #expect(PaywallScreen.Plan.pro.price == "€17.99")
+    }
+
+    /// Free's card shows a zero written the way the App Store wrote the paid
+    /// prices beside it — same currency, same side, same spacing — rather
+    /// than the word "Free" under a card already headed "Free".
+    @Test("Free's zero is written like the store's own prices", arguments: [
+        ("€9.99", "€0"),
+        ("$9.99", "$0"),
+        ("US$9.99", "US$0"),
+        ("9,99 €", "0 €"),
+        ("9,99\u{00A0}€", "0\u{00A0}€"),
+        ("€ 9,99", "€ 0"),
+        ("CHF 9.90", "CHF 0"),
+        ("1'299.00 CHF", "0 CHF"),
+        ("¥1,500", "¥0"),
+        ("R$ 49,90", "R$ 0"),
+        ("₹799.00", "₹0"),
+        // Thousands grouped with whatever the storefront uses: the whole
+        // amount goes, never just its first group.
+        ("€1\u{2009}234,56", "€0"),
+        ("1\u{2007}234,56\u{00A0}€", "0\u{00A0}€"),
+        ("CHF 1\u{2019}234.50", "CHF 0"),
+        ("₹1,23,456.00", "₹0"),
+        ("1.234,56 zł", "0 zł"),
+    ])
+    func zeroPriceKeepsTheStoreFormat(written: String, zero: String) {
+        #expect(PaywallScreen.zeroPrice(like: written) == zero)
+    }
+
+    @Test("a price with no amount in it gives no zero, so the card keeps its fallback")
+    func zeroPriceNeedsAnAmount() {
+        #expect(PaywallScreen.zeroPrice(like: "") == nil)
+        #expect(PaywallScreen.zeroPrice(like: "Free") == nil)
+    }
+
+    /// Plus can be unpriced where Pro is not; Free then copies Pro's format
+    /// rather than falling back to display copy in another currency.
+    @Test("Free copies the first paid plan the App Store has priced")
+    func freeCopiesAnyPricedPlan() {
+        #expect(PaywallScreen.freePrice(copying: [nil, "$17.99"]) == "$0")
+        #expect(PaywallScreen.freePrice(copying: ["€9.99", "€17.99"]) == "€0")
+        #expect(PaywallScreen.freePrice(copying: ["Free", "17,99 €"]) == "0 €")
+        #expect(PaywallScreen.freePrice(copying: [nil, nil]) == nil)
     }
 
     /// `EntitlementService.Plan.freeFallback` is what the app shows before the

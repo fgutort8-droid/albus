@@ -254,8 +254,8 @@ struct GraderScreen: View {
                 Spacer()
                 meter
             }
-            Text("A grading reads every paragraph and marks it against your "
-                 + "rubric, quoting your own sentences back to you.")
+            Text("Reads every paragraph and marks it against your rubric, "
+                 + "quoting your own sentences back to you.")
                 .font(Tokens.Typography.caption)
                 .foregroundStyle(Tokens.Palette.inkSecondary)
         }
@@ -723,13 +723,13 @@ struct GraderScreen: View {
     private var grader: EntitlementService.Allowance { entitlements.plan.grader }
 
     @ViewBuilder private var meter: some View {
-        // `isIncluded` before `remaining`, always. A limit of zero has a
-        // remaining of zero, and rendering "0 left this week" to somebody who
-        // never had any promises a Monday that is never coming.
-        if !grader.isIncluded {
-            Text("Not on the \(entitlements.plan.displayName) plan")
-                .font(Tokens.Typography.overline)
-                .foregroundStyle(Tokens.Palette.inkSecondary)
+        // Only while there are markings to use. Out of them, or never on this
+        // plan, `blockedCard` further down says so in full — and says the
+        // right one of the two — so the meter repeating it was the same news
+        // twice. `hasAny` checks `isIncluded` before `remaining`, which still
+        // keeps "0 left this week" away from somebody who never had any.
+        if !grader.hasAny {
+            EmptyView()
         } else if let left = grader.remaining, let limit = grader.limit {
             HStack(spacing: 6) {
                 HStack(spacing: 3) {
@@ -742,8 +742,7 @@ struct GraderScreen: View {
                 }
                 Text("\(left) left this week")
                     .font(Tokens.Typography.overline)
-                    .foregroundStyle(left > 0 ? Tokens.Palette.inkSecondary
-                                              : Tokens.Palette.danger)
+                    .foregroundStyle(Tokens.Palette.inkSecondary)
             }
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: left)
         } else {

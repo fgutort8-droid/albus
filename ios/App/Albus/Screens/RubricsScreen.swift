@@ -79,13 +79,11 @@ struct RubricsScreen: View {
             : "\(used) assignments use this rubric. They're kept — they just stop being marked against anything."
     }
 
+    /// The title and nothing above it, like every other tab. With no rubrics
+    /// saved the line under it goes too: the empty state below already says
+    /// what a rubric is for, at more length and in the right place.
     private var header: some View {
         VStack(alignment: .leading, spacing: Tokens.Spacing.xs) {
-            Text("MARKED AGAINST")
-                .font(Tokens.Typography.overline)
-                .tracking(Tokens.Tracking.dateline)
-                .foregroundStyle(Tokens.Palette.inkMuted)
-
             HStack(alignment: .firstTextBaseline) {
                 Text("Rubrics")
                     .font(Tokens.Typography.displayLarge)
@@ -96,11 +94,11 @@ struct RubricsScreen: View {
                            accessibilityLabel: "Add a rubric") { editing = .empty }
             }
 
-            Text(rubrics.isEmpty
-                 ? "Save a rubric once and reuse it."
-                 : "\(rubrics.count) saved. Pick one when you add an assignment.")
-                .font(Tokens.Typography.caption)
-                .foregroundStyle(Tokens.Palette.inkSecondary)
+            if !rubrics.isEmpty {
+                Text("\(rubrics.count) saved. Pick one when you add an assignment.")
+                    .font(Tokens.Typography.caption)
+                    .foregroundStyle(Tokens.Palette.inkSecondary)
+            }
         }
         .padding(.top, Tokens.Spacing.s)
     }

@@ -103,7 +103,10 @@ struct NotificationSettingsScreen: View {
 
     @ViewBuilder private func voice(_ preferences: Bindable<Preferences>) -> some View {
         section("Voice") {
-            Toggle("Notifications", isOn: preferences.notificationsEnabled)
+            // Not "Notifications": that is this screen's title, one line up.
+            // Said in the voice the rest of the screen uses — "When Albus
+            // speaks" is how Settings names the way here.
+            Toggle("Let Albus speak", isOn: preferences.notificationsEnabled)
             Toggle("Serious mode", isOn: preferences.seriousMode)
             Text(preferences.wrappedValue.seriousMode
                  ? "Plain and factual. No jokes."
@@ -120,8 +123,10 @@ struct NotificationSettingsScreen: View {
             stepper("Quiet from", value: preferences.quietStartHour, range: 18...23)
             stepper("Quiet until", value: preferences.quietEndHour, range: 4...11)
 
+            // "Fewer", not "Quiet": two rows up, "Quiet from" and "Quiet
+            // until" are the hours, and this is how many.
             Picker("Most per day", selection: preferences.maxPerDay) {
-                Text("Quiet").tag(1)
+                Text("Fewer").tag(1)
                 Text("Normal").tag(2)
                 Text("More").tag(3)
             }

@@ -312,9 +312,11 @@ struct TaskDetailScreen: View {
                             .tracking(Tokens.Tracking.overline)
                             .foregroundStyle(Tokens.Palette.inkMuted)
                         if !isRecord {
+                            // The summary card above already names the rubric
+                            // ("Marked against …"); naming it again here repeated it.
                             Text(assignment.rubric == nil
                                  ? "Mark it against a rubric"
-                                 : "Mark it against \(assignment.rubric!.name)")
+                                 : "Mark it against the rubric")
                                 .font(Tokens.Typography.cardTitle)
                                 .foregroundStyle(Tokens.Palette.ink)
                             Text("Albus reads what you wrote and says what to change, in the order worth changing it.")

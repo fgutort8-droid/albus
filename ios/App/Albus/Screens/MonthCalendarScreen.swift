@@ -64,15 +64,10 @@ struct MonthCalendarScreen: View {
 
     private var monthHeader: some View {
         HStack {
-            VStack(alignment: .leading, spacing: Tokens.Spacing.xs) {
-                Text("MONTH")
-                    .font(Tokens.Typography.overline)
-                    .tracking(Tokens.Tracking.overline)
-                    .foregroundStyle(Tokens.Palette.inkMuted)
-                Text(month, format: .dateTime.month(.wide).year())
-                    .font(Tokens.Typography.displayLarge)
-                    .foregroundStyle(Tokens.Palette.ink)
-            }
+            // "September 2026" needs no "MONTH" over it to say what it is.
+            Text(month, format: .dateTime.month(.wide).year())
+                .font(Tokens.Typography.displayLarge)
+                .foregroundStyle(Tokens.Palette.ink)
             Spacer()
             HStack(spacing: Tokens.Spacing.s) {
                 IconButton(systemImage: "chevron.left", accessibilityLabel: "Previous month") {
