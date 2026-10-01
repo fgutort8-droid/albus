@@ -10,7 +10,9 @@ struct MonthCalendarScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(PlanCoordinator.self) private var coordinator
 
-    @Query(sort: \PlanSessionRecord.startsAt) private var sessions: [PlanSessionRecord]
+    @Query(sort: \PlanSessionRecord.startsAt) private var stored: [PlanSessionRecord]
+    /// The plan's blocks: an archived assignment's are not planned work.
+    private var sessions: [PlanSessionRecord] { PlanBridge.inPlan(stored) }
 
     @State private var month: Date = .now
     @State private var selectedDay: Date?
