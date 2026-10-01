@@ -515,15 +515,15 @@ struct PaywallScreen: View {
     /// Free's price: zero in the storefront's own format, copied from the
     /// first paid plan the App Store has priced, so it reads as the same
     /// currency as the cards beside it. Plus can be missing where Pro is not.
-    static func freePrice(copying written: [String?]) -> String? {
-        written.lazy.compactMap { $0 }.compactMap(zeroPrice(like:)).first
+    nonisolated static func freePrice(copying written: [String?]) -> String? {
+        written.lazy.compactMap { $0 }.compactMap { zeroPrice(like: $0) }.first
     }
 
     /// A price the App Store wrote, with its amount replaced by zero: "€9.99"
     /// becomes "€0", "9,99 €" becomes "0 €", "US$9.99" becomes "US$0". The
     /// amount runs from its first digit to its last, so whatever a storefront
     /// groups thousands with goes with it. Nil when there is no amount in it.
-    static func zeroPrice(like price: String) -> String? {
+    nonisolated static func zeroPrice(like price: String) -> String? {
         guard let first = price.firstIndex(where: \.isNumber),
               let last = price.lastIndex(where: \.isNumber) else { return nil }
         return price.replacingCharacters(in: first...last, with: "0")
