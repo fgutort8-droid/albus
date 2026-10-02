@@ -128,6 +128,7 @@ struct OnboardingFlow: View {
             subtitle: "This is where your first plan begins.",
             actionTitle: "Build my plan",
             isEnabled: taskTitle.trimmingCharacters(in: .whitespaces).count >= 2,
+            footnote: Self.agreement,
             action: begin
         ) {
             VStack(alignment: .leading, spacing: Tokens.Spacing.xl) {
@@ -178,6 +179,16 @@ struct OnboardingFlow: View {
                 }
             }
         }
+    }
+
+    /// Shown beside the button that creates the account, so the age rule and
+    /// the terms are in front of the student before there is an account.
+    static var agreement: AttributedString {
+        let text = "By tapping Build my plan, you confirm you're 13 or older, with a parent's "
+            + "or guardian's agreement if you're under 16, and you accept the "
+            + "[Terms of service](\(AppLinks.terms.absoluteString)) and "
+            + "[Privacy policy](\(AppLinks.privacy.absoluteString))."
+        return (try? AttributedString(markdown: text)) ?? AttributedString(text)
     }
 
     // `TaskKind` used to be declared here with six cases, while AddTaskSheet
@@ -372,6 +383,7 @@ private struct OnboardingScaffold<Content: View>: View {
     let subtitle: String
     let actionTitle: String
     let isEnabled: Bool
+    var footnote: AttributedString? = nil
     let action: () -> Void
     @ViewBuilder var content: Content
 
@@ -400,6 +412,16 @@ private struct OnboardingScaffold<Content: View>: View {
             }
             .scrollContentBackground(.hidden)
             .scrollDismissesKeyboard(.interactively)
+
+            if let footnote {
+                Text(footnote)
+                    .font(Tokens.Typography.caption)
+                    .foregroundStyle(Tokens.Palette.inkSecondary)
+                    .tint(Tokens.Palette.accent)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, Tokens.Spacing.xl)
+                    .padding(.bottom, Tokens.Spacing.m)
+            }
 
             PrimaryButton(title: actionTitle, isEnabled: isEnabled, action: action)
                 .padding(.horizontal, Tokens.Spacing.xl)

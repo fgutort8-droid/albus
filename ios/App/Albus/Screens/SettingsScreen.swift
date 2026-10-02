@@ -297,7 +297,7 @@ struct SettingsScreen: View {
                     aboutRow("Account", accountLabel)
                     linkRow("Help and support", AppLinks.support)
                     linkRow("Privacy policy", AppLinks.privacy)
-                    linkRow("Terms of use", AppLinks.terms)
+                    linkRow("Terms of service", AppLinks.terms)
                 }
             }
         }

@@ -40,3 +40,16 @@ and the owner should confirm the provider settings that code cannot certify.
 The Cloudflare paragraph describes builds made with a Turnstile site key. Publish
 this policy **before** testers or students get such a build: disclosing the
 check before it runs is safe, running it before it is disclosed is not.
+
+## 1 October 2026: payments queue, terms of service
+
+Reviewed against `main` after #30 (payment events saved before they are applied),
+#29 (new API keys) and the queue follow-up (#31).
+
+| Claim | Evidence |
+| --- | --- |
+| Payment events are queued with the account's id, then applied | `private.financial_inbox` in `20260930143051_financial_event_pipeline.sql` stores the allowlisted payload and `user_id`; `prune_financial_inbox()` (daily cron) erases payload and `user_id` 30 days after completion, keeping id, hash and result to refuse replays. Pending, retrying and dead events are never pruned (so a payment is not lost), and the policy says so. |
+| Changes to plans and payments go to a log that can't be edited | `private.financial_audit`, appended by triggers on the five financial tables; update, delete and truncate are refused; accounts appear only as a SHA-256 hash. No automatic expiry, so it sits with "subscription records" under accounting retention. |
+| An account with a payment still queued is never removed as unused | `reap_abandoned_anonymous_users` spares any account named in a `user_id` column; since `20261001190000` the enqueue also holds the account's row while recording. |
+| Age | Terms and policy now say 13 or older, with a parent or guardian agreeing under 16 (stricter than Spain's 14). |
+| Terms | New `/terms/`, Spanish law with EU consumers' mandatory protections kept; Apple's standard EULA still covers the app and is linked from the first paragraph. The app's Terms links (paywall, Settings) now open this page. |

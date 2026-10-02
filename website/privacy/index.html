@@ -12,7 +12,7 @@
   <header><a class="brand" href="/">Albus</a></header>
 
   <h1>Privacy policy</h1>
-  <p class="updated">Last updated 27 September 2026</p>
+  <p class="updated">Last updated 1 October 2026</p>
 
   <p>Albus is an iPhone app that plans study time. This page explains what information it
      handles, why, who helps us run it, and the choices you have.</p>
@@ -79,6 +79,10 @@
      server which plan your account has. We store the subscription's identifiers, product, dates and
      status, and an estimate of what we received after tax and Apple's commission, which we use to set
      how much Albus may spend on AI. We never receive your name, your Apple ID or your payment details.
+     Each purchase, renewal or refund RevenueCat reports is first saved in a queue, with your account's
+     random identifier and the purchase details above, so that none is lost or counted twice, and then
+     applied. Every change to plans and payment records is also written to a log that can't be edited,
+     which identifies accounts only by a one-way code.
      <em>Why: to provide what you paid for, and to keep the accounting records the law requires.</em></p>
 
   <h3>Keeping Albus fair and safe</h3>
@@ -137,7 +141,12 @@
         which contain no content, are kept for cost accounting.</li>
     <li>Rate-limit counters: about two hours.</li>
     <li>The one-way codes made from device identifiers and IP addresses: removed by scheduled cleanup after 90 days without another observation. Security records: 180 days.</li>
-    <li>Subscription records: as long as accounting and tax law require.</li>
+    <li>Subscription records, and the log of changes to plans and payments: as long as accounting and tax law require.</li>
+    <li>Payment events in the queue: their details for 30 days after they are applied; after that, only an identifier,
+        a fingerprint and the outcome, which stop the same event being applied twice. An event that hasn't been
+        applied yet, including one that failed and is waiting for us to sort it out by hand, keeps its details until
+        it is applied, so the payment isn't lost; the 30 days start then. An account with a payment still waiting in
+        the queue is never removed as unused.</li>
   </ul>
 
   <h2>6. Your choices and rights</h2>
@@ -149,19 +158,20 @@
     <li>You can ask us for a copy of your data, to correct it, to delete it, to restrict how we use it,
         or object to how we use it, by writing to <a href="mailto:fgutort8@gmail.com">fgutort8@gmail.com</a>.</li>
     <li>If you think we have handled your data wrongly, you can complain to the data protection
-        authority where you live.</li>
+        authority where you live. In Spain, that is the
+        <a href="https://www.aepd.es">Agencia Española de Protección de Datos</a>.</li>
   </ul>
 
   <h2>7. Children</h2>
   <p>Albus is made for students, including teenagers. It asks for no contact details, shows no ads and
-     does no tracking. If you are under the age at which you can agree to this yourself where you live,
-     ask a parent or guardian to read this policy with you.</p>
+     does no tracking. You must be 13 or older to use it. If you are under 16, a parent or guardian must
+     read this policy and agree to the <a href="/terms/">terms of service</a> for you.</p>
 
   <h2>8. Changes</h2>
   <p>If this policy changes, the new version will be posted here with a new date. If a change matters,
      we will also say so in the app.</p>
 
-  <footer><a href="/support/">Help and support</a> · <a href="/">Albus</a></footer>
+  <footer><a href="/terms/">Terms of service</a> · <a href="/support/">Help and support</a> · <a href="/">Albus</a></footer>
 </main>
 </body>
 </html>

@@ -135,4 +135,16 @@ struct AccountCreationTests {
         #expect(recorder.passes.isEmpty)
         #expect(prefetch.state == .ready, "the pass is left unused")
     }
+
+    /// The account is created by "Build my plan", so the age rule and the
+    /// terms must be stated there, and their links must open the published pages.
+    @Test func buildMyPlanStatesTheTermsAndAge() {
+        let agreement = OnboardingFlow.agreement
+        let text = String(agreement.characters)
+        #expect(text.contains("13 or older"))
+        #expect(text.contains("under 16"))
+        let links = agreement.runs.compactMap(\.link)
+        #expect(links == [AppLinks.terms, AppLinks.privacy])
+        #expect(!text.contains("]("), "the markdown is rendered, not shown")
+    }
 }
