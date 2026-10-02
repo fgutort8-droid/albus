@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 import SwiftData
 import UserNotifications
@@ -74,6 +75,7 @@ struct AlbusApp: App {
 
     @State private var deletion = AccountDeletion()
     @State private var session = SessionService()
+    @State private var localAccount = LocalAccount()
     @State private var coordinator = PlanCoordinator()
     @State private var preferences = Preferences()
     @State private var entitlements = EntitlementService()
@@ -88,11 +90,13 @@ struct AlbusApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .modifier(DebugLinkRecording())
                 // No dark palette exists in the designs yet, and a half-applied
                 // one looks worse than none. Locked until dark is designed.
                 .preferredColorScheme(.light)
                 .environment(session)
                 .environment(deletion)
+                .environment(localAccount)
                 .environment(coordinator)
                 .environment(preferences)
                 .environment(entitlements)
@@ -103,14 +107,18 @@ struct AlbusApp: App {
                 .environment(marking)
                 .onChange(of: deletion.requiresCleanup) { _, pending in
                     if !pending {
-                        coordinator = PlanCoordinator()
-                        entitlements = EntitlementService()
-                        focusSession = FocusSession()
-                        notifications = NotificationCoordinator()
-                        router = NotificationRouter()
-                        marking = MarkingCoordinator()
-                        wireNotifications()
+                        localAccount.forget()
+                        replaceAccountServices()
                     }
+                }
+                // Signed out, or another account's tasks were removed: nothing
+                // that held the previous account's state may carry over.
+                .onChange(of: localAccount.generation) {
+                    replaceAccountServices()
+                }
+                .onReceive(NotificationCenter.default.publisher(
+                    for: ASAuthorizationAppleIDProvider.credentialRevokedNotification)) { _ in
+                    Task { await signOutIfAppleRevoked() }
                 }
                 .task {
                     guard !deletion.requiresCleanup else { return }
@@ -129,6 +137,7 @@ struct AlbusApp: App {
                     // tries to sync on its behalf.
                     await session.start(settling: deletion)
                     guard !deletion.requiresCleanup else { return }
+                    await signOutIfAppleRevoked()
                     // Only meaningful once signed in; refresh reads the
                     // caller's own row and no-ops otherwise.
                     await entitlements.refresh()
@@ -170,6 +179,37 @@ struct AlbusApp: App {
                 }
         }
         .modelContainer(container)
+    }
+
+    /// Fresh services for whoever is signed in next, as after a deletion.
+    @MainActor
+    private func replaceAccountServices() {
+        coordinator = PlanCoordinator()
+        entitlements = EntitlementService()
+        focusSession = FocusSession()
+        notifications = NotificationCoordinator()
+        router = NotificationRouter()
+        marking = MarkingCoordinator()
+        wireNotifications()
+    }
+
+    /// Apple asks apps to sign out a student who has stopped using Sign in
+    /// with Apple for them, which they can do from their Apple ID settings.
+    /// Only a definite "revoked" counts: a phone that cannot tell, signed out
+    /// of iCloud say, keeps the student signed in.
+    @MainActor
+    private func signOutIfAppleRevoked() async {
+        guard session.signInMethod == .apple, let appleUserID = session.appleUserID else { return }
+        let state = await withCheckedContinuation { continuation in
+            ASAuthorizationAppleIDProvider().getCredentialState(forUserID: appleUserID) { state, _ in
+                continuation.resume(returning: state)
+            }
+        }
+        guard state == .revoked else { return }
+        try? await AccountSignOut.perform(session: session, focus: focusSession,
+                                          notifications: notifications,
+                                          context: container.mainContext,
+                                          localAccount: localAccount)
     }
 
     /// Points the system's notification delegate at the router.

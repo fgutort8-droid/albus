@@ -53,3 +53,19 @@ Reviewed against `main` after #30 (payment events saved before they are applied)
 | An account with a payment still queued is never removed as unused | `reap_abandoned_anonymous_users` spares any account named in a `user_id` column; since `20261001190000` the enqueue also holds the account's row while recording. |
 | Age | Terms and policy now say 13 or older, with a parent or guardian agreeing under 16 (stricter than Spain's 14). |
 | Terms | New `/terms/`, Spanish law with EU consumers' mandatory protections kept; Apple's standard EULA still covers the app and is linked from the first paragraph. The app's Terms links (paywall, Settings) now open this page. |
+
+## 2 October 2026: sign-in with Apple and email codes
+
+Students now sign in before set-up (the owner's decision); see `SignInScreen.swift`
+and `SessionService.swift`. Reviewed against this branch (`auth/app`); the server
+half is `auth/server`.
+
+| Claim | Evidence |
+| --- | --- |
+| We keep the email address (or Apple's relay address) only to sign in | Apple: `SignInScreen` requests the `email` scope only, never the full name; GoTrue stores the identity in `auth.identities`. Email: `sendEmailCode` sends the typed address to `/auth/v1/otp`. No other code reads `user.email` except Settings, which shows it to the student. |
+| Cloudflare's check can run for email sign-in, never for Apple | The email code request goes through `AccountCreation` with the Turnstile pass; GoTrue's `isIgnoreCaptchaRoute` skips the check for `grant_type=id_token`. |
+| A new phone gets the account and plan back, not the tasks | No task download exists; `LocalAccount` releases the server's active tasks when the phone holds none (`release_my_active_assignments`). |
+| Signing out keeps the tasks; another account is asked before they go | `LocalAccount.decide` (tested in `LocalAccountTests`), `AccountSwitchScreen`. |
+| Deleting an Apple account tells Apple | `AccountDeletionScreen` asks Apple for a fresh code; `delete-account` exchanges and revokes it (server half). |
+| Sign-in codes expire after 10 minutes | `otp_expiry = 600` in `supabase/config.toml` (server half) and the dashboard setting. |
+| Resend sends the codes | Owner's choice of provider in YOUR_STEPS; change the providers table if another is used. |

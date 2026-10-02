@@ -38,7 +38,20 @@ enum Backend {
     static let authStorage = ResilientAuthStorage()
 
     private static func makeClient() throws -> SupabaseClient {
-        let info = Bundle.main.infoDictionary ?? [:]
+        var info = Bundle.main.infoDictionary ?? [:]
+#if DEBUG
+        // A local Supabase stack for end-to-end checks, such as signing in
+        // with an emailed code read from its Mailpit. Both or neither.
+        // Compiled out of Release, so a shipped build can only reach the
+        // server it was built for.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let url = arguments.firstIndex(of: "-albus.debug.supabaseURL"),
+           let key = arguments.firstIndex(of: "-albus.debug.supabaseKey"),
+           url + 1 < arguments.count, key + 1 < arguments.count {
+            info["SUPABASE_URL"] = arguments[url + 1]
+            info["SUPABASE_PUBLISHABLE_KEY"] = arguments[key + 1]
+        }
+#endif
 
         guard let raw = info["SUPABASE_URL"] as? String,
               !raw.isEmpty, !raw.contains("YOUR_PROJECT_REF"),

@@ -8,13 +8,13 @@ import Supabase
 /// cannot be confused with the several that mean "try again later".
 struct AccountUnreachable: Error {}
 
-/// Gets the user signed in, silently, before anything else runs.
+/// Restores the account this phone holds, and signs students in.
 ///
-/// Albus has no sign-up screen: every user is anonymous from first launch.
-/// That is a product decision (a signup wall is the single biggest thing that
-/// kills apps like this) but it is also why the session must be durable — the
-/// anonymous account *is* the account, and losing it loses their work and
-/// resets their free quota.
+/// Students sign in before anything else, with Apple or with a code sent by
+/// email (the owner's decision, 2 Oct 2026). Accounts made before that were
+/// anonymous; they still open, and keep their data when Apple or an email is
+/// added to them. The session must stay durable either way: it is what the
+/// phone's plans and the free allowance belong to.
 @Observable
 @MainActor
 final class SessionService {
@@ -61,6 +61,32 @@ final class SessionService {
         return nil
     }
 
+    /// How the signed-in account signs in. Nil when signed out.
+    enum SignInMethod: Equatable {
+        case apple
+        case email(String)
+        /// Made before sign-in existed. Adding Apple or an email saves it.
+        case anonymous
+        /// Signed in, but the session does not say how.
+        case other
+    }
+
+    private(set) var signInMethod: SignInMethod?
+
+    /// Whether the account signed in now was restored at launch or signed in
+    /// on the sign-in screen. `LocalAccount` treats the phone's data
+    /// differently for each.
+    private(set) var arrival: LocalAccount.Arrival = .restored
+
+    /// Apple's identifier for the student, to ask Apple whether they have
+    /// since stopped using Sign in with Apple for Albus.
+    private(set) var appleUserID: String?
+
+    /// The address an email code was last sent to by `sendEmailCode`, and
+    /// whether that code adds the address to an anonymous account rather than
+    /// signing in.
+    private var pendingEmail: (address: String, addsToAccount: Bool)?
+
     /// The account once the server has confirmed its pass. Whatever acts for
     /// the account beyond this phone, such as the App Store's purchase
     /// identity, waits for this: a stored account shown early may turn out to
@@ -103,8 +129,14 @@ final class SessionService {
         if ProcessInfo.processInfo.arguments.contains("-albus.debug.assumeSignedIn") {
             state = .signedIn(
                 userID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
-                isAnonymous: true
+                isAnonymous: false
             )
+            signInMethod = .email("student@example.com")
+            return
+        }
+        // The sign-in screen, whatever this simulator's Keychain holds.
+        if ProcessInfo.processInfo.arguments.contains("-albus.debug.assumeSignedOut") {
+            signedOut(as: .needsAccount)
             return
         }
 #endif
@@ -115,6 +147,7 @@ final class SessionService {
         credentialRejected = false
         renewedByServer = false
         renewalBegan = nil
+        arrival = .restored
         renewing = true
         defer { renewing = false }
         var shown = state
@@ -130,7 +163,7 @@ final class SessionService {
             // nothing that needs the server runs before the renewal settles.
             if opensEarly, let stored = client.auth.currentSession, stored.isExpired {
                 try storage.checkHealth()
-                state = .signedIn(userID: stored.user.id, isAnonymous: stored.user.isAnonymous)
+                adopt(stored.user)
                 awaitingRenewal = true
             }
             shown = state
@@ -141,8 +174,7 @@ final class SessionService {
             // after a deletion say: that stands.
             guard state == shown else { return }
             try storage.checkHealth()
-            state = .signedIn(userID: session.user.id,
-                              isAnonymous: session.user.isAnonymous)
+            adopt(session.user)
             awaitingRenewal = false
             renewedByServer = renewed
             renewalBegan = renewed ? began : nil
@@ -152,7 +184,7 @@ final class SessionService {
             // account opens awaiting renewal, as it would have offline; a
             // refused pass or none at all is settled below as ever.
             if !opensEarly, let stored = client.auth.currentSession {
-                state = .signedIn(userID: stored.user.id, isAnonymous: stored.user.isAnonymous)
+                adopt(stored.user)
                 awaitingRenewal = true
             }
             settle(restoreFailure: error)
@@ -179,7 +211,7 @@ final class SessionService {
             // an answer for the old pass must not bring the account back.
             guard state == shown else { return nil }
             try storage.checkHealth()
-            state = .signedIn(userID: session.user.id, isAnonymous: session.user.isAnonymous)
+            adopt(session.user)
             awaitingRenewal = false
             return began
         } catch {
@@ -197,75 +229,194 @@ final class SessionService {
         // about actually happened.
         guard (try? storage.checkHealth()) != nil else {
             awaitingRenewal = false
-            state = .failed(SessionStorageUnavailable().localizedDescription)
+            signedOut(as: .failed(SessionStorageUnavailable().localizedDescription))
             return
         }
         if error is AccountUnreachable {
             awaitingRenewal = false
             credentialRejected = true
-            state = .needsAccount
+            signedOut(as: .needsAccount)
         } else if (error as? AuthError) == .sessionMissing {
             // No credential was available; absence alone proves no deletion.
             awaitingRenewal = false
-            state = .needsAccount
+            signedOut(as: .needsAccount)
         } else if awaitingRenewal {
             // The network failed, not the account. The student keeps their
             // plans, anything that needs the server fails the way it does
             // offline, and `revalidate()` tries again. Never read as a
             // deletion: a phone in a tunnel proves nothing.
         } else {
-            state = .failed("Couldn't restore your sign-in. Please try again.")
+            signedOut(as: .failed("Couldn't restore your sign-in. Please try again."))
         }
     }
 
-    /// Creates the anonymous account, carrying a CAPTCHA token when one is
-    /// required.
+    private func adopt(_ user: User) {
+        state = .signedIn(userID: user.id, isAnonymous: user.isAnonymous)
+        signInMethod = Self.method(of: user)
+        appleUserID = user.identities?.first { $0.provider == "apple" }.map(Self.appleSubject)
+    }
+
+    private func signedOut(as newState: State) {
+        state = newState
+        signInMethod = nil
+        appleUserID = nil
+        pendingEmail = nil
+    }
+
+    static func method(of user: User) -> SignInMethod {
+        if user.isAnonymous { return .anonymous }
+        let providers = Set((user.identities ?? []).map(\.provider))
+        if providers.contains("apple") { return .apple }
+        if let email = user.email, !email.isEmpty { return .email(email) }
+        return .other
+    }
+
+    private static func appleSubject(_ identity: UserIdentity) -> String {
+        identity.identityData?["sub"]?.stringValue ?? identity.id
+    }
+
+    // MARK: - Signing in
+
+    /// Signs in with Apple's ID token, or adds Apple to an account made
+    /// before sign-in existed, which keeps that account and everything in it.
     ///
-    /// - Parameter captchaToken: must be non-nil whenever `Captcha.isEnabled`.
-    ///   Passing nil in that case is a caller bug, and the server will reject
-    ///   it — which is the correct outcome, not something to work around here.
-    @discardableResult
-    func createAccount(captchaToken: String? = nil) async -> Bool {
-        guard let client else {
-            state = .failed("Not configured")
-            return false
+    /// - Parameter nonce: the raw value whose SHA-256 went into Apple's
+    ///   request. Supabase checks the token carries it.
+    func signInWithApple(idToken: String, nonce: String) async throws {
+        try await establish { client, addsToAccount in
+            let credentials = OpenIDConnectCredentials(provider: .apple, idToken: idToken, nonce: nonce)
+            return addsToAccount
+                ? try await client.auth.linkIdentityWithIdToken(credentials: credentials)
+                : try await client.auth.signInWithIdToken(credentials: credentials)
         }
+    }
 
-        // Never create a second account over a live one.
-        if case .signedIn = state { return true }
+    /// Signs in with the same Apple ID token, leaving behind an account made
+    /// before sign-in existed. For when that Apple ID turned out to have its
+    /// own account already, and the student chose it.
+    func switchToApple(idToken: String, nonce: String) async throws {
+        try await establish(replacingAnonymous: true) { client, _ in
+            try await client.auth.signInWithIdToken(
+                credentials: OpenIDConnectCredentials(provider: .apple, idToken: idToken, nonce: nonce))
+        }
+    }
 
+    /// Sends a 6-digit code to `email`. Signing in with it makes the account
+    /// if there isn't one. For an account made before sign-in existed, the
+    /// code instead confirms the address being added to it.
+    ///
+    /// - Parameter captchaToken: the Turnstile pass, required by the server
+    ///   once CAPTCHA is on. Ignored when adding an address, which the server
+    ///   does not check.
+    func sendEmailCode(to email: String, captchaToken: String?,
+                       replacingAnonymous: Bool = false) async throws {
+        guard let client else { throw SignInError.unavailable }
+        guard let address = EmailAddress.normalized(email) else { throw SignInError.invalidEmail }
+        let addsToAccount = !replacingAnonymous && isAnonymousSignedIn
+        do {
+            if addsToAccount {
+                try await client.auth.update(user: UserAttributes(email: address))
+            } else {
+                try await client.auth.signInWithOTP(email: address, shouldCreateUser: true,
+                                                    captchaToken: captchaToken)
+            }
+            pendingEmail = (address, addsToAccount)
+        } catch {
+            throw SignInError.from(error)
+        }
+    }
+
+    /// Checks the code `sendEmailCode` sent, and signs in with it.
+    func verifyEmailCode(_ code: String) async throws {
+        guard let pending = pendingEmail else { throw SignInError.codeRejected }
+        let token = code.filter(\.isNumber)
+        guard token.count == 6 else { throw SignInError.codeRejected }
+        try await establish(replacingAnonymous: !pending.addsToAccount) { client, _ in
+            let response = try await client.auth.verifyOTP(
+                email: pending.address, token: token,
+                type: pending.addsToAccount ? .emailChange : .email)
+            if case .session(let session) = response { return session }
+            // Confirming an added address can answer with the user alone; the
+            // session is the same one, renewed so it carries the address.
+            return try await client.auth.refreshSession()
+        }
+        pendingEmail = nil
+    }
+
+    private var isAnonymousSignedIn: Bool {
+        if case .signedIn(_, true) = state { return true }
+        return false
+    }
+
+    /// The checks every sign-in shares, around the request that signs in.
+    ///
+    /// The storage checks are the ones anonymous creation had: the SDK can
+    /// swallow a failed Keychain write and report success, which would leave
+    /// the student signed in for this launch only and lose the account at the
+    /// next. A sign-in that did not land in storage is not a sign-in.
+    ///
+    /// - Parameters:
+    ///   - replacingAnonymous: sign in to another account even though an
+    ///     anonymous one is signed in here, instead of adding to it.
+    ///   - obtain: the request. Its second argument says whether it should
+    ///     add the new way in to the anonymous account signed in now.
+    private func establish(replacingAnonymous: Bool = false,
+                           _ obtain: (SupabaseClient, _ addsToAccount: Bool) async throws -> Session) async throws {
+        guard let client else { throw SignInError.unavailable }
+        if case .signedIn(_, false) = state { return }
+        let addsToAccount = !replacingAnonymous && isAnonymousSignedIn
         do {
             try storage.beginAttempt()
             try storage.checkWritable()
-            // A retry after temporarily unavailable storage must restore first.
-            let current = client.auth.currentSession
-            let recoveryToken = try storage.recoveryRefreshToken()
-            if current != nil || (recoveryToken != nil && state != .needsAccount) {
-                try storage.checkHealth()
-                let (existing, _) = try await Self.validatedSession(client, storage: storage)
-                try storage.checkHealth()
-                state = .signedIn(userID: existing.user.id, isAnonymous: existing.user.isAnonymous)
-                return true
-            }
             try storage.checkHealth()
-            let session = try await client.auth.signInAnonymously(captchaToken: captchaToken)
+            let session = try await obtain(client, addsToAccount)
             try storage.checkHealth()
             guard client.auth.currentSession?.user.id == session.user.id else {
                 throw SessionStorageUnavailable()
             }
             try storage.checkHealth()
-            state = .signedIn(userID: session.user.id,
-                              isAnonymous: session.user.isAnonymous)
-            return true
+            credentialRejected = false
+            awaitingRenewal = false
+            arrival = .signedIn
+            adopt(session.user)
         } catch {
-            if error is AccountUnreachable {
-                credentialRejected = true
-                state = .needsAccount
-            } else {
-                state = .failed(Self.describe(error))
-            }
-            return false
+            throw SignInError.from(error)
         }
+    }
+
+    /// Signs out on this phone only. Never for an anonymous account, which
+    /// has no way back in: the screens offer saving it instead.
+    func signOut() async throws {
+        guard signInMethod != .anonymous else { throw SignInError.other }
+        try storage.beginAttempt()
+        if let client {
+            do {
+                try await client.auth.signOut(scope: .local)
+            } catch {
+                // The SDK clears local credentials before its logout request;
+                // a phone that cannot reach the server is still signed out.
+                guard client.auth.currentSession == nil else { throw error }
+            }
+        }
+        try storage.checkHealth()
+        try storage.clearRecovery()
+        awaitingRenewal = false
+        signedOut(as: .needsAccount)
+    }
+
+    /// Stops counting the account's tasks on the server as active, because
+    /// they are not on this phone: after signing in on a new phone, or after
+    /// another account's tasks were removed from this one. The free plan caps
+    /// active tasks on the server, and without this a student could be at
+    /// "5 of 5" with nothing on screen.
+    func releaseServerTasks() async throws {
+        guard let client else { throw Backend.ConfigError.missing("Supabase") }
+        try await Self.release(client, storage: storage)
+    }
+
+    private nonisolated static func release(_ client: SupabaseClient, storage: ResilientAuthStorage) async throws {
+        _ = try await validatedSession(client, storage: storage)
+        try await client.rpc("release_my_active_assignments").execute()
     }
 
     /// Asks the server something that changes nothing, before anything that
@@ -296,27 +447,53 @@ final class SessionService {
         try storage.checkHealth()
     }
 
-    func deleteRemoteAccount() async throws {
+    /// - Parameter appleAuthorizationCode: a fresh code from Apple, needed
+    ///   when the account uses Sign in with Apple: the server trades it for a
+    ///   token and revokes that, as Apple requires on deletion.
+    func deleteRemoteAccount(appleAuthorizationCode: String? = nil) async throws {
         guard let client else { throw Backend.ConfigError.missing("Supabase") }
         try storage.beginAttempt()
         // The SDK may turn a failed storage read into an absent session. Probe
         // it before entering the request so that absence cannot confirm deletion.
         _ = client.auth.currentSession
         try storage.checkHealth()
-        try await Self.requestDeletion(client, storage: storage)
+        try await Self.requestDeletion(client, storage: storage, appleAuthorizationCode: appleAuthorizationCode)
     }
 
     /// The request, outside the main actor for the reason `PlanReader` gives:
-    /// `PostgrestResponse` is not Sendable, so awaiting `execute()` from this
-    /// actor-isolated class sends it across an isolation boundary, which
-    /// Xcode 16.4 rejects and Xcode 26 allows. Here the response is consumed
-    /// where it is produced, and only success or an error comes back.
-    private nonisolated static func requestDeletion(_ client: SupabaseClient, storage: ResilientAuthStorage) async throws {
-        // The SDK's RPC adapter suppresses refresh errors. Resolve credentials
-        // explicitly so a temporary refresh failure cannot become proof of loss.
+    /// a response that is not Sendable must not cross an isolation boundary,
+    /// which Xcode 16.4 rejects and Xcode 26 allows. Here the response is
+    /// consumed where it is produced, and only success or an error comes back.
+    private nonisolated static func requestDeletion(_ client: SupabaseClient, storage: ResilientAuthStorage,
+                                                    appleAuthorizationCode: String?) async throws {
+        // Resolve credentials explicitly so a temporary refresh failure cannot
+        // become proof of loss.
         _ = try await validatedSession(client, storage: storage)
-        try await client.rpc("delete_my_account").execute()
+        do {
+            try await client.functions.invoke(
+                "delete-account",
+                options: FunctionInvokeOptions(body: DeletionRequest(appleAuthorizationCode: appleAuthorizationCode)))
+        } catch FunctionsError.httpError(let status, let data) {
+            // Each of these is the server saying it deleted nothing, so the
+            // phone can say so too and keep everything.
+            let code = (try? JSONDecoder().decode(DeletionRefusal.Body.self, from: data))?.error
+            switch (status, code) {
+            case (428, "APPLE_REAUTH_REQUIRED"): throw DeletionRefusal.needsApple
+            case (400, "APPLE_CODE_INVALID"): throw DeletionRefusal.appleCodeInvalid
+            case (400, "APPLE_ACCOUNT_MISMATCH"): throw DeletionRefusal.differentAppleID
+            default: throw FunctionsError.httpError(code: status, data: data)
+            }
+        }
         try storage.checkHealth()
+    }
+
+    private struct DeletionRequest: Encodable, Sendable {
+        let appleAuthorizationCode: String?
+        enum CodingKeys: String, CodingKey { case appleAuthorizationCode = "apple_authorization_code" }
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeIfPresent(appleAuthorizationCode, forKey: .appleAuthorizationCode)
+        }
     }
 
     /// The session to act with, and whether the server renewed it to get it.
@@ -358,13 +535,28 @@ final class SessionService {
         try storage.checkHealth()
         try storage.clearRecovery()
         awaitingRenewal = false
-        state = .needsAccount
+        signedOut(as: .needsAccount)
     }
 
-    private static func describe(_ error: Error) -> String {
-        if let urlError = error as? URLError, urlError.code == .notConnectedToInternet {
-            return "No connection."
+}
+
+/// The server refused a deletion before deleting anything. Safe to tell the
+/// student plainly, and nothing on the phone needs to change.
+enum DeletionRefusal: Error, Equatable {
+    /// The account uses Sign in with Apple and Apple has to confirm first.
+    case needsApple
+    /// Apple's code was too old or already used.
+    case appleCodeInvalid
+    /// Apple confirmed a different Apple ID from the account's.
+    case differentAppleID
+
+    struct Body: Decodable { let error: String }
+
+    var message: String {
+        switch self {
+        case .needsApple: "To delete an account that uses Sign in with Apple, confirm with Apple first."
+        case .appleCodeInvalid: "Apple couldn't confirm it's you. Try again."
+        case .differentAppleID: "That Apple ID isn't the one this account uses. Try again with the Apple ID you sign in with."
         }
-        return error.localizedDescription
     }
 }

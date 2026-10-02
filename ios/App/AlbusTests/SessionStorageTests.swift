@@ -138,7 +138,7 @@ struct SessionStorageTests {
     func swallowedWrite() async {
         let storage = ResilientAuthStorage(fallback: isolated(), keychain: MemoryKeychain(failure: .authWrite))
         let session = SessionService(client: Self.client(storage), storage: storage)
-        #expect(await session.createAccount() == false)
+        await #expect(throws: SignInError.storage) { try await session.signInWithApple(idToken: "unit-id-token", nonce: "unit-nonce") }
         #expect(session.userID == nil)
     }
 
@@ -156,16 +156,17 @@ struct SessionStorageTests {
         let deletion = AccountDeletion(defaults: defaults)
         deletion.adoptLostDeletion(credentialRejected: session.credentialRejected)
         #expect(deletion.requiresCleanup)
-        #expect(await session.createAccount() == false)
+        await #expect(throws: SignInError.self) { try await session.signInWithApple(idToken: "unit-id-token", nonce: "unit-nonce") }
         #expect(session.userID == nil)
     }
 
-    @MainActor @Test("normal creation and restore keep the same account")
-    func sdkRoundTrip() async {
+    @MainActor @Test("a sign-in and the next launch's restore keep the same account")
+    func sdkRoundTrip() async throws {
         let storage = ResilientAuthStorage(fallback: isolated(), keychain: MemoryKeychain())
         let client = Self.client(storage)
         let session = SessionService(client: client, storage: storage)
-        #expect(await session.createAccount())
+        try await session.signInWithApple(idToken: "unit-id-token", nonce: "unit-nonce")
+        #expect(session.arrival == .signedIn)
         let restored = SessionService(client: Self.client(storage), storage: storage)
         await restored.start()
         #expect(restored.userID == session.userID)
@@ -197,7 +198,7 @@ struct SessionStorageTests {
         try await session.deleteRemoteAccount()
     }
 
-    @MainActor @Test("creation retries validate an expired stored session")
+    @MainActor @Test("a sign-in the server refuses leaves no account behind an expired one")
     func expiredCreationRetry() async throws {
         let keychain = MemoryKeychain()
         var payload = try #require(JSONSerialization.jsonObject(with: SessionTestTransport.sessionData) as? [String: Any])
@@ -205,7 +206,7 @@ struct SessionStorageTests {
         try keychain.store(key: "sb-session-unit-auth-token", value: JSONSerialization.data(withJSONObject: payload))
         let storage = ResilientAuthStorage(fallback: isolated(), keychain: keychain)
         let session = SessionService(client: Self.client(storage, transport: RejectedRefreshTransport.self), storage: storage)
-        #expect(await session.createAccount() == false)
+        await #expect(throws: SignInError.self) { try await session.signInWithApple(idToken: "unit-id-token", nonce: "unit-nonce") }
         #expect(session.userID == nil)
     }
 
@@ -230,8 +231,9 @@ struct SessionStorageTests {
         deletion.adoptLostDeletion(credentialRejected: session.credentialRejected)
         #expect(!deletion.requiresCleanup)
         #expect(client.auth.currentSession != nil)
-        // Never a replacement account: creation keeps the one on screen.
-        #expect(await session.createAccount())
+        // Never a replacement account: a sign-in that cannot reach the
+        // server keeps the one on screen.
+        await #expect(throws: SignInError.self) { try await session.signInWithApple(idToken: "unit-id-token", nonce: "unit-nonce") }
         #expect(session.userID == Self.storedUserID)
         do {
             try await session.deleteRemoteAccount()
@@ -537,7 +539,7 @@ struct SessionStorageTests {
                                           clearLocal: { cleared = true }, signOut: {})
 
         let asked = RevokedSessionTransport.paths.all
-        #expect(asked.contains { $0.hasSuffix("/rest/v1/rpc/delete_my_account") }, "the deletion was sent")
+        #expect(asked.contains { $0.hasSuffix("/functions/v1/delete-account") }, "the deletion was sent")
         #expect(!asked.contains { $0.hasSuffix("/auth/v1/token") })
         #expect(done && cleared)
     }
@@ -914,8 +916,8 @@ private final class RevokedSessionTransport: URLProtocol, @unchecked Sendable {
         Self.paths.add(path)
         if path.hasSuffix("/auth/v1/token") {
             respond(status: 400, body: #"{"error_code":"refresh_token_not_found","msg":"Revoked"}"#)
-        } else if path.hasSuffix("/rpc/delete_my_account") {
-            respond(status: 204, body: "")
+        } else if path.hasSuffix("/functions/v1/delete-account") {
+            respond(status: 200, body: #"{"deleted":true,"apple_revoked":false}"#)
         } else {
             respond(status: 200, body: "[]")
         }

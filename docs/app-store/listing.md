@@ -39,10 +39,9 @@ KEEP YOUR MARK SCHEMES CLOSE
 Save your own rubrics and mark schemes for later reference. Browse a searchable
 collection of study tools, with links that open in Safari when you choose them.
 
-START WITHOUT A PASSWORD
-Albus creates an anonymous account during setup. No email address or password is
-required. Your local plans remain available offline; online features need a
-connection.
+NO PASSWORD TO REMEMBER
+Sign in with Apple, or with a code sent to your email. Your plans live on your
+phone and stay available offline; online features need a connection.
 
 Albus helps you plan your work. It does not guarantee grades or that every workload
 will fit the time available.
@@ -60,10 +59,13 @@ pretend that dependency is already complete.
 
 ## App Review notes — paste only after release gates pass
 
-Albus is a study planner. It uses anonymous accounts: no email, password or demo
-login is required. On first launch, choose your study preferences, add the first
-deadline and finish onboarding. The app creates its anonymous account at that
-point. If a CAPTCHA is configured, complete the displayed challenge.
+Albus is a study planner. On first launch, sign in with **Sign in with Apple**
+(the reviewer's own Apple ID works; no demo account is needed) or with a 6-digit
+code sent to any email address you can read. Then choose your study preferences,
+add the first deadline and finish onboarding. If a CAPTCHA is configured, the
+email route may show a challenge. Settings → Account shows how you signed in and
+signs out; Settings → Delete account deletes the account (an Apple account asks
+Apple to confirm first, and Albus revokes its Sign in with Apple token).
 
 Feature paths:
 
@@ -82,7 +84,7 @@ Feature paths:
    marking. The extracted text is sent to the AI provider; grades are guidance.
 7. **Subscription review, once payments/app is merged:** use Apple's sandbox
    purchase environment with a sandbox Apple account. The Apple account is for
-   the purchase only; Albus still uses anonymous authentication. Verify Settings
+   the purchase only; signing in to Albus is separate. Verify Settings
    → Restore purchases and Manage subscription. Do not supply a production
    customer account or expect a production charge.
 8. **Account deletion (requires the owner's deployed migration):** Settings → Delete
