@@ -113,8 +113,8 @@ multi-connection attack suites documented there.
 
 ## Before launch
 
-- [ ] Configure Turnstile keys and enable CAPTCHA on client and server together.
-- [ ] Sign in with Apple, once the Developer account is configured
+- [ ] Sign in with Apple, once the Developer account is configured (the only
+      sign-in; no CAPTCHA is needed, as GoTrue never asks for one on Apple's sign-in)
 - [x] ~~Schedule `reap_abandoned_anonymous_users`~~ — running daily at 04:17
 - [x] Schedule privacy/security-data retention — running daily at 04:43
 - [ ] Rotate the Anthropic key and configure the signal pepper

@@ -10,19 +10,18 @@ struct AccountUnreachable: Error {}
 
 /// Restores the account this phone holds, and signs students in.
 ///
-/// Students sign in before anything else, with Apple or with a code sent by
-/// email (the owner's decision, 2 Oct 2026). Accounts made before that were
-/// anonymous; they still open, and keep their data when Apple or an email is
-/// added to them. The session must stay durable either way: it is what the
-/// phone's plans and the free allowance belong to.
+/// Students sign in before anything else (the owner's decision, 2 Oct 2026),
+/// with Sign in with Apple only (6 Oct 2026). Accounts made before that were
+/// anonymous; they still open, and keep their data when Apple is added to
+/// them. The session must stay durable either way: it is what the phone's
+/// plans and the free allowance belong to.
 @Observable
 @MainActor
 final class SessionService {
 
     enum State: Equatable {
         case starting
-        /// No stored session. Onboarding runs and creates the account at the
-        /// end, which is the only point a CAPTCHA challenge can be presented.
+        /// No stored session: the sign-in screen shows.
         case needsAccount
         case signedIn(userID: UUID, isAnonymous: Bool)
         case failed(String)
@@ -64,8 +63,7 @@ final class SessionService {
     /// How the signed-in account signs in. Nil when signed out.
     enum SignInMethod: Equatable {
         case apple
-        case email(String)
-        /// Made before sign-in existed. Adding Apple or an email saves it.
+        /// Made before sign-in existed. Adding Apple saves it.
         case anonymous
         /// Signed in, but the session does not say how.
         case other
@@ -81,11 +79,6 @@ final class SessionService {
     /// Apple's identifier for the student, to ask Apple whether they have
     /// since stopped using Sign in with Apple for Albus.
     private(set) var appleUserID: String?
-
-    /// The address an email code was last sent to by `sendEmailCode`, and
-    /// whether that code adds the address to an anonymous account rather than
-    /// signing in.
-    private var pendingEmail: (address: String, addsToAccount: Bool)?
 
     /// The account once the server has confirmed its pass. Whatever acts for
     /// the account beyond this phone, such as the App Store's purchase
@@ -108,10 +101,9 @@ final class SessionService {
     /// caller a clean quota, which is exactly the abuse the Keychain-backed
     /// session exists to prevent.
     ///
-    /// Creation is a separate, explicit step (`createAccount`) because it is
-    /// the only moment a CAPTCHA challenge can be attached. Creating an account
-    /// silently at launch, as this used to, is precisely what makes account
-    /// farming a one-line script.
+    /// Signing in is a separate, explicit step, on the sign-in screen.
+    /// Creating an account silently at launch, as this once did, is precisely
+    /// what makes account farming a one-line script.
     ///
     /// - Parameter opensEarly: false while a deletion the student asked for is
     ///   unanswered. Its account may already be gone, so launch asks the server,
@@ -131,7 +123,7 @@ final class SessionService {
                 userID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
                 isAnonymous: false
             )
-            signInMethod = .email("student@example.com")
+            signInMethod = .apple
             return
         }
         // The sign-in screen, whatever this simulator's Keychain holds.
@@ -260,14 +252,12 @@ final class SessionService {
         state = newState
         signInMethod = nil
         appleUserID = nil
-        pendingEmail = nil
     }
 
     static func method(of user: User) -> SignInMethod {
         if user.isAnonymous { return .anonymous }
         let providers = Set((user.identities ?? []).map(\.provider))
         if providers.contains("apple") { return .apple }
-        if let email = user.email, !email.isEmpty { return .email(email) }
         return .other
     }
 
@@ -299,48 +289,6 @@ final class SessionService {
             try await client.auth.signInWithIdToken(
                 credentials: OpenIDConnectCredentials(provider: .apple, idToken: idToken, nonce: nonce))
         }
-    }
-
-    /// Sends a 6-digit code to `email`. Signing in with it makes the account
-    /// if there isn't one. For an account made before sign-in existed, the
-    /// code instead confirms the address being added to it.
-    ///
-    /// - Parameter captchaToken: the Turnstile pass, required by the server
-    ///   once CAPTCHA is on. Ignored when adding an address, which the server
-    ///   does not check.
-    func sendEmailCode(to email: String, captchaToken: String?,
-                       replacingAnonymous: Bool = false) async throws {
-        guard let client else { throw SignInError.unavailable }
-        guard let address = EmailAddress.normalized(email) else { throw SignInError.invalidEmail }
-        let addsToAccount = !replacingAnonymous && isAnonymousSignedIn
-        do {
-            if addsToAccount {
-                try await client.auth.update(user: UserAttributes(email: address))
-            } else {
-                try await client.auth.signInWithOTP(email: address, shouldCreateUser: true,
-                                                    captchaToken: captchaToken)
-            }
-            pendingEmail = (address, addsToAccount)
-        } catch {
-            throw SignInError.from(error)
-        }
-    }
-
-    /// Checks the code `sendEmailCode` sent, and signs in with it.
-    func verifyEmailCode(_ code: String) async throws {
-        guard let pending = pendingEmail else { throw SignInError.codeRejected }
-        let token = code.filter(\.isNumber)
-        guard token.count == 6 else { throw SignInError.codeRejected }
-        try await establish(replacingAnonymous: !pending.addsToAccount) { client, _ in
-            let response = try await client.auth.verifyOTP(
-                email: pending.address, token: token,
-                type: pending.addsToAccount ? .emailChange : .email)
-            if case .session(let session) = response { return session }
-            // Confirming an added address can answer with the user alone; the
-            // session is the same one, renewed so it carries the address.
-            return try await client.auth.refreshSession()
-        }
-        pendingEmail = nil
     }
 
     private var isAnonymousSignedIn: Bool {

@@ -38,24 +38,30 @@ struct ServerTaskCountTests {
 
     // MARK: - Finishing
 
-    @Test("finishing the last step of a task the server knows signals once; undoing does not")
-    func finishingSignals() throws {
+    @Test("every way a task finishes or opens again is reported, once each")
+    func statusChangesSignal() throws {
         let context = try store()
         let coordinator = PlanCoordinator(plans: PlanService(client: nil), assignments: AssignmentService(client: nil))
         let known = task(context, remoteID: UUID(), status: .active, steps: 2)
         let steps = known.subtasks.sorted { $0.ordinal < $1.ordinal }
 
         coordinator.setCompleted(steps[0], true, context: context)
-        #expect(coordinator.finishedOnPhone == 0, "one step done is not a finished task")
+        #expect(coordinator.statusChangesOnPhone == 0, "one step done is not a finished task")
         coordinator.setCompleted(steps[1], true, context: context)
-        #expect(coordinator.finishedOnPhone == 1)
+        #expect(coordinator.statusChangesOnPhone == 1, "finished")
         #expect(known.statusValue == .completed)
         coordinator.setCompleted(steps[1], false, context: context)
-        #expect(coordinator.finishedOnPhone == 1, "reopening is not reported")
+        #expect(coordinator.statusChangesOnPhone == 2, "opened again by undoing a step")
+        #expect(known.statusValue == .active)
+        coordinator.deleteStep(steps[1], context: context)
+        #expect(coordinator.statusChangesOnPhone == 3, "finished by deleting the step that was still open")
+        #expect(known.statusValue == .completed)
+        coordinator.addStep(to: known, title: "One more", minutes: 20, context: context)
+        #expect(coordinator.statusChangesOnPhone == 4, "opened again by a new step")
 
         let unsent = task(context, remoteID: nil, status: .active, steps: 1)
         coordinator.setCompleted(unsent.subtasks[0], true, context: context)
-        #expect(coordinator.finishedOnPhone == 1, "the server has no copy of it to close")
+        #expect(coordinator.statusChangesOnPhone == 4, "the server has no copy of it to change")
     }
 
     @Test("the phone reports only its own finished and open tasks, the most recent first")
@@ -90,24 +96,25 @@ struct ServerTaskCountTests {
 
     // MARK: - The server calls
 
-    @Test("finished tasks are sent by id, an empty list sends nothing, and a failure is reported as nil")
-    func finishCall() async throws {
+    @Test("the phone's finished and open tasks are sent by id; nothing to send sends nothing; a failure is nil")
+    func syncCall() async throws {
         let server = TaskServer()
-        server.answer("finish_my_assignments", status: 200, body: "2")
+        server.answer("sync_my_assignments", status: 200, body: "2")
         let service = AssignmentService(client: server.client)
-        let ids = [UUID(), UUID()]
+        let finished = [UUID(), UUID()], open = [UUID()]
 
-        #expect(await service.finish(remoteIDs: ids) == 2)
+        #expect(await service.sync(finished: finished, open: open) == 2)
         let call = try #require(server.calls.first)
-        #expect(call.path == "/rest/v1/rpc/finish_my_assignments")
+        #expect(call.path == "/rest/v1/rpc/sync_my_assignments")
         #expect(call.method == "POST")
-        #expect(call.list("p_ids") == ids.map { $0.uuidString.lowercased() })
+        #expect(call.list("p_finished") == finished.map { $0.uuidString.lowercased() })
+        #expect(call.list("p_open") == open.map { $0.uuidString.lowercased() })
 
-        #expect(await service.finish(remoteIDs: []) == 0)
+        #expect(await service.sync(finished: [], open: []) == 0)
         #expect(server.calls.count == 1, "nothing to send, nothing sent")
 
-        server.answer("finish_my_assignments", status: 500, body: #"{"message":"down"}"#)
-        #expect(await service.finish(remoteIDs: ids) == nil)
+        server.answer("sync_my_assignments", status: 500, body: #"{"message":"down"}"#)
+        #expect(await service.sync(finished: finished, open: open) == nil)
     }
 
     @Test("freeing other tasks keeps this phone's open ones, and a failure throws")
@@ -129,13 +136,14 @@ struct ServerTaskCountTests {
         await #expect(throws: (any Error).self) { try await service.releaseOthers(keeping: keep) }
     }
 
-    @Test("the finished tasks reach the server before the plan is read, and the count is settling until then")
+    @Test("the phone's tasks reach the server before the plan is read, and the count is settling until then")
     func syncOrder() async throws {
         let context = try store()
-        let finished = UUID()
+        let finished = UUID(), open = UUID()
         task(context, remoteID: finished, status: .completed)
+        task(context, remoteID: open, status: .active)
         let server = TaskServer()
-        server.answer("finish_my_assignments", status: 200, body: "1")
+        server.answer("sync_my_assignments", status: 200, body: "1")
         let coordinator = PlanCoordinator(plans: PlanService(client: nil),
                                           assignments: AssignmentService(client: server.client))
         var settlingDuringRefresh = false
@@ -147,7 +155,8 @@ struct ServerTaskCountTests {
         }
 
         #expect(callsBeforeRefresh == 1)
-        #expect(server.calls.first?.list("p_ids") == [finished.uuidString.lowercased()])
+        #expect(server.calls.first?.list("p_finished") == [finished.uuidString.lowercased()])
+        #expect(server.calls.first?.list("p_open") == [open.uuidString.lowercased()])
         #expect(settlingDuringRefresh, "the banner holds off until the plan is read back")
         #expect(!coordinator.serverCountSettling)
     }

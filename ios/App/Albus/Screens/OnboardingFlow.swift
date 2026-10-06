@@ -4,8 +4,7 @@ import AlbusCore
 
 /// After signing in: three questions, one deadline, a plan.
 ///
-/// The account already exists by now: `SignInScreen` makes it, and carries
-/// the CAPTCHA where one is needed.
+/// The account already exists by now: `SignInScreen` makes it.
 struct OnboardingFlow: View {
     @Environment(\.modelContext) private var context
     @Environment(PlanCoordinator.self) private var coordinator

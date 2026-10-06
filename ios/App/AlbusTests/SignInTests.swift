@@ -82,132 +82,6 @@ struct SignInTests {
         #expect(session.userID == Fixture.appleUserID)
     }
 
-    // MARK: - Email
-
-    @Test("an email code is requested with the pass, then verified, and the account says the address")
-    func emailCode() async throws {
-        let server = Server()
-        server.on("/auth/v1/otp") { _ in .ok("{}") }
-        server.on("/auth/v1/verify") { _ in .ok(Fixture.session(user: Fixture.emailUser)) }
-        let session = server.sessionService()
-
-        try await session.sendEmailCode(to: "  Student@Example.COM ", captchaToken: "turnstile-pass")
-        try await session.verifyEmailCode("123 456")
-
-        let otp = try #require(server.requests.first { $0.path == "/auth/v1/otp" })
-        #expect(otp.json["email"] as? String == "student@example.com")
-        #expect(otp.json["create_user"] as? Bool == true)
-        let security = otp.json["gotrue_meta_security"] as? [String: Any]
-        #expect(security?["captcha_token"] as? String == "turnstile-pass")
-        let verify = try #require(server.requests.first { $0.path == "/auth/v1/verify" })
-        #expect(verify.json["type"] as? String == "email")
-        #expect(verify.json["token"] as? String == "123456")
-        #expect(verify.json["email"] as? String == "student@example.com")
-        #expect(session.signInMethod == .email("student@example.com"))
-        #expect(session.state == .signedIn(userID: Fixture.emailUserID, isAnonymous: false))
-    }
-
-    @Test("an address that can't be one is refused before anything is sent")
-    func invalidEmail() async {
-        let server = Server()
-        let session = server.sessionService()
-        for typed in ["", "student", "@example.com", "student@", "student@example", "a b@example.com", "a@b@c.com"] {
-            await #expect(throws: SignInError.invalidEmail) {
-                try await session.sendEmailCode(to: typed, captchaToken: nil)
-            }
-        }
-        #expect(server.requests.isEmpty)
-    }
-
-    @Test("a wrong or expired code says so, and keeps the address for another try")
-    func codeRejected() async throws {
-        let server = Server()
-        server.on("/auth/v1/otp") { _ in .ok("{}") }
-        server.on("/auth/v1/verify") { _ in .error(403, code: "otp_expired") }
-        let session = server.sessionService()
-        try await session.sendEmailCode(to: "student@example.com", captchaToken: nil)
-
-        await #expect(throws: SignInError.codeRejected) { try await session.verifyEmailCode("000000") }
-        await #expect(throws: SignInError.codeRejected) { try await session.verifyEmailCode("12345") }
-        #expect(session.userID == nil)
-        #expect(server.requests.filter { $0.path == "/auth/v1/verify" }.count == 1,
-                "five digits never reach the server")
-    }
-
-    @Test("a code before any was sent is refused without a request")
-    func codeWithoutRequest() async {
-        let server = Server()
-        let session = server.sessionService()
-        await #expect(throws: SignInError.codeRejected) { try await session.verifyEmailCode("123456") }
-        #expect(server.requests.isEmpty)
-    }
-
-    @Test("too many code requests say to wait")
-    func rateLimited() async {
-        let server = Server()
-        server.on("/auth/v1/otp") { _ in .error(429, code: "over_email_send_rate_limit") }
-        let session = server.sessionService()
-        await #expect(throws: SignInError.tooManyRequests) {
-            try await session.sendEmailCode(to: "student@example.com", captchaToken: nil)
-        }
-    }
-
-    @Test("an account made before sign-in adds an email with an email-change code")
-    func emailLinksAnonymousAccount() async throws {
-        let server = Server()
-        server.on("/auth/v1/user") { _ in
-            .ok(Fixture.user(id: Fixture.anonymousUserID, anonymous: true, identities: []))
-        }
-        server.on("/auth/v1/verify") { _ in
-            .ok(Fixture.session(user: Fixture.user(id: Fixture.anonymousUserID, anonymous: false,
-                                                  email: "student@example.com",
-                                                  identities: [Fixture.emailIdentity(userID: Fixture.anonymousUserID)])))
-        }
-        let session = try server.sessionService(stored: Fixture.session(user: Fixture.anonymousUser))
-        await session.start()
-
-        try await session.sendEmailCode(to: "student@example.com", captchaToken: nil)
-        try await session.verifyEmailCode("654321")
-
-        let update = try #require(server.requests.first { $0.path == "/auth/v1/user" })
-        #expect(update.method == "PUT")
-        #expect(update.json["email"] as? String == "student@example.com")
-        #expect(!server.requests.contains { $0.path == "/auth/v1/otp" }, "no new account is asked for")
-        let verify = try #require(server.requests.first { $0.path == "/auth/v1/verify" })
-        #expect(verify.json["type"] as? String == "email_change")
-        #expect(session.userID == Fixture.anonymousUserID)
-        #expect(session.signInMethod == .email("student@example.com"))
-    }
-
-    @Test("an email with its own account is reported when adding it")
-    func emailInUse() async throws {
-        let server = Server()
-        server.on("/auth/v1/user") { _ in .error(422, code: "email_exists") }
-        let session = try server.sessionService(stored: Fixture.session(user: Fixture.anonymousUser))
-        await session.start()
-        await #expect(throws: SignInError.emailInUse) {
-            try await session.sendEmailCode(to: "student@example.com", captchaToken: nil)
-        }
-        #expect(session.signInMethod == .anonymous)
-    }
-
-    @Test("switching to an email's own account asks for a sign-in code, not an email change")
-    func switchToEmail() async throws {
-        let server = Server()
-        server.on("/auth/v1/otp") { _ in .ok("{}") }
-        server.on("/auth/v1/verify") { _ in .ok(Fixture.session(user: Fixture.emailUser)) }
-        let session = try server.sessionService(stored: Fixture.session(user: Fixture.anonymousUser))
-        await session.start()
-
-        try await session.sendEmailCode(to: "student@example.com", captchaToken: "pass", replacingAnonymous: true)
-        try await session.verifyEmailCode("123456")
-
-        #expect(!server.requests.contains { $0.path == "/auth/v1/user" })
-        let verify = try #require(server.requests.first { $0.path == "/auth/v1/verify" })
-        #expect(verify.json["type"] as? String == "email")
-        #expect(session.userID == Fixture.emailUserID)
-    }
-
     // MARK: - Signing out
 
     @Test("signing out leaves the phone signed out, with no pass to restore")
@@ -316,24 +190,42 @@ struct SignInTests {
                  underlyingResponse: HTTPURLResponse(url: URL(string: "https://x.invalid")!, statusCode: 400,
                                                      httpVersion: nil, headerFields: nil)!)
         }
-        #expect(SignInError.from(api("otp_expired")) == .codeRejected)
-        #expect(SignInError.from(api("over_email_send_rate_limit")) == .tooManyRequests)
         #expect(SignInError.from(api("over_request_rate_limit")) == .tooManyRequests)
         #expect(SignInError.from(api("identity_already_exists")) == .appleIDInUse)
-        #expect(SignInError.from(api("email_exists")) == .emailInUse)
-        #expect(SignInError.from(api("captcha_failed")) == .checkFailed)
-        #expect(SignInError.from(api("email_address_invalid")) == .invalidEmail)
+        #expect(SignInError.from(api("email_exists")) == .appleIDInUse,
+                "linking can meet the Apple ID's email on another account")
         #expect(SignInError.from(api("signup_disabled")) == .unavailable)
+        #expect(SignInError.from(api("provider_disabled")) == .unavailable)
+        #expect(SignInError.from(api("otp_expired")) == .other, "no codes any more")
         #expect(SignInError.from(api("something_new")) == .other)
         #expect(SignInError.from(URLError(.notConnectedToInternet)) == .offline)
         #expect(SignInError.from(SessionStorageUnavailable()) == .storage)
-        for error in [SignInError.offline, .invalidEmail, .codeRejected, .tooManyRequests, .appleIDInUse,
-                      .emailInUse, .checkFailed, .unavailable, .storage, .other] {
+        for error in [SignInError.offline, .tooManyRequests, .appleIDInUse, .unavailable, .storage, .other] {
             let message = error.message ?? ""
             #expect(!message.isEmpty)
             #expect(!message.contains("server text"))
         }
         #expect(SignInError.cancelled.message == nil, "cancelling says nothing")
+    }
+
+    /// The account is made on the sign-in screen, so the age rule and the
+    /// terms are stated there. The sentence ends in the two pages, which are
+    /// buttons; `LegalLinkDestinationsUITests` checks where each one goes.
+    @Test("the sign-in screen states the age rule and the terms")
+    func signInStatesTheTermsAndAge() {
+        let text = SignInScreen.agreement
+        #expect(text.contains("13 or older"))
+        #expect(text.contains("under 16"))
+        #expect(text.hasSuffix("you accept"))
+    }
+
+    @Test("an account with no Apple identity is not called Apple")
+    func methodWithoutApple() async throws {
+        let server = Server()
+        let session = try server.sessionService(stored: Fixture.session(user: Fixture.emailUser))
+        await session.start()
+        #expect(session.userID == Fixture.emailUserID)
+        #expect(session.signInMethod == .other)
     }
 
     @Test("each Apple attempt gets its own nonce, and its hash is SHA-256 hex")

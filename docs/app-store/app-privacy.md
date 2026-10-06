@@ -25,7 +25,7 @@ security and subscription access. Do not select advertising/marketing purposes.
 | Apple data type | Collected? | Evidence / scope |
 | --- | --- | --- |
 | Name | No | `OnboardingFlow.swift` stores the optional display name in `Preferences.swift` on the device. `ProfileService.swift` sends subject names, not the student's name. A `profiles.display_name` column alone is not evidence of collection by this client. |
-| Email Address | Yes | Since 2 Oct 2026 students sign in with a 6-digit code sent to their email (`SessionService.sendEmailCode`), or with Apple, which can share the address or a private relay address (`SignInScreen.swift` requests the `email` scope only). Stored by Supabase Auth with the account, and sent to the email provider to deliver the code. Used only to sign in. External support email is addressed separately below. |
+| Email Address | Yes | Since Oct 2026 students sign in with Apple only. Apple can share the address or a private relay address (`SignInScreen.swift` requests the `email` scope only, never the name). Stored by Supabase Auth with the account and used only to find the account when the student writes to support; Albus sends no email. External support email is addressed separately below. |
 | Phone Number | No | No phone field, telephony read or phone-auth flow in app sources. |
 | Physical Address | No | No address collection or shipping flow. |
 | Other User Contact Info | No | No social handle/contact field sent by the client. |
@@ -79,12 +79,9 @@ this task; none of its files were changed here.
 - Clarification: no third-party study-activity analytics SDK does **not** mean no
   Product Interaction data. AI request accounting is described by the policy and
   is disclosed here as functionality, not marketing analytics.
-- **Policy gap:** `CaptchaService.swift` can load Cloudflare Turnstile when a
-  release site key is configured. PR #6 does not name Cloudflare. Its placeholder
-  configuration disables the widget; the owner's real release settings were not
-  inspected. Before enabling it, name the provider and verify its data handling
-  against [Cloudflare's Turnstile privacy addendum](https://www.cloudflare.com/turnstile-privacy-policy/).
-  The addendum identifies IP address, TLS fingerprint, user agent and origin/site key as signals. Confirm the release integration and retention rather than assuming the widget is data-free.
+- **Cloudflare:** none. The Turnstile CAPTCHA client was removed in Oct 2026,
+  when sign-in became Apple only (GoTrue never asks for a CAPTCHA on an Apple
+  ID-token sign-in), so no build loads Cloudflare's script.
 - **Partner verification needed:** Supabase's auth/hosting logs may contain raw
   IP/request metadata beyond the app's hashed tables. The policy acknowledges
   provider logs, but their production configuration/retention was not inspected.

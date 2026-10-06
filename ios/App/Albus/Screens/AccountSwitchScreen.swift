@@ -61,11 +61,7 @@ struct AccountSwitchScreen: View {
     }
 
     private var who: String {
-        switch session.signInMethod {
-        case .email(let address): address
-        case .apple: "your Apple account"
-        default: "this account"
-        }
+        session.signInMethod == .apple ? "your Apple account" : "this account"
     }
 
     private func remove() async {

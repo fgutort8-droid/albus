@@ -6,20 +6,14 @@ import Supabase
 /// Why a sign-in did not go through, in the words the student sees.
 ///
 /// The SDK's errors are mapped once, here, so the screens never show a server
-/// message. GoTrue answers a wrong code and an expired one with the same
-/// `otp_expired`, so they share a message rather than guess which it was.
+/// message.
 enum SignInError: Error, Equatable {
     case cancelled
     case offline
-    case invalidEmail
-    case codeRejected
     case tooManyRequests
     /// Adding Apple to an account made before sign-in existed, when that Apple
     /// ID already has its own account.
     case appleIDInUse
-    /// The same, for an email address.
-    case emailInUse
-    case checkFailed
     case unavailable
     case storage
     case other
@@ -28,13 +22,9 @@ enum SignInError: Error, Equatable {
         switch self {
         case .cancelled: nil
         case .offline: "No connection. Check your internet and try again."
-        case .invalidEmail: "That doesn't look like an email address."
-        case .codeRejected: "That code didn't work or has expired. Check it, or send a new one."
         case .tooManyRequests: "Too many tries. Wait a minute, then try again."
         case .appleIDInUse: "This Apple ID already has an Albus account."
-        case .emailInUse: "This email already has an Albus account."
-        case .checkFailed: "The security check didn't go through. Try again."
-        case .unavailable: "This way of signing in isn't available right now. Try the other one, or try again later."
+        case .unavailable: "Sign in with Apple isn't available right now. Please try again later."
         case .storage: SessionStorageUnavailable().errorDescription
         case .other: "Couldn't sign in. Please try again."
         }
@@ -54,40 +44,15 @@ enum SignInError: Error, Equatable {
         }
         if let error = error as? ASAuthorizationError, error.code == .canceled { return .cancelled }
         if let error = error as? AuthError {
-            // Newer than this SDK's list of codes.
-            if error.errorCode.rawValue == "email_address_invalid" { return .invalidEmail }
             switch error.errorCode {
-            case .otpExpired, .invalidCredentials: return .codeRejected
-            case .overEmailSendRateLimit, .overRequestRateLimit: return .tooManyRequests
-            case .identityAlreadyExists: return .appleIDInUse
-            case .emailExists: return .emailInUse
-            case .captchaFailed: return .checkFailed
-            case .validationFailed: return .invalidEmail
-            case .signupDisabled, .providerDisabled, .emailProviderDisabled, .otpDisabled,
-                 .manualLinkingDisabled, .emailAddressNotAuthorized:
-                return .unavailable
+            case .overRequestRateLimit: return .tooManyRequests
+            // Linking can also meet the Apple ID's email on another account.
+            case .identityAlreadyExists, .emailExists: return .appleIDInUse
+            case .signupDisabled, .providerDisabled, .manualLinkingDisabled: return .unavailable
             default: return .other
             }
         }
         return .other
-    }
-}
-
-/// The address as typed, made fit to send: trimmed, lowercased, and only if it
-/// could be an address at all. The server is the real check; this only spares
-/// a request that cannot succeed.
-enum EmailAddress {
-    static func normalized(_ typed: String) -> String? {
-        let email = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard email.count <= 254,
-              let at = email.firstIndex(of: "@"),
-              at != email.startIndex,
-              email[email.index(after: at)...].contains("."),
-              !email.hasSuffix("."),
-              email.filter({ $0 == "@" }).count == 1,
-              !email.contains(where: \.isWhitespace)
-        else { return nil }
-        return email
     }
 }
 

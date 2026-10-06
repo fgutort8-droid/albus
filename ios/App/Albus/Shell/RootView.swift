@@ -18,6 +18,7 @@ struct RootView: View {
     @Environment(LocalAccount.self) private var localAccount
     @Environment(PlanCoordinator.self) private var coordinator
     @Environment(NotificationCoordinator.self) private var notifications
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -54,8 +55,16 @@ struct RootView: View {
             guard session.confirmedUserID != nil else { return }
             await syncServerTaskCount()
         }
-        // A task just finished: the server stops counting it as open.
-        .onChange(of: coordinator.finishedOnPhone) {
+        // A task finished, or opened again: the server's count of open
+        // tasks follows.
+        .onChange(of: coordinator.statusChangesOnPhone) {
+            Task { await syncServerTaskCount() }
+        }
+        // Back from the background, where another phone may have filled the
+        // plan. Unless a sync is already on its way.
+        .onChange(of: scenePhase) {
+            guard scenePhase == .active, session.confirmedUserID != nil,
+                  !coordinator.serverCountSettling else { return }
             Task { await syncServerTaskCount() }
         }
     }

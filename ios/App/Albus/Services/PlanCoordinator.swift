@@ -61,9 +61,13 @@ final class PlanCoordinator {
 
     private var accountWasDeleted = false
 
-    /// Goes up each time a task the server knows is finished on this phone,
-    /// so the app can tell the server, which only counts open tasks.
-    private(set) var finishedOnPhone = 0
+    /// Goes up each time a task the server knows finishes or opens again on
+    /// this phone, so the app can tell the server, which counts open tasks.
+    private(set) var statusChangesOnPhone = 0
+
+    /// The phone could not read its own tasks, so it cannot say which are
+    /// here, and nothing is sent.
+    struct LocalTasksUnreadable: Error {}
 
     /// True while the phone is telling the server which tasks it holds and
     /// reading the plan back. The plan's count of open tasks is stale until
@@ -318,20 +322,21 @@ final class PlanCoordinator {
 
     // MARK: - The server's count of open tasks
 
-    /// Tells the server which of this phone's tasks are finished, then reads
-    /// the plan back through `refresh`.
+    /// Tells the server which of this phone's tasks are finished and which
+    /// are open, then reads the plan back through `refresh`.
     ///
     /// The free plan caps open tasks on the server, but finishing a task used
     /// to change it only here, so a student who finished five was still
-    /// refused a sixth. Every finished task is sent each time, not just new
-    /// ones: the server ignores those it already closed, and a failed attempt
+    /// refused a sixth. The whole picture is sent each time, not just what
+    /// changed: the server changes only what differs, and a failed attempt
     /// needs no queue to be caught up by the next.
     func syncServerCount(context: ModelContext, refresh: @MainActor () async -> Void) async {
         guard !accountWasDeleted else { return }
         settlingCalls += 1
         defer { settlingCalls -= 1 }
-        let finished = Self.finishedRemoteIDs(in: context)
-        if !finished.isEmpty { _ = await assignments.finish(remoteIDs: finished) }
+        if let finished = Self.finishedRemoteIDs(in: context), let open = Self.openRemoteIDs(in: context) {
+            _ = await assignments.sync(finished: finished, open: Array(open.prefix(Self.serverListLimit)))
+        }
         await refresh()
     }
 
@@ -340,7 +345,9 @@ final class PlanCoordinator {
     /// they may still use the phone those tasks are on.
     func releaseOthers(context: ModelContext, refresh: @MainActor () async -> Void) async throws {
         guard !accountWasDeleted else { return }
-        let keeping = Self.openRemoteIDs(in: context)
+        // A read that failed is not an empty phone: freeing everything but
+        // nothing would free the tasks that are here too.
+        guard let keeping = Self.openRemoteIDs(in: context) else { throw LocalTasksUnreadable() }
         // The server takes at most 500. Past that it would free tasks that
         // are here, so it is not asked at all.
         guard keeping.count <= Self.serverListLimit else { return }
@@ -353,21 +360,24 @@ final class PlanCoordinator {
     static let serverListLimit = 500
 
     /// The server ids of the tasks finished on this phone, most recent first.
-    static func finishedRemoteIDs(in context: ModelContext) -> [UUID] {
+    /// Nil when the phone cannot read its tasks.
+    static func finishedRemoteIDs(in context: ModelContext) -> [UUID]? {
         let completed = AssignmentStatus.completed.rawValue
         var descriptor = FetchDescriptor<Assignment>(
             predicate: #Predicate { $0.status == completed && $0.remoteID != nil },
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])
         descriptor.fetchLimit = serverListLimit
-        return ((try? context.fetch(descriptor)) ?? []).compactMap(\.remoteID)
+        return (try? context.fetch(descriptor))?.compactMap(\.remoteID)
     }
 
-    /// The server ids of the tasks open on this phone.
-    static func openRemoteIDs(in context: ModelContext) -> [UUID] {
+    /// The server ids of the tasks open on this phone, most recent first.
+    /// Nil when the phone cannot read its tasks.
+    static func openRemoteIDs(in context: ModelContext) -> [UUID]? {
         let active = AssignmentStatus.active.rawValue
         let descriptor = FetchDescriptor<Assignment>(
-            predicate: #Predicate { $0.status == active && $0.remoteID != nil })
-        return ((try? context.fetch(descriptor)) ?? []).compactMap(\.remoteID)
+            predicate: #Predicate { $0.status == active && $0.remoteID != nil },
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])
+        return (try? context.fetch(descriptor))?.compactMap(\.remoteID)
     }
 
     /// How many open tasks the server counts that are not open on this
@@ -537,7 +547,6 @@ final class PlanCoordinator {
                       now: Date = .now) {
         guard (subtask.completedAt != nil) != completed else { return }
         claim(subtask.assignment)
-        let wasFinished = subtask.assignment?.isComplete ?? false
 
         if completed {
             subtask.completedAt = now
@@ -549,13 +558,10 @@ final class PlanCoordinator {
         }
         subtask.assignment?.updatedAt = now
 
-        // Finishing the last step closes the assignment. The open-task cap is
-        // counted on the server, so it hears about it too (`syncServerCount`).
+        // Finishing the last step closes the assignment; undoing one opens it
+        // again. Either way the server hears about it (`settleStatus`).
         if let assignment = subtask.assignment {
             settleStatus(of: assignment)
-            if !wasFinished, assignment.isComplete, assignment.remoteID != nil {
-                finishedOnPhone += 1
-            }
         }
 
         save(context, "toggle step")
@@ -713,9 +719,16 @@ final class PlanCoordinator {
     /// Completed once every step is done, active otherwise. Archived stays
     /// archived: it is a record of work now, and a change to it must not turn
     /// it back into a plan.
+    /// Every path that can finish a task, or open a finished one again,
+    /// comes through here: ticking a step, undoing one, adding a step, or
+    /// deleting the one that was still open. The open-task cap is counted
+    /// on the server, so each change is reported (`syncServerCount`).
     private func settleStatus(of assignment: Assignment) {
         guard !assignment.isArchived else { return }
-        assignment.statusValue = assignment.isComplete ? .completed : .active
+        let settled: AssignmentStatus = assignment.isComplete ? .completed : .active
+        guard assignment.statusValue != settled else { return }
+        assignment.statusValue = settled
+        if assignment.remoteID != nil { statusChangesOnPhone += 1 }
     }
 
     /// Ordinals must stay contiguous: the scheduler places work in ordinal

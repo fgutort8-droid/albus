@@ -20,22 +20,26 @@ struct AssignmentService {
         self.client = client
     }
 
-    /// Tells the server these tasks are finished on this phone, so they stop
-    /// counting against the open-task cap. Only ever this phone's own tasks,
-    /// so it is right however many phones the student uses, and harmless to
-    /// repeat: the server ignores a task it no longer counts.
+    /// Tells the server which of this phone's tasks are finished and which
+    /// are open, so its count of open tasks, which the plan's cap uses,
+    /// matches. Only ever this phone's own tasks, so it is right however many
+    /// phones the student uses, and harmless to repeat: the server changes
+    /// only what differs. A task reopened past the cap stays closed there.
     ///
-    /// - Returns: how many the server was still counting, or nil when it
-    ///   could not be reached.
-    func finish(remoteIDs: [UUID]) async -> Int? {
+    /// - Returns: how many tasks the server changed, or nil when it could not
+    ///   be reached.
+    func sync(finished: [UUID], open: [UUID]) async -> Int? {
         guard let client else { return nil }
-        guard !remoteIDs.isEmpty else { return 0 }
+        guard !finished.isEmpty || !open.isEmpty else { return 0 }
         do {
             return try await client
-                .rpc("finish_my_assignments", params: ["p_ids": remoteIDs.map { $0.uuidString.lowercased() }])
+                .rpc("sync_my_assignments", params: [
+                    "p_finished": finished.map { $0.uuidString.lowercased() },
+                    "p_open": open.map { $0.uuidString.lowercased() },
+                ])
                 .execute().value
         } catch {
-            print("[Albus] finishing tasks on the server failed")
+            print("[Albus] syncing task status with the server failed")
             return nil
         }
     }

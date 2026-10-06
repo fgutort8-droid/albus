@@ -69,3 +69,17 @@ half is `auth/server`.
 | Deleting an Apple account tells Apple | `AccountDeletionScreen` asks Apple for a fresh code; `delete-account` exchanges and revokes it (server half). |
 | Sign-in codes expire after 10 minutes | `otp_expiry = 600` in `supabase/config.toml` (server half) and the dashboard setting. |
 | Resend sends the codes | Owner's choice of provider in YOUR_STEPS; change the providers table if another is used. |
+
+## 6 October 2026: Sign in with Apple only
+
+The owner dropped the email code (no domain or email provider). The rows above
+about email codes, Cloudflare and Resend no longer apply; the policy, terms and
+support page were changed to match.
+
+| Claim | Evidence |
+| --- | --- |
+| You sign in with Apple; there is no other way in | `SignInScreen` shows only `SignInWithAppleButton`. `SessionService` has no email or password sign-in; the only account-making calls are `signInWithIdToken` and `linkIdentityWithIdToken`. |
+| We keep the email address Apple shares, only to find the account if the student writes to us | `SignInScreen` requests the `email` scope only, never the name. Nothing in the app sends email; Settings shows "Apple", not the address. |
+| No Cloudflare check | `CaptchaService`, `CaptchaPrefetch` and `AccountCreation` were deleted; `Info.plist` and `project.yml` no longer carry a Turnstile key. GoTrue never asks for a CAPTCHA on `grant_type=id_token`. |
+| The server's count of open tasks follows the phone | `PlanCoordinator.settleStatus` reports every finish and reopen; `syncServerCount` sends `sync_my_assignments(p_finished, p_open)`; Stop counting sends `release_my_other_assignments(p_keep)` and nothing if the phone can't read its tasks. |
+

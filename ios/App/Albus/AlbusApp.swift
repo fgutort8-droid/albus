@@ -129,9 +129,8 @@ struct AlbusApp: App {
                                                          availability: preferences.availability)
                     catchUp()
                     wireNotifications()
-                    // Restores a stored session. It no longer *creates* one:
-                    // account creation moved into onboarding, which is the only
-                    // place a CAPTCHA challenge can be presented. A deletion the
+                    // Restores a stored session. It never *creates* one:
+                    // students sign in on the sign-in screen. A deletion the
                     // student asked for and never heard back about is settled
                     // before anything else reads the old account's data or
                     // tries to sync on its behalf.

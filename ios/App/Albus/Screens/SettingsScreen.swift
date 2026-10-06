@@ -351,7 +351,7 @@ struct SettingsScreen: View {
                 VStack(alignment: .leading, spacing: Tokens.Spacing.m) {
                     aboutRow("Signed in with", signInLabel)
                     if session.signInMethod == .anonymous {
-                        Text("This account isn't saved yet. Add Apple or an email so you can sign back in if you change phones.")
+                        Text("This account isn't saved yet. Add Apple so you can sign back in if you change phones.")
                             .font(Tokens.Typography.caption)
                             .foregroundStyle(Tokens.Palette.inkSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -381,12 +381,10 @@ struct SettingsScreen: View {
     }
 
     /// Never the user id. It identifies nothing to the student and is the one
-    /// string on this screen worth not putting on a shared screenshot. The
-    /// email is theirs, and says which account this is.
+    /// string on this screen worth not putting on a shared screenshot.
     private var signInLabel: String {
         switch session.signInMethod {
         case .apple: "Apple"
-        case .email(let address): address
         case .anonymous: "Not saved"
         case .other: "Signed in"
         case nil: "Not signed in"

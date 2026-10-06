@@ -100,6 +100,9 @@ struct HomeScreen: View {
                     await coordinator.addAssignment(draft, context: context,
                                                     availability: preferences.availability,
                                                     taskLimit: entitlements.plan.tasks.limit)
+                    // Refused, perhaps by a plan full of another phone's
+                    // tasks: read the plan again, so Home can say so.
+                    if case .failed = coordinator.status { await entitlements.refresh() }
                 }
             }
         }
@@ -409,7 +412,7 @@ struct HomeScreen: View {
                 retryTitle: "Stop counting") { confirmingRelease = true }
         }
         if releaseFailed {
-            StatusBanner(tone: .error, message: "Couldn't reach Albus. Check your connection and try again.")
+            StatusBanner(tone: .error, message: "Couldn't stop counting them. Check your connection and try again.")
         }
     }
 
