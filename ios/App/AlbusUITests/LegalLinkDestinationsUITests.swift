@@ -91,7 +91,7 @@ final class LegalLinkDestinationsUITests: XCTestCase {
     func testSignInLinks() {
         let app = launch(signedIn: false)
         XCTAssertTrue(app.buttons["signIn.email"].waitForExistence(timeout: 30), "the sign-in screen comes first")
-        expect(app.links["Terms of service"], opens: terms, in: app)
-        expect(app.links["Privacy policy"], opens: privacy, in: app)
+        expect(app.buttons["Terms of service"], opens: terms, in: app)
+        expect(app.buttons["Privacy policy"], opens: privacy, in: app)
     }
 }

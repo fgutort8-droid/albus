@@ -137,14 +137,12 @@ struct AccountCreationTests {
     }
 
     /// The account is made on the sign-in screen, so the age rule and the
-    /// terms are stated there, and their links open the published pages.
+    /// terms are stated there. The sentence ends in the two pages, which are
+    /// buttons; `LegalLinkDestinationsUITests` checks where each one goes.
     @Test func signInStatesTheTermsAndAge() {
-        let agreement = SignInScreen.agreement
-        let text = String(agreement.characters)
+        let text = SignInScreen.agreement
         #expect(text.contains("13 or older"))
         #expect(text.contains("under 16"))
-        let links = agreement.runs.compactMap(\.link)
-        #expect(links == [AppLinks.terms, AppLinks.privacy])
-        #expect(!text.contains("]("), "the markdown is rendered, not shown")
+        #expect(text.hasSuffix("you accept"))
     }
 }

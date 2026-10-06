@@ -16,6 +16,7 @@ struct SignInScreen: View {
 
     @Environment(SessionService.self) private var session
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     private enum Step: Equatable { case choose, email, code }
     @State private var step: Step = .choose
@@ -66,14 +67,9 @@ struct SignInScreen: View {
                 .scrollDismissesKeyboard(.interactively)
 
                 if !savingAccount, step != .code {
-                    Text(Self.agreement)
-                        .font(Tokens.Typography.caption)
-                        .foregroundStyle(Tokens.Palette.inkSecondary)
-                        .tint(Tokens.Palette.accent)
-                        .fixedSize(horizontal: false, vertical: true)
+                    agreementFootnote
                         .padding(.horizontal, Tokens.Spacing.xl)
                         .padding(.bottom, Tokens.Spacing.l)
-                        .accessibilityIdentifier("signIn.agreement")
                 }
             }
         }
@@ -440,12 +436,40 @@ struct SignInScreen: View {
     // MARK: - Agreement
 
     /// Beside the buttons that make the account, so the age rule and the
-    /// terms are in front of the student before there is one.
-    static var agreement: AttributedString {
-        let text = "By continuing, you confirm you're 13 or older, with a parent's or "
-            + "guardian's agreement if you're under 16, and you accept the "
-            + "[Terms of service](\(AppLinks.terms.absoluteString)) and "
-            + "[Privacy policy](\(AppLinks.privacy.absoluteString))."
-        return (try? AttributedString(markdown: text)) ?? AttributedString(text)
+    /// terms are in front of the student before there is one. The sentence
+    /// ends in the two documents, on the line below.
+    static let agreement = "By continuing, you confirm you're 13 or older, with a parent's or "
+        + "guardian's agreement if you're under 16, and you accept"
+
+    /// The documents are buttons, as in Settings, not links inside the
+    /// sentence: iOS 18 does not expose a sentence's links as separate
+    /// controls, so on GitHub's simulators the UI test that proves each one
+    /// opens the right page could not find them.
+    private var agreementFootnote: some View {
+        let terms = Button("Terms of service") { openURL(AppLinks.terms) }
+            .foregroundStyle(Tokens.Palette.accent)
+        let privacy = Button("Privacy policy") { openURL(AppLinks.privacy) }
+            .foregroundStyle(Tokens.Palette.accent)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(Self.agreement)
+                .fixedSize(horizontal: false, vertical: true)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 0) {
+                    Text("the ")
+                    terms
+                    Text(" and ")
+                    privacy
+                    Text(".")
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    terms
+                    privacy
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .font(Tokens.Typography.caption)
+        .foregroundStyle(Tokens.Palette.inkSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

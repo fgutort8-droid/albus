@@ -52,8 +52,11 @@ struct RootView: View {
         .task(id: session.confirmedUserID) {
             await purchases.start(userID: session.confirmedUserID)
             guard session.confirmedUserID != nil else { return }
-            await entitlements.refresh()
-            await releaseServerTasksIfPending()
+            await syncServerTaskCount()
+        }
+        // A task just finished: the server stops counting it as open.
+        .onChange(of: coordinator.finishedOnPhone) {
+            Task { await syncServerTaskCount() }
         }
     }
 
@@ -61,23 +64,28 @@ struct RootView: View {
     /// `LocalAccount`.
     private func settleLocalData() async {
         guard let userID = session.userID, !deletion.requiresCleanup else { return }
-        let releases = localAccount.arrived(userID, arrival: session.arrival,
-                                            hasLocalData: LocalAccount.hasData(in: context),
-                                            preferences: preferences)
+        localAccount.arrived(userID, arrival: session.arrival,
+                             hasLocalData: LocalAccount.hasData(in: context),
+                             preferences: preferences)
         guard localAccount.awaitingDecision == nil else { return }
         if session.arrival == .signedIn {
             // Signed back in: the reminders cleared at sign-out come back.
             await notifications.rebuild(context: context, preferences: preferences, coordinator: coordinator)
         }
-        if releases { await releaseServerTasksIfPending() }
+        // The phone may only now have become this account's.
+        if session.confirmedUserID == userID { await syncServerTaskCount() }
     }
 
-    private func releaseServerTasksIfPending() async {
-        guard localAccount.releasePending, session.confirmedUserID != nil else { return }
-        // Tried again at the next launch if this fails.
-        if (try? await session.releaseServerTasks()) != nil {
-            localAccount.releaseFinished()
+    /// Reads the plan, after telling the server which of the phone's tasks
+    /// are finished, so the count of open tasks it shows is this phone's.
+    /// Only for the account the phone's tasks belong to.
+    private func syncServerTaskCount() async {
+        guard let userID = session.confirmedUserID,
+              localAccount.owner == userID, localAccount.awaitingDecision == nil else {
+            await entitlements.refresh()
+            return
         }
+        await coordinator.syncServerCount(context: context) { await entitlements.refresh() }
     }
 }
 

@@ -82,12 +82,6 @@ struct AccountSwitchScreen: View {
             }
         } catch {
             message = "Couldn't clear this phone. Please try again."
-            return
-        }
-        // The account's own tasks are not on this phone either. If this
-        // fails it is tried again at the next launch.
-        if (try? await session.releaseServerTasks()) != nil {
-            localAccount.releaseFinished()
         }
     }
 

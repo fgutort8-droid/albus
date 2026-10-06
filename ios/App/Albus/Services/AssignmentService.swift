@@ -20,6 +20,39 @@ struct AssignmentService {
         self.client = client
     }
 
+    /// Tells the server these tasks are finished on this phone, so they stop
+    /// counting against the open-task cap. Only ever this phone's own tasks,
+    /// so it is right however many phones the student uses, and harmless to
+    /// repeat: the server ignores a task it no longer counts.
+    ///
+    /// - Returns: how many the server was still counting, or nil when it
+    ///   could not be reached.
+    func finish(remoteIDs: [UUID]) async -> Int? {
+        guard let client else { return nil }
+        guard !remoteIDs.isEmpty else { return 0 }
+        do {
+            return try await client
+                .rpc("finish_my_assignments", params: ["p_ids": remoteIDs.map { $0.uuidString.lowercased() }])
+                .execute().value
+        } catch {
+            print("[Albus] finishing tasks on the server failed")
+            return nil
+        }
+    }
+
+    /// Stops the server counting every open task but `keeping`, the ones open
+    /// on this phone. The others were made on another phone, or before a
+    /// reinstall, and only the student knows whether that phone is still in
+    /// use, so this runs only when they ask.
+    ///
+    /// - Returns: how many tasks stopped counting.
+    func releaseOthers(keeping remoteIDs: [UUID]) async throws -> Int {
+        guard let client else { throw Backend.ConfigError.missing("Supabase") }
+        return try await client
+            .rpc("release_my_other_assignments", params: ["p_keep": remoteIDs.map { $0.uuidString.lowercased() }])
+            .execute().value
+    }
+
     /// True when the row is gone from the server — or was never there.
     func delete(remoteID: UUID) async -> Bool {
         guard let client else { return false }

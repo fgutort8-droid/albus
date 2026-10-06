@@ -237,20 +237,6 @@ struct SignInTests {
         #expect(session.userID == Fixture.anonymousUserID)
     }
 
-    // MARK: - Server tasks on a new phone
-
-    @Test("releasing asks the server about the caller's own tasks, with no arguments")
-    func releaseServerTasks() async throws {
-        let server = Server()
-        server.on("/rest/v1/rpc/release_my_active_assignments") { _ in .ok("3") }
-        let session = try server.sessionService(stored: Fixture.session(user: Fixture.emailUser))
-        await session.start()
-        try await session.releaseServerTasks()
-        let call = try #require(server.requests.first { $0.path == "/rest/v1/rpc/release_my_active_assignments" })
-        #expect(call.method == "POST")
-        #expect(call.json.isEmpty)
-    }
-
     // MARK: - Deletion
 
     @Test("deletion sends Apple's code when there is one, and only then")

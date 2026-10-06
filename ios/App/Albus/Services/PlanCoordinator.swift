@@ -61,6 +61,16 @@ final class PlanCoordinator {
 
     private var accountWasDeleted = false
 
+    /// Goes up each time a task the server knows is finished on this phone,
+    /// so the app can tell the server, which only counts open tasks.
+    private(set) var finishedOnPhone = 0
+
+    /// True while the phone is telling the server which tasks it holds and
+    /// reading the plan back. The plan's count of open tasks is stale until
+    /// then, so nothing should be concluded from it.
+    var serverCountSettling: Bool { settlingCalls > 0 }
+    private var settlingCalls = 0
+
     func invalidateForAccountDeletion() {
         accountWasDeleted = true
         onScheduleChanged = nil
@@ -306,6 +316,69 @@ final class PlanCoordinator {
         }
     }
 
+    // MARK: - The server's count of open tasks
+
+    /// Tells the server which of this phone's tasks are finished, then reads
+    /// the plan back through `refresh`.
+    ///
+    /// The free plan caps open tasks on the server, but finishing a task used
+    /// to change it only here, so a student who finished five was still
+    /// refused a sixth. Every finished task is sent each time, not just new
+    /// ones: the server ignores those it already closed, and a failed attempt
+    /// needs no queue to be caught up by the next.
+    func syncServerCount(context: ModelContext, refresh: @MainActor () async -> Void) async {
+        guard !accountWasDeleted else { return }
+        settlingCalls += 1
+        defer { settlingCalls -= 1 }
+        let finished = Self.finishedRemoteIDs(in: context)
+        if !finished.isEmpty { _ = await assignments.finish(remoteIDs: finished) }
+        await refresh()
+    }
+
+    /// Stops the server counting the open tasks that are not on this phone,
+    /// then reads the plan back through `refresh`. Only when the student asks:
+    /// they may still use the phone those tasks are on.
+    func releaseOthers(context: ModelContext, refresh: @MainActor () async -> Void) async throws {
+        guard !accountWasDeleted else { return }
+        let keeping = Self.openRemoteIDs(in: context)
+        // The server takes at most 500. Past that it would free tasks that
+        // are here, so it is not asked at all.
+        guard keeping.count <= Self.serverListLimit else { return }
+        settlingCalls += 1
+        defer { settlingCalls -= 1 }
+        _ = try await assignments.releaseOthers(keeping: keeping)
+        await refresh()
+    }
+
+    static let serverListLimit = 500
+
+    /// The server ids of the tasks finished on this phone, most recent first.
+    static func finishedRemoteIDs(in context: ModelContext) -> [UUID] {
+        let completed = AssignmentStatus.completed.rawValue
+        var descriptor = FetchDescriptor<Assignment>(
+            predicate: #Predicate { $0.status == completed && $0.remoteID != nil },
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])
+        descriptor.fetchLimit = serverListLimit
+        return ((try? context.fetch(descriptor)) ?? []).compactMap(\.remoteID)
+    }
+
+    /// The server ids of the tasks open on this phone.
+    static func openRemoteIDs(in context: ModelContext) -> [UUID] {
+        let active = AssignmentStatus.active.rawValue
+        let descriptor = FetchDescriptor<Assignment>(
+            predicate: #Predicate { $0.status == active && $0.remoteID != nil })
+        return ((try? context.fetch(descriptor)) ?? []).compactMap(\.remoteID)
+    }
+
+    /// How many open tasks the server counts that are not open on this
+    /// phone, when they are what stops the student adding one here. Zero
+    /// otherwise: below the cap they cost nothing, and when the phone's own
+    /// tasks fill it, freeing others would not help.
+    static func uncountedOnPhone(used: Int, limit: Int?, openHere: Int, openHereOnServer: Int) -> Int {
+        guard let limit, limit > 0, openHere < limit, used >= limit else { return 0 }
+        return max(0, used - openHereOnServer)
+    }
+
     /// Removes a server row the phone holds no copy of, retrying later if the
     /// server cannot be reached now.
     private func deleteRemote(_ remoteID: UUID) async {
@@ -464,6 +537,7 @@ final class PlanCoordinator {
                       now: Date = .now) {
         guard (subtask.completedAt != nil) != completed else { return }
         claim(subtask.assignment)
+        let wasFinished = subtask.assignment?.isComplete ?? false
 
         if completed {
             subtask.completedAt = now
@@ -475,10 +549,13 @@ final class PlanCoordinator {
         }
         subtask.assignment?.updatedAt = now
 
-        // Finishing the last step closes the assignment, which is what frees a
-        // slot against the free-tier active-plan cap.
+        // Finishing the last step closes the assignment. The open-task cap is
+        // counted on the server, so it hears about it too (`syncServerCount`).
         if let assignment = subtask.assignment {
             settleStatus(of: assignment)
+            if !wasFinished, assignment.isComplete, assignment.remoteID != nil {
+                finishedOnPhone += 1
+            }
         }
 
         save(context, "toggle step")

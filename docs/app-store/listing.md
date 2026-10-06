@@ -67,6 +67,14 @@ email route may show a challenge. Settings → Account shows how you signed in a
 signs out; Settings → Delete account deletes the account (an Apple account asks
 Apple to confirm first, and Albus revokes its Sign in with Apple token).
 
+Why the account comes first (guideline 5.1.1(v)): Albus's step plans and its
+marking are written by an AI model on our server, and each account has its own
+limits on them, enforced there. The account also carries the student's plan
+(Free, Plus or Pro), which comes back when they sign in on a new iPhone.
+Without an account, reinstalling would reset those limits, and a subscription
+could not follow the student to a new phone. Sign in with Apple takes one tap,
+and the student can hide their email address from us.
+
 Feature paths:
 
 1. **Planning:** Home → add an assignment; enter a title, work type, deadline and

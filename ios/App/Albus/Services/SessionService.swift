@@ -404,21 +404,6 @@ final class SessionService {
         signedOut(as: .needsAccount)
     }
 
-    /// Stops counting the account's tasks on the server as active, because
-    /// they are not on this phone: after signing in on a new phone, or after
-    /// another account's tasks were removed from this one. The free plan caps
-    /// active tasks on the server, and without this a student could be at
-    /// "5 of 5" with nothing on screen.
-    func releaseServerTasks() async throws {
-        guard let client else { throw Backend.ConfigError.missing("Supabase") }
-        try await Self.release(client, storage: storage)
-    }
-
-    private nonisolated static func release(_ client: SupabaseClient, storage: ResilientAuthStorage) async throws {
-        _ = try await validatedSession(client, storage: storage)
-        try await client.rpc("release_my_active_assignments").execute()
-    }
-
     /// Asks the server something that changes nothing, before anything that
     /// could delete the account is sent: with no signal this fails, and
     /// nothing has left the phone.

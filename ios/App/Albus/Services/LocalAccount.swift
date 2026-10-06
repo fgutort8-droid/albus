@@ -8,11 +8,14 @@ import SwiftData
 /// the phone has to know whose tasks it holds. Signing out keeps them, for
 /// when the same account signs back in; a different account finds them still
 /// here and is asked before they are removed.
+///
+/// Nothing here touches the server's count of open tasks. Tasks the phone
+/// does not hold may be in use on another phone, and only the student knows,
+/// so they are freed from Home, when the student asks (`PlanCoordinator.releaseOthers`).
 @Observable
 @MainActor
 final class LocalAccount {
     private static let ownerKey = "albus.localData.owner"
-    private static let releaseKey = "albus.localData.releasePending"
 
     /// How the account now signed in got there.
     enum Arrival: Equatable {
@@ -27,9 +30,8 @@ final class LocalAccount {
         case keep
         /// The phone holds nothing of anyone's: it becomes this account's.
         /// `resetsSetUp` clears the set-up answers, which belonged to whoever
-        /// was here before; `releasesServerTasks` tells the server that the
-        /// account's tasks are not on this phone.
-        case adopt(resetsSetUp: Bool, releasesServerTasks: Bool)
+        /// was here before.
+        case adopt(resetsSetUp: Bool)
         /// Another account's tasks are here. Ask before removing them.
         case ask
     }
@@ -40,9 +42,10 @@ final class LocalAccount {
     /// account's tasks on this phone.
     private(set) var awaitingDecision: UUID?
 
-    /// Bumped whenever the phone stops acting for an account, by signing out
-    /// or by removing another account's tasks, so the app replaces the
-    /// services that held that account's state.
+    /// Bumped whenever the phone stops acting for an account, by signing out,
+    /// by removing another account's tasks, or by another account taking an
+    /// empty phone over, so the app replaces the services that held that
+    /// account's state, such as its plan.
     private(set) var generation = 0
 
     /// The account the phone's data belongs to. Stored, not read through,
@@ -62,35 +65,30 @@ final class LocalAccount {
 #endif
     }
 
-    /// The server still counts tasks this phone does not hold.
-    var releasePending: Bool { defaults.bool(forKey: Self.releaseKey) }
-
     static func decide(for userID: UUID, owner: UUID?, arrival: Arrival, hasLocalData: Bool) -> Decision {
         if owner == userID { return .keep }
         // Data from before the phone kept track belongs to the account it
         // was made under, which is the one restored at launch.
-        if owner == nil, arrival == .restored { return .adopt(resetsSetUp: false, releasesServerTasks: false) }
-        if !hasLocalData { return .adopt(resetsSetUp: true, releasesServerTasks: true) }
+        if owner == nil, arrival == .restored { return .adopt(resetsSetUp: false) }
+        if !hasLocalData { return .adopt(resetsSetUp: true) }
         return .ask
     }
 
     /// Settles what the phone's data means for the account now signed in.
-    ///
-    /// - Returns: whether the server should be told the account's tasks are
-    ///   not on this phone. `releaseFinished()` records that it was.
-    @discardableResult
-    func arrived(_ userID: UUID, arrival: Arrival, hasLocalData: Bool, preferences: Preferences) -> Bool {
+    func arrived(_ userID: UUID, arrival: Arrival, hasLocalData: Bool, preferences: Preferences) {
         switch Self.decide(for: userID, owner: owner, arrival: arrival, hasLocalData: hasLocalData) {
         case .keep:
             awaitingDecision = nil
-            return releasePending
-        case .adopt(let resetsSetUp, let releases):
+        case .adopt(let resetsSetUp):
             if resetsSetUp { preferences.resetAfterAccountDeletion() }
-            adopt(userID, releasing: releases)
-            return releasePending
+            let replacesAnother = owner != nil
+            adopt(userID)
+            // The services may still hold the other account's plan. Replaced
+            // here as at sign-out, so a refresh that fails cannot leave this
+            // student looking at someone else's.
+            if replacesAnother { generation += 1 }
         case .ask:
             awaitingDecision = userID
-            return false
         }
     }
 
@@ -100,7 +98,7 @@ final class LocalAccount {
                                  clearLocal: @MainActor () async throws -> Void) async throws {
         guard awaitingDecision == userID else { return }
         try await clearLocal()
-        adopt(userID, releasing: true)
+        adopt(userID)
         awaitingDecision = nil
         generation += 1
     }
@@ -115,30 +113,30 @@ final class LocalAccount {
     /// The account was deleted and the phone cleared.
     func forget() {
         defaults.removeObject(forKey: Self.ownerKey)
-        defaults.removeObject(forKey: Self.releaseKey)
         owner = nil
         awaitingDecision = nil
     }
 
-    func releaseFinished() {
-        defaults.removeObject(forKey: Self.releaseKey)
-    }
-
-    private func adopt(_ userID: UUID, releasing: Bool) {
+    private func adopt(_ userID: UUID) {
         defaults.set(userID.uuidString, forKey: Self.ownerKey)
         owner = userID
-        if releasing { defaults.set(true, forKey: Self.releaseKey) }
     }
 
-    /// Whether the phone holds anything a student made. A store that cannot
+    /// Whether the phone holds anything a student made, of any kind: a
+    /// course saved before its first task is still theirs. Every model in the
+    /// schema is counted, so a new one cannot be missed. A store that cannot
     /// be counted is taken to hold something, so it is asked about rather
     /// than handed to whoever signed in.
     static func hasData(in context: ModelContext) -> Bool {
-        guard let assignments = try? context.fetchCount(FetchDescriptor<Assignment>()),
-              let rubrics = try? context.fetchCount(FetchDescriptor<Rubric>()),
-              let gradings = try? context.fetchCount(FetchDescriptor<Grading>())
-        else { return true }
-        return assignments + rubrics + gradings > 0
+        for model in AlbusSchema.models {
+            guard let rows = rowCount(of: model, in: context) else { return true }
+            if rows > 0 { return true }
+        }
+        return false
+    }
+
+    private static func rowCount<M: PersistentModel>(of model: M.Type, in context: ModelContext) -> Int? {
+        try? context.fetchCount(FetchDescriptor<M>())
     }
 }
 

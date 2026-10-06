@@ -22,12 +22,12 @@ struct LocalAccountTests {
         #expect(L.decide(for: me, owner: me, arrival: .restored, hasLocalData: false) == .keep)
         // Data from before the phone kept track belongs to the account restored at launch.
         #expect(L.decide(for: me, owner: nil, arrival: .restored, hasLocalData: true)
-                == .adopt(resetsSetUp: false, releasesServerTasks: false))
-        // A new phone, or one with nothing on it: the account's server tasks are not here.
+                == .adopt(resetsSetUp: false))
+        // A new phone, or one with nothing on it, becomes this account's.
         #expect(L.decide(for: me, owner: nil, arrival: .signedIn, hasLocalData: false)
-                == .adopt(resetsSetUp: true, releasesServerTasks: true))
+                == .adopt(resetsSetUp: true))
         #expect(L.decide(for: me, owner: someoneElse, arrival: .signedIn, hasLocalData: false)
-                == .adopt(resetsSetUp: true, releasesServerTasks: true))
+                == .adopt(resetsSetUp: true))
         // Someone else's tasks are here: ask, never remove silently, never hand them over.
         #expect(L.decide(for: me, owner: someoneElse, arrival: .signedIn, hasLocalData: true) == .ask)
         #expect(L.decide(for: me, owner: someoneElse, arrival: .restored, hasLocalData: true) == .ask)
@@ -35,7 +35,7 @@ struct LocalAccountTests {
                 "tasks from an account this phone lost track of are not the new account's")
     }
 
-    @Test("adopting a phone with nothing on it resets the set-up answers and asks the server to release")
+    @Test("adopting a phone with nothing on it resets the set-up answers")
     func adoptEmptyPhone() {
         let defaults = isolated()
         let local = LocalAccount(defaults: defaults)
@@ -43,16 +43,28 @@ struct LocalAccountTests {
         preferences.name = "Someone Else"
         preferences.markOnboarded()
 
-        let releases = local.arrived(me, arrival: .signedIn, hasLocalData: false, preferences: preferences)
+        local.arrived(me, arrival: .signedIn, hasLocalData: false, preferences: preferences)
 
-        #expect(releases)
         #expect(local.owner == me)
-        #expect(local.releasePending)
         #expect(preferences.name.isEmpty)
         #expect(!preferences.hasOnboarded, "the new account answers the set-up questions")
-        local.releaseFinished()
-        #expect(!local.releasePending)
         #expect(LocalAccount(defaults: defaults).owner == me, "remembered across launches")
+    }
+
+    @Test("another account taking over an empty phone replaces the services that held the last one's plan")
+    func takeoverReplacesServices() {
+        let local = LocalAccount(defaults: isolated())
+        let preferences = Preferences(defaults: isolated())
+        local.arrived(someoneElse, arrival: .signedIn, hasLocalData: false, preferences: preferences)
+        let first = local.generation
+        #expect(first == 0, "a phone nobody had needs nothing replaced")
+
+        local.arrived(me, arrival: .signedIn, hasLocalData: false, preferences: preferences)
+        #expect(local.owner == me)
+        #expect(local.generation == first + 1)
+
+        local.arrived(me, arrival: .restored, hasLocalData: false, preferences: preferences)
+        #expect(local.generation == first + 1, "the same account again changes nothing")
     }
 
     @Test("the account that made the tasks signs back in to everything as it was")
@@ -60,14 +72,12 @@ struct LocalAccountTests {
         let local = LocalAccount(defaults: isolated())
         let preferences = Preferences(defaults: isolated())
         local.arrived(me, arrival: .signedIn, hasLocalData: false, preferences: preferences)
-        local.releaseFinished()
         preferences.name = "Me"
         preferences.markOnboarded()
         local.signedOut()
 
-        let releases = local.arrived(me, arrival: .signedIn, hasLocalData: true, preferences: preferences)
+        local.arrived(me, arrival: .signedIn, hasLocalData: true, preferences: preferences)
 
-        #expect(!releases)
         #expect(local.awaitingDecision == nil)
         #expect(preferences.name == "Me")
         #expect(preferences.hasOnboarded)
@@ -80,9 +90,8 @@ struct LocalAccountTests {
         local.arrived(someoneElse, arrival: .signedIn, hasLocalData: false, preferences: preferences)
         preferences.name = "Someone Else"
 
-        let releases = local.arrived(me, arrival: .signedIn, hasLocalData: true, preferences: preferences)
+        local.arrived(me, arrival: .signedIn, hasLocalData: true, preferences: preferences)
 
-        #expect(!releases)
         #expect(local.awaitingDecision == me)
         #expect(local.owner == someoneElse)
         #expect(preferences.name == "Someone Else")
@@ -93,7 +102,6 @@ struct LocalAccountTests {
         let local = LocalAccount(defaults: isolated())
         let preferences = Preferences(defaults: isolated())
         local.arrived(someoneElse, arrival: .signedIn, hasLocalData: false, preferences: preferences)
-        local.releaseFinished()
         local.arrived(me, arrival: .signedIn, hasLocalData: true, preferences: preferences)
         let before = local.generation
         var cleared = 0
@@ -102,9 +110,8 @@ struct LocalAccountTests {
 
         #expect(cleared == 1)
         #expect(local.owner == me)
-        #expect(local.releasePending, "this account's own server tasks aren't here either")
         #expect(local.awaitingDecision == nil)
-        #expect(local.generation == before + 1, "services that held the old account's state are replaced")
+        #expect(local.generation == before + 1, "services that held the old account's state are replaced, once")
     }
 
     @Test("a failed clear leaves the other account's tasks theirs, and the question open")
@@ -148,19 +155,32 @@ struct LocalAccountTests {
         local.arrived(me, arrival: .signedIn, hasLocalData: false, preferences: Preferences(defaults: isolated()))
         local.forget()
         #expect(local.owner == nil)
-        #expect(!local.releasePending)
         #expect(LocalAccount(defaults: defaults).owner == nil)
+    }
+
+    private func emptyStore() throws -> ModelContext {
+        let container = try ModelContainer(for: AlbusSchema.schema,
+                                           configurations: ModelConfiguration(schema: AlbusSchema.schema,
+                                                                              isStoredInMemoryOnly: true))
+        return ModelContext(container)
     }
 
     @Test("anything a student made counts as data on the phone")
     func hasData() throws {
-        let container = try ModelContainer(for: AlbusSchema.schema,
-                                           configurations: ModelConfiguration(schema: AlbusSchema.schema,
-                                                                              isStoredInMemoryOnly: true))
-        let context = container.mainContext
+        let context = try emptyStore()
         #expect(!LocalAccount.hasData(in: context))
         context.insert(Rubric(name: "Essay rubric"))
         try context.save()
         #expect(LocalAccount.hasData(in: context))
+    }
+
+    @Test("a course saved before its first task is data too, so the next account is asked about it")
+    func courseAloneIsData() throws {
+        let context = try emptyStore()
+        context.insert(Course(displayName: "Biology"))
+        try context.save()
+        #expect(LocalAccount.hasData(in: context))
+        #expect(LocalAccount.decide(for: me, owner: someoneElse, arrival: .signedIn,
+                                    hasLocalData: LocalAccount.hasData(in: context)) == .ask)
     }
 }
