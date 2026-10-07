@@ -211,6 +211,33 @@ struct ServerTaskCountTests {
         #expect(!coordinator.serverCountSettling)
     }
 
+    @Test("a change while the plan is being read back is sent next, and the plan read again")
+    func changeDuringRefreshIsSent() async throws {
+        let context = try store()
+        let id = UUID()
+        let assignment = task(context, remoteID: id, status: .active)
+        let server = TaskServer()
+        server.answer("sync_my_assignments", status: 200, body: "1")
+        let coordinator = PlanCoordinator(plans: PlanService(client: nil),
+                                          assignments: AssignmentService(client: server.client))
+        let counter = RefreshCounter()
+
+        await coordinator.syncServerCount(context: context) {
+            counter.count += 1
+            guard counter.count == 1 else { return }
+            // The student finishes the task while the plan is on its way back,
+            // and the change asks for a sync, as RootView does.
+            assignment.statusValue = .completed
+            await coordinator.syncServerCount(context: context) { counter.count += 1 }
+        }
+
+        #expect(server.calls.count == 2, "the change made during the read is sent")
+        #expect(server.calls.last?.list("p_finished") == [id.uuidString.lowercased()])
+        #expect(server.calls.last?.list("p_open") == [])
+        #expect(counter.count == 2, "and the plan is read again after it")
+        #expect(!coordinator.serverCountSettling)
+    }
+
     @Test("an account that was deleted sends nothing")
     func deletedAccountSendsNothing() async throws {
         let context = try store()

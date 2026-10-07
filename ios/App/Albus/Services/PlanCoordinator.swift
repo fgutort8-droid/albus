@@ -338,8 +338,8 @@ final class PlanCoordinator {
     /// One request at a time, the latest picture last. Two on the wire at once
     /// could land in either order, and an older picture applied last would
     /// undo a newer one: a task finished and reopened would end up closed on
-    /// the server while open here. A change made while a request is on its way
-    /// is sent after it, read afresh.
+    /// the server while open here. A change made while a request is on its way,
+    /// or while the plan is being read back, is sent after it, read afresh.
     ///
     /// The open list cannot undo "Stop counting" from another phone: the
     /// server reopens only tasks it holds as finished, never ones freed
@@ -362,8 +362,10 @@ final class PlanCoordinator {
             if let finished = Self.finishedRemoteIDs(in: context), let open = Self.openRemoteIDs(in: context) {
                 _ = await assignments.sync(finished: finished, open: Array(open.prefix(Self.serverListLimit)))
             }
+            // The plan is read after the last request. A change made while it
+            // is being read is sent next, and the plan read again.
+            if !syncAgain { await refresh() }
         } while syncAgain && !accountWasDeleted
-        await refresh()
     }
 
     /// Stops the server counting the open tasks that are not on this phone,

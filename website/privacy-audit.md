@@ -83,3 +83,18 @@ support page were changed to match.
 | No Cloudflare check | `CaptchaService`, `CaptchaPrefetch` and `AccountCreation` were deleted; `Info.plist` and `project.yml` no longer carry a Turnstile key. GoTrue never asks for a CAPTCHA on `grant_type=id_token`. |
 | The server's count of open tasks follows the phone | `PlanCoordinator.settleStatus` reports every finish and reopen; `syncServerCount` sends `sync_my_assignments(p_finished, p_open)`; Stop counting sends `release_my_other_assignments(p_keep)` and nothing if the phone can't read its tasks. |
 
+## 7 October 2026: what deleting an account keeps
+
+The server-side erasure audit (task 08B, `docs/security-model.md` §7) checked
+every table that points at an account. The policy had said financial records
+"no longer link to your account"; some still carry the account's random
+identifier, so the deletion paragraph now says so. Apple revocation is also
+best effort, and the policy now says what happens when Apple can't be reached.
+
+| Claim | Evidence |
+| --- | --- |
+| Deletion removes the account, its email address and student content | `delete_my_account()` deletes the `auth.users` row; profiles, courses, assignments, subtasks, sessions, logs, rubrics, gradings and entitlements cascade (`account_erasure_test.sql`). |
+| Payment and security records hold no name, email or study content | `ai_usage`, `security_events` and `subscription_revenue` set `user_id` to null; `financial_audit` keeps only a SHA-256 hash. |
+| Subscription records and queued payment events still carry the random identifier | `subscription_transactions.ownership_origin_user_id` and `ownership_path`, `private.subscription_transfers.source_ids` and `destination_id`, and `private.financial_inbox.user_id` until 30 days after the event is applied. |
+| RevenueCat keeps its record of the purchases | Its customer id is the account's id; Albus sends no deletion request to RevenueCat. |
+| If Apple can't be reached, the account is still deleted | `delete-account` (task 08A) records a warning and deletes when Apple's exchange or revoke fails, or its keys are missing; it stops only for a missing or expired code, or a different Apple ID. |

@@ -33,7 +33,7 @@ scripts/            local CI, adversarial concurrency tests, deploy
 | | State |
 |---|---|
 | Database, RLS, financial controls | **built** — local adversarial suite; live deployment pending |
-| Accounts (anonymous-first) | **done** |
+| Accounts (Sign in with Apple; old anonymous accounts link Apple in place) | **done** |
 | `POST /breakdown` — study plans | **done**, deployed |
 | Rate/cost limiting | **built** — request, attempt, allowance, per-account and global USD fuses |
 | Scheduler, estimator, notifications | **built** and unit-tested |
