@@ -8,18 +8,22 @@ whether another person's data is visible or whether Albus pays for an AI call.
 
 ## 1. Identity
 
-Every student is a real `auth.users` row. First launch creates an anonymous
-Supabase user and stores its rotating session in the iOS Keychain. Anonymous
-users hold the `authenticated` Postgres role; `anon` means no signed-in user and
-has no table grants at all.
+Students sign in with native Sign in with Apple before making an account.
+There is no email/password sign-in, email provider, or Google sign-in. The app
+sends Apple's ID token and raw nonce; GoTrue verifies the signature, nonce and
+`com.felipegutierrez.albus` audience. An Apple ID identifies the account on a
+new phone; its plan returns, while tasks remain on the phone.
 
-The Keychain survives ordinary app deletion, so reinstalling does not normally
-mint a fresh allowance. It is not treated as proof of personhood: accounts can
-still be created outside the app, which is why rate, risk, and global financial
-controls exist underneath it.
+The new app never creates anonymous accounts. Existing anonymous accounts keep
+refreshing their sessions and can link Apple in place through manual linking,
+preserving their UUID and content. Production disables anonymous sign-ins after
+testers update; the local stack keeps them enabled for compatibility tests.
+Anonymous users have the `authenticated` database role; `anon` means no signed-in
+user and has no table grants.
 
-`requireUser()` validates the bearer token with Supabase Auth. Identity always
-comes from that JWT's `sub`; no Edge Function accepts `user_id` from a body.
+Sessions live in the iOS Keychain, but financial and risk controls still apply
+server-side. `requireUser()` validates the bearer token with Supabase Auth.
+Identity comes from the verified JWT; no Edge Function trusts a body `user_id`.
 
 ## 2. Data isolation and the write surface
 
@@ -175,9 +179,13 @@ observations: the now-pseudonymous account UUID remains for the 90-day fraud
 window, while the auth row and all student content delete normally. The daily
 retention job then removes the observation.
 
-Anonymous signup is limited to ten per IP/hour. CAPTCHA/Turnstile remains a
-launch blocker because server-side CAPTCHA cannot be enabled until real
-Cloudflare keys are configured on both client and Supabase.
+An Apple ID identifies a student account. Production switches anonymous signup
+off after testers use the new build, closing that account-farming path; existing
+anonymous sessions keep working. Local anonymous signup remains limited to ten
+per IP/hour for migration tests. CAPTCHA stays off: the app has no challenge,
+native Apple ID-token sign-in is exempt, and no other production signup path
+remains once anonymous signup is disabled. Email provider access is disabled,
+including OTP for existing email users. See [the sign-in runbook](security/sign-in-runbook.md).
 
 ## 6. RevenueCat and entitlements
 
@@ -290,8 +298,10 @@ containers only when migrations/security tests change to keep GitHub cost low.
 
 - Rotate the previously exposed Anthropic key and set the dedicated signal
   pepper.
-- Configure Turnstile and enable CAPTCHA in client and Supabase together.
-- Enable Apple Sign-In/account linking before taking payment.
+- Enable the Apple provider with the bundle ID, disable the Email provider,
+  and keep manual linking enabled; follow [the sign-in runbook](security/sign-in-runbook.md).
+- Set the four `APPLE_*` Edge secrets before deploying account deletion.
+- After testers update, disable anonymous sign-ins in production; leave CAPTCHA off.
 - Configure RevenueCat products, SDK, dual webhook secrets, and product map;
   verify purchase, renewal, cancellation, expiry, refund, replay, and conflict
   in Sandbox before enabling Production products.

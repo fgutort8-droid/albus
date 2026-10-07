@@ -12,6 +12,7 @@ on:
       - 'supabase/config.toml'
       - 'scripts/security-concurrency-local.sh'
       - 'scripts/security/financial-concurrency.py'
+      - 'scripts/security/apple-only-signin.py'
       - '.github/workflows/database-security.yml'
 
 permissions:
@@ -33,6 +34,8 @@ jobs:
         run: supabase db reset --local --no-seed --yes
       - name: Run policy and financial-safety assertions
         run: supabase test db --local
+      - name: Only Sign in with Apple can make an account
+        run: python3 scripts/security/apple-only-signin.py
       - name: Race the last available slots
         run: scripts/security-concurrency-local.sh
       - name: Race payment events, processors and account cleanup

@@ -21,47 +21,39 @@ jwt_expiry = 3600
 enable_refresh_token_rotation = true
 refresh_token_reuse_interval = 10
 
-# No account on first launch — every user starts anonymous.
+# This file runs the local stack; production is changed separately in the
+# dashboard. Follow docs/security/sign-in-runbook.md to keep both in step.
+# The new app signs in with Apple before creating an account. Production turns
+# anonymous signup OFF after testers update: existing anonymous sessions still
+# refresh. Keep it ON locally to test those accounts linking Apple in place.
 enable_anonymous_sign_ins = true
 
-# Manual linking lets an anonymous user become permanent at purchase
-# WITHOUT losing their row, so nothing has to be migrated.
+# Preserve the old anonymous account's id and content when it links Apple.
 enable_manual_linking = true
 
-# Email/password is not used. Apple Sign-In is added at the paywall.
+# CLI 2.98.2 maps this to GOTRUE_EXTERNAL_EMAIL_ENABLED=false, disabling the
+# email provider, not global signup. Password signup and OTP for both new and
+# existing addresses are refused; Apple remains enabled independently.
 [auth.email]
 enable_signup = false
 enable_confirmations = false
 
+# Native ID-token sign-in only; GoTrue verifies the bundle-id audience.
+# CLI 2.98.2 explicitly permits Apple without an OAuth client secret.
 [auth.external.apple]
-enabled = false   # flip on when the Apple Developer account is configured
+enabled = true
+client_id = "com.felipegutierrez.albus"
 
-# CAPTCHA cannot be switched on unilaterally: once enabled, Supabase rejects any
-# sign-up that does not carry a captcha token.
-#
-# The client half is done — `CaptchaService` presents a Cloudflare Turnstile
-# challenge and `SessionService.createAccount` passes the token through. It is
-# inert until `TURNSTILE_SITE_KEY` is set in Config.xcconfig: `Captcha.isEnabled`
-# is `!siteKey.isEmpty`, so with no key onboarding skips the challenge entirely.
-#
-# `provider` said "hcaptcha" while the client implements Turnstile. That is not a
-# problem while this is off, and would have been one the moment it was flipped on:
-# Supabase would have tried to verify a Turnstile token against hCaptcha and
-# rejected every single sign-up. Corrected to match what the client actually sends.
-#
-# To switch on, all three are needed together:
-#   1. TURNSTILE_SITE_KEY in ios/App/Config.xcconfig  (public, safe on device)
-#   2. the Turnstile SECRET key in the Supabase dashboard, Auth > Settings
-#      (never in this repo — it verifies tokens server-side)
-#   3. enabled = true here
+# The app has no CAPTCHA. Native Apple's id_token grant is exempt from its
+# check. After production disables anonymous signup, no other signup path
+# remains for CAPTCHA to protect. Leave it off in the dashboard too.
 [auth.captcha]
 enabled = false
 provider = "turnstile"
 
-# Until then, this is the real control on account-farming. The default is 30
-# anonymous sign-ins per hour per IP; a genuine student needs exactly one, and
-# a shared school NAT might need a handful. Ten leaves room for that while
-# cutting the ceiling on scripted signups by two thirds.
+# GoTrue 2.188.1 applies token_refresh (GOTRUE_RATE_LIMIT_TOKEN_REFRESH)
+# to /token, including id_token; sign_in_sign_ups covers signup/email OTP.
+# Local anonymous signup remains bounded separately for compatibility tests.
 [auth.rate_limit]
 anonymous_users = 10
 sign_in_sign_ups = 30
