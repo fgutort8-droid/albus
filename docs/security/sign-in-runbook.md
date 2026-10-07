@@ -39,10 +39,13 @@ Albus project in the Supabase dashboard, and keep these settings in step with
    CAPTCHA check, and no other sign-up path remains after step 4.
 
 The local verification script checks password signup, email OTP for new and
-existing users, forged Apple token rejection, and anonymous compatibility. Run:
+existing users, forged Apple token rejection, and anonymous compatibility. CI
+runs it on pull requests that change the database, its tests or
+`supabase/config.toml`. To run it yourself, start the local stack
+(`supabase start`), then from the repository:
 
 ```bash
-python3 scripts/security/apple-only-signin.py --workdir /tmp/albus-codex-08c
+python3 scripts/security/apple-only-signin.py
 ```
 
 Sources: [native Apple sign-in](https://supabase.com/docs/guides/auth/social-login/auth-apple),

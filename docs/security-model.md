@@ -219,11 +219,12 @@ keeps access until paid expiry because it schedules a pause; only the later
 does not change entitlement before the provider reports the actual transaction
 state.
 
-Accounts are anonymous, so a new phone is a new account, and Restore has to be
-able to move an active subscription. RevenueCat's restore behaviour therefore
+Signing in with the same Apple ID on a new phone returns the same account,
+and its plan with it. An old anonymous account that never added Apple is the
+exception: on a new phone it is a new account, and Restore has to be able to
+move an active subscription to it. RevenueCat's restore behaviour therefore
 stays on **Transfer to new App User ID**; "only if there are no active
-subscriptions" would refuse exactly the restore a student with a new phone
-needs. A signed `TRANSFER` runs `transfer_subscriptions`: the transactions
+subscriptions" would refuse exactly the restore such a student needs. A signed `TRANSFER` runs `transfer_subscriptions`: the transactions
 move, both accounts are recomputed, and the last 30 days of AI usage move with
 the plan. Every per-account AI limit counts that history, so walking one
 subscription through fresh accounts does not multiply the weekly markings, the
