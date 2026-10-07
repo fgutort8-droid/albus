@@ -266,6 +266,65 @@ Production operators must keep Supabase/GitHub MFA enabled, rotate any exposed
 provider key, review security events and circuit-breaker usage, and test a kill
 switch before launch. Logs must never include request bodies or secrets.
 
+### Deleting an account
+
+`delete_my_account()` derives the account from `auth.uid()` and deletes its
+`auth.users` row. The following inventory was checked on the disposable local
+stack rebuilt from every migration (CLI 2.98.2, PostgreSQL 17). Its catalog has
+31 application tables, 38 foreign keys reaching `auth.users`, 15 account-like
+columns without a foreign key, and zero Storage buckets. The exact catalog
+queries and output are included in the PR description. This is local evidence;
+production still needs the owner's deployment review.
+
+| Database location | What deletion does |
+|---|---|
+| `public.profiles`, `courses`, `assignments`, `subtasks`, `plan_sessions`, `completion_logs`, `rubrics`, `rubric_items`, `gradings`, `entitlements` | Deleted by owner/parent cascades, including grading feedback and its content hash. |
+| `private.api_rate_windows` | Deleted by owner cascade. |
+| `public.ai_usage` | Kept for cost reconciliation; `user_id` becomes null. Failed/reserved rows expire after 30 days; completed rows have no scheduled expiry. |
+| `public.security_events` | Kept without `user_id`; scheduled deletion after 180 days. No student content is allowed. |
+| `public.identity_links` | Kept deliberately with the pseudonymous account UUID and keyed device/network hashes; deleted after 90 days without another observation. This UUID is retained, not replaced with a hash. |
+| `public.subscription_transactions` | Kept for accounting and restore routing. `user_id` becomes null, but `ownership_origin_user_id` and `ownership_path` still retain account UUIDs. |
+| `public.subscription_revenue` | Kept for accounting; `user_id` becomes null. Purchase and event identifiers remain. |
+| `public.subscription_webhook_events` | Kept replay evidence, indexed by provider event ID; no account column. |
+| `private.subscription_transfers` | Kept restore routing. `active_destination_id` becomes null, but `source_ids` and `destination_id` retain account UUIDs. |
+| `private.ai_usage_purchases` | Kept links between retained usage and purchases. Links expire after 30 days of usage age; parent deletion also cascades. |
+| `private.financial_inbox` | Kept payment-processing evidence. No owner FK: `user_id` and the allowlisted JSON payload still name a deleted account. Completed payloads and `user_id` are cleared after 30 days; pending/retry/dead events retain their details until processing succeeds. |
+| `private.financial_audit` | Kept immutable evidence with only a SHA-256 account/resource hash and allowlisted financial fields, never student content or the raw UUID. No scheduled expiry. |
+| `public.curricula`, `course_templates`, `assessment_types`, `rubric_criteria`, `duration_priors`, `plans`, `app_config`, `subscription_products`; `private.ai_model_prices`, `ai_tier_budgets` | Kept shared reference/configuration data; no student ownership. |
+| `auth.users`, `auth.identities`, `auth.sessions`, `auth.one_time_tokens`, `auth.mfa_factors` | Deleted, as are session/factor children and user-owned OAuth/WebAuthn records. |
+| `auth.refresh_tokens` | Deleted through `session_id → auth.sessions`; its text `user_id` has no owner FK. A legacy orphan with no session cannot be proven erased by this SQL RPC. |
+| `auth.flow_state` | No FK on `user_id` or `linking_target_id`; the SQL deletion RPC does not clear OAuth/PKCE flow state. The current app uses native ID-token sign-in, but older flows need separate verification. |
+| Storage | No buckets in the rebuilt stack and no app upload path. Storage owner fields have no owner FK; future uploads would require explicit erasure. |
+
+`prune-security-data` runs `prune_security_data(90, 180)` daily at 04:43
+(database schedule), and `albus-financial-payload-retention` runs
+`prune_financial_inbox()` daily at 03:23. The former also clears expired rate
+windows after two hours, failed/reserved AI attempts after 30 days, and purchase
+usage links after 30 days. These jobs do not scrub the permanent restore-route
+UUID fields above.
+
+| Outside our database | What happens |
+|---|---|
+| RevenueCat | Uses the Supabase account UUID. Albus currently makes no RevenueCat customer-deletion request. Open item: define and implement that provider deletion, including paid-account handling. |
+| Email | No email provider is used and Albus sends no sign-in email; native Sign in with Apple is the only new-account path. Apple may supply a contact/relay address, erased with the auth account locally. |
+| Anthropic | Receives the requested planning/marking text. Account deletion does not call an Anthropic erasure endpoint. Provider retention is governed by its [commercial data-retention policy](https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data), not by our database cascades. |
+| Apple | Task 08A's `delete-account` function exchanges a fresh code, compares the identity and revokes Apple's token before local deletion. Upstream outages or missing secrets allow deletion with `apple_revoked: false`; the student can remove Albus in Apple's settings. Deletion does not cancel an App Store subscription. |
+| Supabase backups and operational logs; copies on other phones | Outside this SQL transaction. No cross-device task wipe or provider-log erasure is implemented. |
+
+**Audit blockers and policy comparison.** Compared with
+`origin/auth/app:website/privacy/index.html` (sections 5–6), student-content
+erasure, security retention, completed/queued payment retention, and Anthropic
+retention match the implemented paths. The sentence “financial records no longer
+link to your account” is stronger than the schema: retained payment payloads,
+restore routes and RevenueCat still carry the UUID. The strict requirement that
+surviving records contain only a null owner or a hash is therefore not currently
+true. Apple revocation is also best effort, whereas the policy describes it
+without the outage/unconfigured exception. These need an owner decision and a
+separate financial-erasure/provider change or corrected policy; this task does
+not alter billing routing, retention, the website, or the existing deletion RPC.
+The erasure test labels these retained UUID cases `AUDIT GAP` so its passing
+result cannot be mistaken for proof of complete financial unlinking.
+
 ## 8. Verification
 
 After any schema or entitlement change:
@@ -278,8 +337,10 @@ supabase test db --local
 scripts/security-concurrency-local.sh
 ```
 
-The pgTAP suite performs 96 privilege, RLS, plan, rate, risk, cost, replay, and
-cross-user checks in a rolled-back transaction. The shell test opens twelve
+The pgTAP suite performs 496 privilege, RLS, plan, rate, risk, cost, replay,
+assignment-status and account-erasure assertions across 13 files, each in a
+rolled-back transaction. The erasure assertions explicitly expose retained
+financial UUIDs; see the audit blockers in §7. The shell test opens twelve
 real Postgres connections for one remaining grading/task/rubric and requires
 exactly one winner in each race. A one-connection test cannot prove locking.
 
