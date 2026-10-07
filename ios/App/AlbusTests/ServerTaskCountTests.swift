@@ -181,6 +181,36 @@ struct ServerTaskCountTests {
         #expect(!coordinator.serverCountSettling)
     }
 
+    @Test("a change while a sync is on its way is sent after it, never beside it, and the latest wins")
+    func syncsQueue() async throws {
+        let context = try store()
+        let id = UUID()
+        let assignment = task(context, remoteID: id, status: .active)
+        let server = TaskServer()
+        server.answer("sync_my_assignments", status: 200, body: "1")
+        let held = server.holdFirstAnswer()
+        let coordinator = PlanCoordinator(plans: PlanService(client: nil),
+                                          assignments: AssignmentService(client: server.client))
+        let counter = RefreshCounter()
+
+        let first = Task { await coordinator.syncServerCount(context: context) { counter.count += 1 } }
+        for _ in 0..<300 where server.calls.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(server.calls.count == 1, "the first request is on its way, held")
+
+        assignment.statusValue = .completed
+        await coordinator.syncServerCount(context: context) { counter.count += 1 }
+        #expect(server.calls.count == 1, "nothing is sent beside a request on its way")
+
+        held.signal()
+        await first.value
+
+        #expect(server.calls.count == 2)
+        #expect(server.calls.last?.list("p_finished") == [id.uuidString.lowercased()], "the latest picture goes last")
+        #expect(server.calls.last?.list("p_open") == [])
+        #expect(counter.count == 1, "the plan is read once, after the last request")
+        #expect(!coordinator.serverCountSettling)
+    }
+
     @Test("an account that was deleted sends nothing")
     func deletedAccountSendsNothing() async throws {
         let context = try store()
@@ -197,6 +227,11 @@ struct ServerTaskCountTests {
         #expect(server.calls.isEmpty)
         #expect(!refreshed)
     }
+}
+
+@MainActor
+private final class RefreshCounter {
+    var count = 0
 }
 
 // MARK: - A scripted server
@@ -221,6 +256,12 @@ private final class TaskServer {
         TaskTransport.registry.set(host: host, path: "/rest/v1/rpc/\(function)", status: status, body: body)
     }
 
+    /// Holds the answer to the next request until the test signals, as a
+    /// slow network would.
+    func holdFirstAnswer() -> DispatchSemaphore {
+        TaskTransport.registry.hold(host: host)
+    }
+
     private(set) lazy var client: SupabaseClient = {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [TaskTransport.self]
@@ -238,6 +279,7 @@ private final class TaskTransport: URLProtocol, @unchecked Sendable {
         private let lock = NSLock()
         private var answers: [String: [String: (Int, String)]] = [:]
         private var log: [String: [TaskServer.Call]] = [:]
+        private var holds: [String: DispatchSemaphore] = [:]
 
         func set(host: String, path: String, status: Int, body: String) {
             lock.lock(); defer { lock.unlock() }
@@ -247,10 +289,17 @@ private final class TaskTransport: URLProtocol, @unchecked Sendable {
             lock.lock(); defer { lock.unlock() }
             return log[host] ?? []
         }
-        func record(host: String, call: TaskServer.Call) -> (Int, String)? {
+        func hold(host: String) -> DispatchSemaphore {
+            lock.lock(); defer { lock.unlock() }
+            let semaphore = DispatchSemaphore(value: 0)
+            holds[host] = semaphore
+            return semaphore
+        }
+        /// Records the call, and hands back a hold for it if one is waiting.
+        func record(host: String, call: TaskServer.Call) -> (answer: (Int, String)?, hold: DispatchSemaphore?) {
             lock.lock(); defer { lock.unlock() }
             log[host, default: []].append(call)
-            return answers[host]?[call.path]
+            return (answers[host]?[call.path], holds.removeValue(forKey: host))
         }
     }
     static let registry = Registry()
@@ -263,7 +312,10 @@ private final class TaskTransport: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         guard let url = request.url, let host = url.host else { return }
         let call = TaskServer.Call(method: request.httpMethod ?? "GET", path: url.path, body: bodyData())
-        let (status, body) = Self.registry.record(host: host, call: call) ?? (404, #"{"message":"no script"}"#)
+        let recorded = Self.registry.record(host: host, call: call)
+        // A held answer waits here, on the loading thread, not the test's.
+        recorded.hold?.wait()
+        let (status, body) = recorded.answer ?? (404, #"{"message":"no script"}"#)
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
                                        headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

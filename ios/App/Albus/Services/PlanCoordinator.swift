@@ -75,6 +75,10 @@ final class PlanCoordinator {
     var serverCountSettling: Bool { settlingCalls > 0 }
     private var settlingCalls = 0
 
+    /// A sync on its way, and whether the phone changed again meanwhile.
+    private var syncRunning = false
+    private var syncAgain = false
+
     func invalidateForAccountDeletion() {
         accountWasDeleted = true
         onScheduleChanged = nil
@@ -330,13 +334,35 @@ final class PlanCoordinator {
     /// refused a sixth. The whole picture is sent each time, not just what
     /// changed: the server changes only what differs, and a failed attempt
     /// needs no queue to be caught up by the next.
+    ///
+    /// One request at a time, the latest picture last. Two on the wire at once
+    /// could land in either order, and an older picture applied last would
+    /// undo a newer one: a task finished and reopened would end up closed on
+    /// the server while open here. A change made while a request is on its way
+    /// is sent after it, read afresh.
+    ///
+    /// The open list cannot undo "Stop counting" from another phone: the
+    /// server reopens only tasks it holds as finished, never ones freed
+    /// (`archived`), which is how that decision survives this phone still
+    /// holding them (`sync_my_assignments`, server task 08B).
     func syncServerCount(context: ModelContext, refresh: @MainActor () async -> Void) async {
         guard !accountWasDeleted else { return }
-        settlingCalls += 1
-        defer { settlingCalls -= 1 }
-        if let finished = Self.finishedRemoteIDs(in: context), let open = Self.openRemoteIDs(in: context) {
-            _ = await assignments.sync(finished: finished, open: Array(open.prefix(Self.serverListLimit)))
+        if syncRunning {
+            syncAgain = true
+            return
         }
+        syncRunning = true
+        settlingCalls += 1
+        defer {
+            syncRunning = false
+            settlingCalls -= 1
+        }
+        repeat {
+            syncAgain = false
+            if let finished = Self.finishedRemoteIDs(in: context), let open = Self.openRemoteIDs(in: context) {
+                _ = await assignments.sync(finished: finished, open: Array(open.prefix(Self.serverListLimit)))
+            }
+        } while syncAgain && !accountWasDeleted
         await refresh()
     }
 
