@@ -4,9 +4,9 @@
     "frozen": true
   },
   "tasks": {
-    "check": "deno check breakdown/index.ts grade/index.ts revenuecat-webhook/index.ts",
+    "check": "deno check breakdown/index.ts grade/index.ts delete-account/index.ts revenuecat-webhook/index.ts",
     "test": "deno test --allow-env _tests/",
-    "lint": "deno lint _shared/ breakdown/ grade/ revenuecat-webhook/"
+    "lint": "deno lint _shared/ breakdown/ grade/ delete-account/ revenuecat-webhook/"
   },
   "fmt": {
     "lineWidth": 100

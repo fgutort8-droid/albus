@@ -81,5 +81,8 @@ verify_jwt = true
 [functions.grade]
 verify_jwt = true
 
+[functions.delete-account]
+verify_jwt = true
+
 [functions.revenuecat-webhook]
 verify_jwt = false

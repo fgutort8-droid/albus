@@ -58,6 +58,10 @@ subscription or usage enumeration.
 | `ANTHROPIC_API_KEY` | Edge secrets | pays for model calls |
 | RevenueCat webhook secrets | Edge secrets | authenticate and sign payment events |
 | `ALBUS_SIGNAL_PEPPER` | Edge secrets | makes stored signal hashes non-reversible |
+| `APPLE_TEAM_ID` | Edge secrets, set by the owner | lets the server revoke Sign in with Apple |
+| `APPLE_KEY_ID` | Edge secrets, set by the owner | lets the server revoke Sign in with Apple |
+| `APPLE_PRIVATE_KEY` | Edge secrets, set by the owner | lets the server revoke Sign in with Apple |
+| `APPLE_CLIENT_ID` | Edge secrets, set by the owner | lets the server revoke Sign in with Apple |
 
 Functions take their Supabase keys from `resolveKey` in `_shared/auth.ts`: a
 hand-set `ALBUS_SUPABASE_*_KEY` override first, then the platform's
@@ -80,7 +84,7 @@ again. The RevenueCat webhook is the sole no-JWT function because RevenueCat is
 not an Albus user; it has two independent checks described below.
 
 Bodies are streamed through byte ceilings before JSON parsing: 16 KiB for plan
-generation, 128 KiB for grading, and 64 KiB for RevenueCat.
+generation, 128 KiB for grading, 64 KiB for RevenueCat, and 2 KiB for account deletion.
 Field-level limits then bound prompt content. A declared or streamed oversized
 body is cancelled before full allocation.
 
@@ -89,6 +93,17 @@ they resolve to. Breakdown additionally rejects a foreign course/rubric before
 calling Anthropic, avoiding a paid generation that is guaranteed to fail when
 saved. Prompt inputs are fenced and tag-like student text is stripped; output
 is schema-constrained and normalized before persistence.
+
+`delete-account` authenticates the caller and loads their Apple identity through
+the admin client. It exchanges a fresh authorization code, compares the Apple
+subject, revokes the refresh token (or access token), then calls the existing
+caller-scoped `delete_my_account()` RPC. A missing code, expired code, or another
+Apple ID stops deletion. Missing Apple secrets and upstream failures never block
+account erasure: an awaited warning is recorded before the user is deleted,
+without codes, tokens, subjects, emails, or device/network hashes. The response
+reports whether Apple revocation succeeded. There is no request-rate gate:
+the existing gate accepts only AI endpoints, each attempt makes at most one
+exchange and revoke, and a successful deletion removes its authenticated caller.
 
 ## 4. AI financial protection
 
