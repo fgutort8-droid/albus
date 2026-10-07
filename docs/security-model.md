@@ -308,22 +308,20 @@ UUID fields above.
 | RevenueCat | Uses the Supabase account UUID. Albus currently makes no RevenueCat customer-deletion request. Open item: define and implement that provider deletion, including paid-account handling. |
 | Email | No email provider is used and Albus sends no sign-in email; native Sign in with Apple is the only new-account path. Apple may supply a contact/relay address, erased with the auth account locally. |
 | Anthropic | Receives the requested planning/marking text. Account deletion does not call an Anthropic erasure endpoint. Provider retention is governed by its [commercial data-retention policy](https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data), not by our database cascades. |
-| Apple | Task 08A's `delete-account` function exchanges a fresh code, compares the identity and revokes Apple's token before local deletion. Upstream outages or missing secrets allow deletion with `apple_revoked: false`; the student can remove Albus in Apple's settings. Deletion does not cancel an App Store subscription. |
+| Apple | The `delete-account` function exchanges a fresh code, compares the identity and revokes Apple's token before local deletion. Upstream outages or missing secrets allow deletion with `apple_revoked: false`; the student can remove Albus in Apple's settings. Deletion does not cancel an App Store subscription. |
 | Supabase backups and operational logs; copies on other phones | Outside this SQL transaction. No cross-device task wipe or provider-log erasure is implemented. |
 
-**Audit blockers and policy comparison.** Compared with
-`origin/auth/app:website/privacy/index.html` (sections 5–6), student-content
-erasure, security retention, completed/queued payment retention, and Anthropic
-retention match the implemented paths. The sentence “financial records no longer
-link to your account” is stronger than the schema: retained payment payloads,
-restore routes and RevenueCat still carry the UUID. The strict requirement that
-surviving records contain only a null owner or a hash is therefore not currently
-true. Apple revocation is also best effort, whereas the policy describes it
-without the outage/unconfigured exception. These need an owner decision and a
-separate financial-erasure/provider change or corrected policy; this task does
-not alter billing routing, retention, the website, or the existing deletion RPC.
-The erasure test labels these retained UUID cases `AUDIT GAP` so its passing
-result cannot be mistaken for proof of complete financial unlinking.
+**Audit result and the privacy policy.** Student-content erasure, security
+retention, completed and queued payment retention, and Anthropic retention match
+the privacy policy. The policy used to say financial records "no longer link to
+your account", which the retained UUIDs above contradict. Since 7 October 2026
+(PR #34) its deletion paragraph says that subscription records and queued
+payment events keep the account's random identifier, as does RevenueCat's
+customer record, and that Apple revocation is best effort. Still open, as
+billing changes of their own: asking RevenueCat to delete the customer when the
+account is deleted, and replacing the retained restore-route UUIDs with a hash.
+The erasure test labels the retained UUID cases `RETAINED, disclosed` so a
+passing run can't be mistaken for proof of complete financial unlinking.
 
 ## 8. Verification
 
@@ -340,7 +338,7 @@ scripts/security-concurrency-local.sh
 The pgTAP suite performs 496 privilege, RLS, plan, rate, risk, cost, replay,
 assignment-status and account-erasure assertions across 13 files, each in a
 rolled-back transaction. The erasure assertions explicitly expose retained
-financial UUIDs; see the audit blockers in §7. The shell test opens twelve
+financial UUIDs; see the audit result in §7. The shell test opens twelve
 real Postgres connections for one remaining grading/task/rubric and requires
 exactly one winner in each race. A one-connection test cannot prove locking.
 

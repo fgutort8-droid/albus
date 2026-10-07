@@ -105,7 +105,7 @@ select set_config('request.jwt.claim.sub','',true);
 select set_config('request.jwt.claims','',true);
 
 -- All 31 application tables are inspected, including empty reference tables.
--- Retained UUID routes are explicit exceptions in the audit and PR blocker.
+-- Retained UUID routes are explicit exceptions, listed in the audit.
 select is(pg_temp.account_rows(relation,'d0820000-0000-4000-8000-000000000001'),0,'erased every account reference in '||relation)
 from erasure_tables where relation not in ('identity_links','public.identity_links','subscription_transactions','public.subscription_transactions','private.financial_inbox','private.subscription_transfers') order by relation;
 select is(pg_temp.account_rows(relation,'d0820000-0000-4000-8000-000000000002'),expected,'other account unchanged in '||relation) from staying_counts order by relation;
@@ -118,11 +118,12 @@ select is((select count(*)::integer from private.subscription_transfers where ev
 select is(pg_temp.account_rows('private.financial_audit','d0820000-0000-4000-8000-000000000001'),0,'immutable financial audit contains no account UUID');
 select ok(exists(select 1 from private.financial_audit where resource_hash=encode(extensions.digest('d0820000-0000-4000-8000-000000000001','sha256'),'hex')),'immutable financial evidence survives keyed only by a hash');
 
--- Do not silently assert the policy promise. These expose the exact current
--- retention mismatches without changing the payment pipeline in this task.
-select is(pg_temp.account_rows('private.financial_inbox','d0820000-0000-4000-8000-000000000001'),1,'AUDIT GAP: completed payment payload and user_id still name the deleted account');
-select is(pg_temp.account_rows('public.subscription_transactions','d0820000-0000-4000-8000-000000000001'),1,'AUDIT GAP: purchase ownership origin/path retain the deleted UUID');
-select is(pg_temp.account_rows('private.subscription_transfers','d0820000-0000-4000-8000-000000000001'),1,'AUDIT GAP: transfer source/destination retain the deleted UUID');
+-- Retained for now and disclosed in the privacy policy since 7 October 2026.
+-- Replacing them with a hash is an open billing change; if it lands, these
+-- assertions change with it.
+select is(pg_temp.account_rows('private.financial_inbox','d0820000-0000-4000-8000-000000000001'),1,'RETAINED, disclosed: completed payment payload and user_id still name the deleted account');
+select is(pg_temp.account_rows('public.subscription_transactions','d0820000-0000-4000-8000-000000000001'),1,'RETAINED, disclosed: purchase ownership origin/path retain the deleted UUID');
+select is(pg_temp.account_rows('private.subscription_transfers','d0820000-0000-4000-8000-000000000001'),1,'RETAINED, disclosed: transfer source/destination retain the deleted UUID');
 
 insert into auth.users(id,instance_id,aud,role,encrypted_password,raw_app_meta_data,raw_user_meta_data,created_at,updated_at,last_sign_in_at,is_anonymous)
 select ('d0890000-0000-4000-8000-'||lpad(g::text,12,'0'))::uuid,
