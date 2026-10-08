@@ -15,6 +15,20 @@ Almost everything else in the app runs on-device. Scheduling, re-planning,
 tool matching, notifications, progress and per-user calibration need no
 server — see the architecture notes for the full ledger.
 
+## Accounts
+
+Students sign in first with native Sign in with Apple. GoTrue verifies the ID
+token and nonce against the bundle ID. Email/password sign-in and email OTP are
+disabled. Old anonymous sessions still refresh and link Apple in place through
+manual linking, keeping the same account UUID. A new phone signs in to the same
+account and plan; tasks stay on the phone. Production turns anonymous sign-ins
+off after testers update, while local stacks keep them on for compatibility
+tests. The app has no CAPTCHA; Apple's ID-token grant is exempt from it.
+
+The owner applies production provider settings separately in the dashboard;
+see [the sign-in runbook](security/sign-in-runbook.md). The local checks are
+`python3 scripts/security/apple-only-signin.py --workdir <local-stack>`.
+
 ---
 
 ## Model routing
@@ -235,8 +249,9 @@ lives outside the repo:
    product ids, in one group with Pro above Plus, and Billing Grace Period off.
 2. RevenueCat: connect the app. The client logs in with the Supabase user id,
    lowercased. Leave restore behaviour on the default, **Transfer to new App
-   User ID**: accounts are anonymous, so a new phone is a new account, and
-   `transfer_subscriptions` moves the plan and its usage history.
+   User ID** for legacy-account restores. New Apple sign-ins recover the same
+   account on a new phone. If a signed transfer does occur, `transfer_subscriptions`
+   still moves the plan and its usage history.
 3. RevenueCat → Integrations → Webhooks: point at
    `https://<project>.functions.supabase.co/revenuecat-webhook`; configure both
    `REVENUECAT_WEBHOOK_SECRET` (the Authorization header) and
@@ -358,10 +373,11 @@ expected; none is an oversight.
   `auth.uid()`, schema-qualify their relations, and take no user-id parameter.
   AI reservation/finalization and every internal function that *does* take a
   uid are service-only; the obsolete client-callable forms were dropped.
-- **`auth_allow_anonymous_sign_ins`** — the entire product is anonymous-first.
-  Every user holds the `authenticated` role via an anonymous session; this is
-  the design, not a leak. `public.plans` appears here because it is readable by
-  every signed-in user, which is intended: it is a price list.
-- **`auth_leaked_password_protection`, `auth_insufficient_mfa_options`** — the
-  app has no passwords and sends no email. Both become relevant only when Apple
-  Sign-In is switched on.
+- **`auth_allow_anonymous_sign_ins`** is expected only on the local compatibility
+  stack and during the tester rollout. Disable it in production after testers
+  update; existing sessions can still refresh and link Apple. `public.plans`
+  remains readable by every signed-in user because it is a price list.
+- **`auth_leaked_password_protection`** — the app has no passwords or email
+  sign-in, so this setting cannot protect its Apple sign-in flow.
+- **`auth_insufficient_mfa_options`** — student identity uses native Apple sign-in;
+  operator MFA on Supabase and the other provider accounts remains required.
