@@ -40,6 +40,9 @@ jobs:
           python3 scripts/test-dependency-controls.py
           python3 scripts/test-deployment-preview.py
           bash scripts/tests/deploy-subscriptions-dry-run.sh
+          bash scripts/tests/deploy-auth-dry-run.sh
+          bash scripts/tests/deploy-auth-live-run.sh
+          bash scripts/tests/set-apple-secrets-test.sh
           python3 scripts/tools/test_fetch_logos.py
       - name: Install checksum-pinned Gitleaks
         env:
