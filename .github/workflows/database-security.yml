@@ -9,6 +9,9 @@ on:
     paths:
       - 'supabase/migrations/**'
       - 'supabase/tests/**'
+      - 'supabase/functions/delete-account/**'
+      - 'supabase/functions/_shared/**'
+      - 'scripts/security/delete-account-boundary.py'
       - 'supabase/config.toml'
       - 'scripts/security-concurrency-local.sh'
       - 'scripts/security/financial-concurrency.py'
@@ -37,6 +40,8 @@ jobs:
         run: scripts/security-concurrency-local.sh
       - name: Race payment events, processors and account cleanup
         run: python3 scripts/security/financial-concurrency.py
+      - name: Only a student's own token deletes their account
+        run: python3 scripts/security/delete-account-boundary.py
       - name: Stop local services
         if: always()
         run: supabase stop --no-backup

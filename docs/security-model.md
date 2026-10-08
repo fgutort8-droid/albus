@@ -104,6 +104,9 @@ without codes, tokens, subjects, emails, or device/network hashes. The response
 reports whether Apple revocation succeeded. There is no request-rate gate:
 the existing gate accepts only AI endpoints, each attempt makes at most one
 exchange and revoke, and a successful deletion removes its authenticated caller.
+`scripts/security/delete-account-boundary.py` runs in the Database security
+workflow against the real local function: a student's own token deletes exactly
+that account, and a missing, forged or spent token deletes nothing.
 
 ## 4. AI financial protection
 
