@@ -105,6 +105,24 @@ ALBUS_TEST_REMOTE_ONLY=20261007000000 preview
 expect_stop 'an unknown remote migration' 'unrecognized remote migrations: 20261007000000'
 echo 'PASS: a migration only the server knows stops it'
 
+ALBUS_TEST_PENDING='' preview
+expect_pass 'a run after the migration was applied'
+grep -q 'Pending migrations: none' "$TEST_DIR/output" || { echo 'FAIL: an applied migration was not read as applied' >&2; exit 1; }
+echo 'PASS: running again after the migration was applied still previews'
+
+NEWER="$TEST_DIR/newer"
+mkdir -p "$NEWER"
+cp -R "$ROOT/supabase" "$NEWER/supabase"
+rm -rf "$NEWER/supabase/.temp"
+printf 'select 1;\n' > "$NEWER/supabase/migrations/20261009000000_unreviewed.sql"
+SOURCE="$NEWER" ALBUS_TEST_PENDING='' preview
+expect_stop 'a newer migration main and the server both have' 'main has a migration newer than the reviewed one (20261009000000)'
+echo 'PASS: a newer migration already on the server stops it, though nothing is pending'
+
+SOURCE="$NEWER" ALBUS_TEST_PENDING='20261006120000 20261009000000' preview
+expect_stop 'a newer migration only main has' 'unexpected pending migrations: 20261006120000 20261009000000'
+echo 'PASS: a newer pending migration stops it'
+
 ALBUS_TEST_DELETE_FUNCTION=',{"slug":"delete-account","verify_jwt":false,"version":1}' preview
 expect_stop 'delete-account live without its JWT check' 'already live without its JWT check'
 echo 'PASS: a live delete-account without its JWT check stops it'

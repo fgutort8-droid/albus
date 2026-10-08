@@ -85,6 +85,18 @@ compare() {
   PENDING=$(awk -F'|' 'NF>=3 {l=$1;r=$2;gsub(/ /,"",l);gsub(/ /,"",r);if(l~/^[0-9]+$/ && r=="")print l}' <<<"$out" | xargs)
   [ -z "$REMOTE_ONLY" ] || stop "unrecognized remote migrations: $REMOTE_ONLY"
   case "$PENDING" in ""|"$EXPECTED") ;; *) stop "unexpected pending migrations: $PENDING" ;; esac
+  # The reviewed state is exact, not just "contains $PREVIOUS": main's newest
+  # change is $EXPECTED, and the live database ends at $PREVIOUS, or at
+  # $EXPECTED when this runs again after applying it.
+  local latest_local latest_remote
+  latest_local=$(awk -F'|' 'NF>=3 {l=$1;gsub(/ /,"",l);if(l~/^[0-9]+$/)print l}' <<<"$out" | sort | tail -1)
+  latest_remote=$(awk -F'|' 'NF>=3 {r=$2;gsub(/ /,"",r);if(r~/^[0-9]+$/)print r}' <<<"$out" | sort | tail -1)
+  [ "$latest_local" = "$EXPECTED" ] \
+    || stop "main has a migration newer than the reviewed one ($latest_local); ask Claude for a new script"
+  case "$latest_remote" in
+    "$PREVIOUS"|"$EXPECTED") ;;
+    *) stop "the live database ends at $latest_remote, not $PREVIOUS or $EXPECTED; stopping rather than guessing" ;;
+  esac
 }
 
 functions_state() {
@@ -120,7 +132,7 @@ names={r.get('name') for r in rows if isinstance(r,dict)}
 missing=[n for n in sys.argv[2:] if n not in names]
 for n in sys.argv[2:]: print(n+': '+('set' if n in names else 'not set yet'))
 print('All four Apple secrets are set.' if not missing else
-      'Next step: set '+', '.join(missing)+' (see docs/security/sign-in-runbook.md) before the new app build ships.')
+      'Next step, before the new app build ships: bash scripts/set-apple-secrets.sh /path/to/AuthKey_XXXXXXXXXX.p8 (sets '+', '.join(missing)+')')
 PY
 }
 
@@ -137,7 +149,8 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 if [ -n "$PENDING" ]; then
-  supabase db push --yes </dev/null
+  supabase db push --yes </dev/null \
+    || stop 'Supabase reported an error applying the migration, so nothing was deployed; tell Claude'
   compare
   [ -z "$PENDING" ] || stop 'migration still pending'
 fi
@@ -157,14 +170,17 @@ select
  not exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('public','private') and p.prosecdef and not coalesce(p.proconfig @> array['search_path=""'],false)) as definer_paths_closed;
 commit;
 SQL
-supabase db query --linked --file "$STAGE/verify.sql" --output json > "$STAGE/verify.json"
-python3 - "$STAGE/verify.json" <<'PY'
+supabase db query --linked --file "$STAGE/verify.sql" --output json > "$STAGE/verify.json" </dev/null \
+  || stop 'the migration is applied, but the database checks could not run, so delete-account was not deployed; tell Claude'
+python3 - "$STAGE/verify.json" <<'PY' || stop 'the migration is applied, but the database checks did not all pass, so delete-account was not deployed; tell Claude before anything else'
 import json,sys
 j=json.load(open(sys.argv[1])); r=j.get('rows',[]) if isinstance(j,dict) else j
-assert len(r)==1 and len(r[0])==11 and all(v is True for v in r[0].values()), 'Database verification failed'
-for key,value in r[0].items(): print(key+': '+str(value))
+if len(r)==1 and isinstance(r[0],dict):
+ for key,value in r[0].items(): print(key+': '+str(value))
+sys.exit(0 if len(r)==1 and len(r[0])==11 and all(v is True for v in r[0].values()) else 1)
 PY
-supabase functions deploy delete-account --project-ref "$REF" --use-api </dev/null
+supabase functions deploy delete-account --project-ref "$REF" --use-api </dev/null \
+  || stop 'the migration is applied and checked, but delete-account did not deploy; running this again is safe'
 functions_state after || stop 'delete-account deployed, but not as reviewed; tell Claude before anything else'
 STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/functions/v1/delete-account" \
   -H 'Content-Type: application/json' -d '{}' || true)
@@ -172,4 +188,4 @@ STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/functions/v1/delet
 echo 'delete-account refuses a request with no token (401), as it should.'
 apple_secrets
 echo 'DONE: the task functions are live and checked, delete-account is deployed with its JWT check on. No secrets changed.'
-echo 'Tell Claude, who checks the live state next.'
+echo 'Send Claude everything this printed.'

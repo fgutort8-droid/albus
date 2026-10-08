@@ -13,7 +13,10 @@ set -euo pipefail
 REF=ssvehwhblgqtvqkfbkbj
 CLIENT_ID=com.felipegutierrez.albus
 NAMES='APPLE_TEAM_ID APPLE_KEY_ID APPLE_PRIVATE_KEY APPLE_CLIENT_ID'
+# Before the secrets are sent, a stop changes nothing. From then on, they may
+# be set, and sending the same four again is safe.
 stop() { echo "STOPPED: $*; nothing was set." >&2; exit 1; }
+stop_after_sending() { echo "STOPPED: $*. They may or may not be set; running this again is safe. Tell Claude." >&2; exit 1; }
 for tool in supabase python3 openssl; do command -v "$tool" >/dev/null || stop "missing $tool"; done
 [ $# -eq 1 ] || stop 'give the path to the .p8 file Apple let you download'
 KEY_FILE=$1
@@ -51,16 +54,16 @@ with open(env_file, 'w') as f:
     f.write('APPLE_PRIVATE_KEY="' + key.replace('\n', '\\n') + '"\n')
 PY
 supabase secrets set --project-ref "$REF" --env-file "$STAGE/apple.env" </dev/null >/dev/null \
-  || stop 'Supabase did not accept the secrets'
+  || stop_after_sending 'Supabase reported an error setting the secrets'
 supabase secrets list --project-ref "$REF" --output json > "$STAGE/secrets.json" </dev/null \
-  || stop 'set, but the secret names could not be read back; tell Claude'
+  || stop_after_sending 'the secrets were sent, but their names could not be read back'
 # Names only. The list also carries a digest of each value; it is never printed.
 python3 - "$STAGE/secrets.json" $NAMES <<'PY'
 import json,sys
 rows=json.load(open(sys.argv[1])); rows=rows.get('secrets',rows) if isinstance(rows,dict) else rows
 names={r.get('name') for r in rows if isinstance(r,dict)}
 missing=[n for n in sys.argv[2:] if n not in names]
-if missing: sys.exit('STOPPED: not set: '+', '.join(missing)+'; tell Claude')
+if missing: sys.exit('STOPPED: sent, but not listed: '+', '.join(missing)+'. Running this again is safe. Tell Claude.')
 print('Set: '+', '.join(sys.argv[2:])+'. No value was shown or saved.')
 PY
 echo 'Tell Claude, who checks them next.'

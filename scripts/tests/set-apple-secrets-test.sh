@@ -14,11 +14,13 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$ALBUS_TEST_LOG"
 case "$1 $2" in
   'secrets set')
+    [ -z "${ALBUS_TEST_SET_FAILS:-}" ] || exit 1
     while [ $# -gt 0 ]; do
       if [ "$1" = --env-file ]; then cp "$2" "$ALBUS_TEST_ENV_COPY"; fi
       shift
     done ;;
   'secrets list')
+    [ -z "${ALBUS_TEST_LIST_FAILS:-}" ] || exit 1
     printf '[{"name":"SUPABASE_URL","value":"00"}'
     if [ -f "$ALBUS_TEST_ENV_COPY" ] && [ -z "${ALBUS_TEST_DROP:-}" ]; then
       sed -nE 's/^([A-Z_]+)=.*/,{"name":"\1","value":"00"}/p' "$ALBUS_TEST_ENV_COPY" | tr -d '\n'
@@ -69,7 +71,18 @@ run "$KEY" 'not-an-id'
 echo 'PASS: a malformed team ID is refused before anything is set'
 
 ALBUS_TEST_DROP=1 run "$KEY" 'TEAMID1234'
-[ "$STATUS" -ne 0 ] && grep -q 'not set: APPLE_TEAM_ID' "$TEST_DIR/output" \
+[ "$STATUS" -ne 0 ] && grep -q 'sent, but not listed: APPLE_TEAM_ID' "$TEST_DIR/output" \
   || { cat "$TEST_DIR/output" >&2; echo 'FAIL: secrets missing after setting were not reported' >&2; exit 1; }
 echo 'PASS: secrets that do not read back are reported'
+
+# Once the secrets have been sent, no message may claim nothing changed.
+for failing in ALBUS_TEST_SET_FAILS ALBUS_TEST_LIST_FAILS; do
+  export "$failing=1"
+  run "$KEY" 'TEAMID1234'
+  unset "$failing"
+  [ "$STATUS" -ne 0 ] && grep -q 'may or may not be set; running this again is safe' "$TEST_DIR/output" \
+    && ! grep -q 'nothing was set' "$TEST_DIR/output" \
+    || { cat "$TEST_DIR/output" >&2; echo "FAIL: $failing was misreported" >&2; exit 1; }
+done
+echo 'PASS: a failure after sending never says nothing was set'
 echo 'PASS: the Apple-secrets helper never shows the key and checks what it set.'
