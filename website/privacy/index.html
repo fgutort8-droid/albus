@@ -12,7 +12,7 @@
   <header><a class="brand" href="/">Albus</a></header>
 
   <h1>Privacy policy</h1>
-  <p class="updated">Last updated 1 October 2026</p>
+  <p class="updated">Last updated 7 October 2026</p>
 
   <p>Albus is an iPhone app that plans study time. This page explains what information it
      handles, why, who helps us run it, and the choices you have.</p>
@@ -20,14 +20,13 @@
   <div class="summary">
     <h2>The short version</h2>
     <ul>
-      <li>No name, email address or phone number is required to use Albus. Your account is anonymous; a display name is optional.</li>
+      <li>You sign in with Apple. We keep the email address Apple shares with us, which can be a private relay address, only to find your account if you write to us. A display name is optional.</li>
       <li>Albus stores your assignments, plans, saved rubrics and marking results to provide the app's features.</li>
       <li>When you ask for an AI plan or for marking, the text that request needs is sent to Anthropic,
           which runs the AI. Anthropic does not use API content for model training by default under its commercial terms.</li>
       <li>We don't save the full submission in our database. Saved feedback can include excerpts from your work.</li>
-      <li>A security check from Cloudflare runs while you set up Albus, to stop programs creating accounts in bulk.</li>
       <li>No ads, no advertising identifier and no tracking across apps or websites.</li>
-      <li>Apple handles payments. We never see your card or your Apple ID.</li>
+      <li>Apple handles payments. We never see your card or your Apple ID password.</li>
     </ul>
   </div>
 
@@ -39,10 +38,14 @@
   <h2>2. What we collect, and why</h2>
 
   <h3>Your account</h3>
-  <p>When you finish setting up Albus, it creates an anonymous account with our database provider,
-     Supabase. The account has a random identifier and no name, email address or password. It lets
-     your plans sync to our server and lets us apply your plan's limits.
-     <em>Why: to provide the app you asked for.</em></p>
+  <p>You sign in before you start, with Sign in with Apple. Your account is kept by our database provider,
+     Supabase, with a random identifier and no password. Apple gives us an identifier it made for you and
+     Albus, and the email address you choose to share, which can be a private relay address that forwards to
+     you. We never see your Apple ID or its password, and we don't ask Apple for your name.</p>
+  <p>We use your email address only to find your account if you write to us. We don't send you email,
+     newsletters or marketing. Accounts made before sign-in existed (before October 2026) are anonymous
+     until you add Apple to them.
+     <em>Why: to provide the app you asked for, and to let you sign back in.</em></p>
 
   <h3>What you put into Albus</h3>
   <ul>
@@ -92,23 +95,13 @@
      network part, and both values are replaced with a keyed one-way code. These tables do not store the raw identifier or IP address. Our hosting and authentication providers may separately keep network information in operational and security logs. We also keep short security records, such as which feature was
      used and an error code, never anything you wrote.
      <em>Why: our legitimate interest in preventing abuse and keeping Albus affordable, including free.</em></p>
-  <p>When you set up Albus, it also runs a check from Cloudflare, called Turnstile, that tells people apart
-     from programs creating accounts in bulk. It runs in the background while you answer the setup questions,
-     and asks you to tick a box only if it isn't sure. It can run more than once during set-up: a pass is only
-     good for a few minutes, so a new check runs if set-up takes longer, if a check stalls, or if creating the
-     account fails. To decide, Cloudflare processes signals such as your
-     IP address and technical details of your phone's connection and software, like its iOS version. Cloudflare also uses
-     these signals to improve its bot detection, as its
-     <a href="https://www.cloudflare.com/turnstile-privacy-policy/">Turnstile privacy notice</a> describes.
-     Our server receives only a one-time pass that says the check succeeded. The check runs in a private
-     web view that keeps nothing on your phone afterwards.
-     <em>Why: our legitimate interest in preventing abuse.</em></p>
-
   <h3>Reminders</h3>
   <p>Study reminders are scheduled on your phone. Albus does not use a push notification service.</p>
 
   <h3>On your phone</h3>
-  <p>Albus keeps a copy of your plans on your iPhone so it works offline.</p>
+  <p>Your tasks and plans are kept on your iPhone, so Albus works offline. Signing in on a new phone brings
+     back your account and your plan, not your tasks. If you sign out, your tasks stay on the phone for when
+     you sign back in; if someone else signs in on that phone, Albus asks before removing them.</p>
 
   <h2>3. What we don't do</h2>
   <p>We don't show ads. We don't sell or share personal data for advertising. We don't use third-party
@@ -121,22 +114,19 @@
     <tr><td>Anthropic</td><td>Runs the AI models behind plans and marking, on the text described above.
         Under its commercial terms, API content is not used for training by default. Provider retention is governed by its <a href="https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data">commercial data-retention policy</a>; deleting your Albus account does not immediately erase provider logs.</td></tr>
     <tr><td>RevenueCat</td><td>Confirms and tracks subscription purchases.</td></tr>
-    <tr><td>Cloudflare</td><td>Runs the Turnstile check when you set up Albus, to stop automated sign-ups, under its
-        <a href="https://www.cloudflare.com/turnstile-privacy-policy/">Turnstile privacy notice</a>.</td></tr>
-    <tr><td>Apple</td><td>The App Store, payments and subscriptions, under Apple's own privacy policy.</td></tr>
+    <tr><td>Apple</td><td>The App Store, payments, subscriptions and Sign in with Apple, under Apple's own privacy policy.</td></tr>
     <tr><td>Netlify</td><td>Hosts this website.</td></tr>
   </table>
-  <p>These providers handle data on our instructions under their data processing terms. Apple, and
-     Cloudflare when it improves its bot detection, also act under their own privacy policies. Some are based
+  <p>These providers handle data on our instructions under their data processing terms. Apple also acts
+     under its own privacy policy. Some are based
      in the United States; where data leaves the EU, we rely on the safeguards in those terms, such as the
      European Commission's Standard Contractual Clauses.</p>
 
   <h2>5. How long we keep it</h2>
   <ul>
-    <li>Your account and what you put into Albus: until you delete your account. An account that was never
-        used (set-up not finished, nothing saved and no activity for 30 days) is removed automatically.</li>
-    <li>The Cloudflare check: our server keeps nothing from it. Cloudflare keeps its signals as its
-        Turnstile privacy notice describes.</li>
+    <li>Your account, its email address, and what you put into Albus: until you delete your account. An
+        anonymous account from before sign-in existed that was never used (set-up not finished, nothing saved
+        and no activity for 30 days) is removed automatically.</li>
     <li>Records of AI requests that failed or were abandoned: 30 days. Records of completed requests,
         which contain no content, are kept for cost accounting.</li>
     <li>Rate-limit counters: about two hours.</li>
@@ -152,9 +142,17 @@
   <h2>6. Your choices and rights</h2>
   <ul>
     <li><strong>Delete your account</strong> in the app: Settings → Delete account. This removes your
-        account, student content on our server and the local cache on this phone. Financial and security records described above survive under their existing retention rules; financial records no longer link to your account. Deleting your account does not cancel
+        account, its email address, student content on our server and the local cache on this phone. If you
+        signed in with Apple, Apple asks you to confirm, and Albus asks Apple to stop your Sign in with Apple
+        for Albus. If Apple can't be reached, your account is still deleted, and you can stop it yourself in
+        your iPhone's Settings, under your name, in Sign in with Apple. The payment and security records
+        described above are kept under their retention rules. They hold no name, email address or study
+        content, but subscription records and queued payment events still carry the random identifier your
+        account had, and so does RevenueCat's record of your purchases. Deleting your account does not cancel
         a subscription; cancel it first in your iPhone's Settings → your name → Subscriptions.</li>
-    <li><strong>Remove Albus from your phone</strong> by deleting the app, which removes the copy stored there.</li>
+    <li><strong>Sign out</strong> in Settings → Account. Your account stays, and so do the tasks on that phone.</li>
+    <li><strong>Remove Albus from your phone</strong> by deleting the app, which removes the copy stored there.
+        Your account stays until you delete it.</li>
     <li>You can ask us for a copy of your data, to correct it, to delete it, to restrict how we use it,
         or object to how we use it, by writing to <a href="mailto:fgutort8@gmail.com">fgutort8@gmail.com</a>.</li>
     <li>If you think we have handled your data wrongly, you can complain to the data protection
@@ -163,8 +161,8 @@
   </ul>
 
   <h2>7. Children</h2>
-  <p>Albus is made for students, including teenagers. It asks for no contact details, shows no ads and
-     does no tracking. You must be 13 or older to use it. If you are under 16, a parent or guardian must
+  <p>Albus is made for students, including teenagers. It asks for nothing beyond what Sign in with Apple
+     shares, shows no ads and does no tracking. You must be 13 or older to use it. If you are under 16, a parent or guardian must
      read this policy and agree to the <a href="/terms/">terms of service</a> for you.</p>
 
   <h2>8. Changes</h2>

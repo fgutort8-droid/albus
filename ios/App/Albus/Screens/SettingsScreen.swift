@@ -13,11 +13,18 @@ struct SettingsScreen: View {
     @Environment(Preferences.self) private var preferences
     @Environment(SessionService.self) private var session
     @Environment(PurchaseService.self) private var purchases
+    @Environment(FocusSession.self) private var focus
+    @Environment(NotificationCoordinator.self) private var notifications
+    @Environment(LocalAccount.self) private var localAccount
     @Environment(\.openURL) private var openURL
     @Query(sort: \Course.displayName) private var courses: [Course]
 
     @State private var showingPaywall = false
     @State private var showingAccountDeletion = false
+    @State private var showingSaveAccount = false
+    @State private var confirmingSignOut = false
+    @State private var isSigningOut = false
+    @State private var signOutError: String?
     @State private var isRestoring = false
     @State private var purchaseNotice: String?
 
@@ -31,6 +38,7 @@ struct SettingsScreen: View {
                 profileSection($preferences)
                 if !courses.isEmpty { subjectsSection }
                 notificationsSection
+                accountSection
                 aboutSection
                 Divider()
                 Button("Delete account", role: .destructive) {
@@ -51,6 +59,7 @@ struct SettingsScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showingPaywall) { PaywallScreen() }
         .sheet(isPresented: $showingAccountDeletion) { AccountDeletionScreen() }
+        .sheet(isPresented: $showingSaveAccount) { SignInScreen(savingAccount: true) }
         .task { await entitlements.refresh() }
         .refreshable { await entitlements.refresh() }
     }
@@ -294,7 +303,6 @@ struct SettingsScreen: View {
             GlassCard {
                 VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
                     aboutRow("Version", Self.version)
-                    aboutRow("Account", accountLabel)
                     linkRow("Help and support", AppLinks.support)
                     linkRow("Privacy policy", AppLinks.privacy)
                     linkRow("Terms of service", AppLinks.terms)
@@ -331,11 +339,73 @@ struct SettingsScreen: View {
         }
     }
 
+    // MARK: - Account
+
+    /// How the student signs in, and the way out. An account made before
+    /// sign-in existed cannot sign back in, so it is offered saving instead
+    /// of signing out.
+    private var accountSection: some View {
+        VStack(alignment: .leading, spacing: Tokens.Spacing.m) {
+            SectionHeader(label: "Account") { EmptyView() }
+            GlassCard {
+                VStack(alignment: .leading, spacing: Tokens.Spacing.m) {
+                    aboutRow("Signed in with", signInLabel)
+                    if session.signInMethod == .anonymous {
+                        Text("This account isn't saved yet. Add Apple so you can sign back in if you change phones.")
+                            .font(Tokens.Typography.caption)
+                            .foregroundStyle(Tokens.Palette.inkSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        PrimaryButton(title: "Save your account") { showingSaveAccount = true }
+                            .accessibilityIdentifier("saveAccount")
+                    } else if session.signInMethod != nil {
+                        textButton(isSigningOut ? "Signing out…" : "Sign out") { confirmingSignOut = true }
+                            .disabled(isSigningOut)
+                            .accessibilityIdentifier("signOut")
+                            // On the button, so the question appears beside it.
+                            .confirmationDialog("Sign out?", isPresented: $confirmingSignOut,
+                                                titleVisibility: .visible) {
+                                Button("Sign out", role: .destructive) { signOut() }
+                                Button("Cancel", role: .cancel) {}
+                            } message: {
+                                Text("Your tasks stay on this phone and come back when you sign in again with the same account.")
+                            }
+                    }
+                    if let signOutError {
+                        Text(signOutError)
+                            .font(Tokens.Typography.caption)
+                            .foregroundStyle(Tokens.Palette.danger)
+                    }
+                }
+            }
+        }
+    }
+
     /// Never the user id. It identifies nothing to the student and is the one
     /// string on this screen worth not putting on a shared screenshot.
-    private var accountLabel: String {
-        if case .signedIn = session.state { return "Signed in" }
-        return "Not signed in"
+    private var signInLabel: String {
+        switch session.signInMethod {
+        case .apple: "Apple"
+        case .anonymous: "Not saved"
+        case .other: "Signed in"
+        case nil: "Not signed in"
+        }
+    }
+
+    private func signOut() {
+        guard !isSigningOut else { return }
+        signOutError = nil
+        isSigningOut = true
+        Task {
+            defer { isSigningOut = false }
+            do {
+                try await AccountSignOut.perform(session: session, focus: focus,
+                                                 notifications: notifications,
+                                                 context: modelContext,
+                                                 localAccount: localAccount)
+            } catch {
+                signOutError = "Couldn't sign out. Please try again."
+            }
+        }
     }
 
     private static var version: String {

@@ -23,9 +23,17 @@ enum OnboardingPath {
     ///
     /// Purchases are off too: prices come from the display copy, so a test
     /// about the paywall's layout does not depend on RevenueCat's servers.
+    ///
+    /// Signed in by assumption. Students sign in before the set-up questions
+    /// since 2 Oct 2026, with Apple or an emailed code, and neither can be
+    /// automated. These tests used to make a real account on the production
+    /// project, and spend a real AI call, on every run; now they make none.
+    /// The first plan is the one the phone makes at once.
     static func launch(_ app: XCUIApplication) {
         app.launchArguments += ["-albus.debug.skipNotificationPrompt",
-                                "-albus.debug.noPurchases"]
+                                "-albus.debug.noPurchases",
+                                "-albus.debug.assumeSignedIn",
+                                "-albus.profile.onboarded", "NO"]
         app.launch()
     }
 
@@ -118,10 +126,11 @@ enum OnboardingPath {
 
         app.buttons["Build my plan"].tap()
 
-        // Account creation plus a real Claude call.
+        // The plan the phone makes at once; with no real account the AI's
+        // version never comes, and onboarding does not wait for it.
         let done = app.buttons["Show me"]
         XCTAssertTrue(done.waitForExistence(timeout: 120),
-                      "onboarding never finished — account creation or the first plan failed",
+                      "onboarding never finished — the first plan failed",
                       file: file, line: line)
         done.tap()
 
