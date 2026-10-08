@@ -15,6 +15,8 @@ COLLISION_USER_PREFIX='42000000-0000-4000-8000-'
 COLLISION_RUBRIC_ID='43000000-0000-4000-8000-000000000001'
 RESTORE_FROM_ID='44000000-0000-4000-8000-000000000001'
 RESTORE_TO_ID='44000000-0000-4000-8000-000000000002'
+PHONE_USER_ID='45000000-0000-4000-8000-000000000001'
+PHONE_DONE_PREFIX='45100000-0000-4000-8000-'
 TEST_OUTPUT_DIR=$(mktemp -d)
 
 db() {
@@ -66,6 +68,7 @@ cleanup() {
               where id in ('${RESTORE_FROM_ID}', '${RESTORE_TO_ID}')" >/dev/null 2>&1 || true
   db -q -c "delete from auth.users where id = '${TEST_USER_ID}'" >/dev/null 2>&1 || true
   db -q -c "delete from auth.users where id = '${FREE_USER_ID}'" >/dev/null 2>&1 || true
+  db -q -c "delete from auth.users where id = '${PHONE_USER_ID}'" >/dev/null 2>&1 || true
   db -q -c "delete from auth.users where id::text like '${COLLISION_USER_PREFIX}%'" \
     >/dev/null 2>&1 || true
   rm -rf "$TEST_OUTPUT_DIR"
@@ -182,6 +185,147 @@ TASK_TOTAL=$(db -Atq -c "select count(*) from public.assignments
   where user_id = '${TEST_USER_ID}' and status = 'active'")
 if [ "$TASK_SUCCESS" -ne 1 ] || [ "$TASK_TOTAL" -ne 10 ]; then
   echo "assignment race failed: successes=$TASK_SUCCESS total=$TASK_TOTAL" >&2
+  exit 1
+fi
+
+# A phone reports its tasks while new tasks are made and "Stop counting" runs.
+# All take the cap trigger's per-student lock first, so the cap holds exactly,
+# and a task freed by Stop counting (archived) never comes back.
+db -q -c "
+  insert into auth.users (
+    id, instance_id, aud, role, email, encrypted_password,
+    raw_app_meta_data, raw_user_meta_data, created_at, updated_at, is_anonymous
+  ) values (
+    '${PHONE_USER_ID}', '00000000-0000-0000-0000-000000000000',
+    'authenticated', 'authenticated', null, '', '{}', '{}', now(), now(), true
+  );
+  insert into public.entitlements (user_id, tier, expires_at)
+  values ('${PHONE_USER_ID}', 'plus', now() + interval '1 day');
+" >/dev/null
+PHONE_CAP=$(db -Atq -c "select p.active_tasks from public.plans p
+  where p.tier = public.effective_tier('${PHONE_USER_ID}')")
+db -q -c "insert into public.assignments
+  (id, user_id, title, task_type, deadline, estimated_minutes, status)
+  select ('${PHONE_DONE_PREFIX}' || lpad(i::text, 12, '0'))::uuid, '${PHONE_USER_ID}',
+         'Done ' || i, 'essay', now() + interval '7 days', 60, 'completed'
+    from generate_series(1, 12) i;
+  insert into public.assignments
+  (user_id, title, task_type, deadline, estimated_minutes)
+  select '${PHONE_USER_ID}', 'Open ' || i, 'essay', now() + interval '7 days', 60
+    from generate_series(1, ${PHONE_CAP} - 1) i" >/dev/null
+
+# One place left. Twelve phones each reopen a different finished task while
+# twelve connections create new ones: exactly one of the 24 may take it.
+for i in $(seq 1 12); do
+  DONE_ID="${PHONE_DONE_PREFIX}$(printf '%012d' "$i")"
+  (
+    set +e
+    db -Atq -c "begin;
+      set local role authenticated;
+      set local \"request.jwt.claim.sub\" = '${PHONE_USER_ID}';
+      select 'reopened=' || public.sync_my_assignments(null, array['${DONE_ID}']::uuid[]);
+      commit;" >"$TEST_OUTPUT_DIR/phone-reopen-$i" 2>&1
+    status=$?
+    printf '%s\n' "$status" >"$TEST_OUTPUT_DIR/phone-reopen-$i.status"
+  ) &
+  (
+    set +e
+    db -Atq -c "begin;
+      set local role authenticated;
+      set local \"request.jwt.claim.sub\" = '${PHONE_USER_ID}';
+      select public.create_assignment_with_plan(
+        'Phone racer $i', 'essay', now() + interval '7 days', 60,
+        '[{\"title\":\"Draft\",\"estimated_minutes\":60}]'::jsonb,
+        null, null, null, null, 'normal');
+      commit;" >"$TEST_OUTPUT_DIR/phone-create-$i" 2>&1
+    status=$?
+    printf '%s\n' "$status" >"$TEST_OUTPUT_DIR/phone-create-$i.status"
+  ) &
+done
+wait
+
+PHONE_REOPENED=0
+PHONE_CREATED=0
+PHONE_UNEXPECTED=0
+for i in $(seq 1 12); do
+  status=$(<"$TEST_OUTPUT_DIR/phone-reopen-$i.status")
+  reopened=$(sed -nE 's/^reopened=([0-9]+)$/\1/p' "$TEST_OUTPUT_DIR/phone-reopen-$i")
+  if [ "$status" -eq 0 ] && [ -n "$reopened" ]; then
+    # A reopen the cap refuses is skipped, never an error.
+    PHONE_REOPENED=$((PHONE_REOPENED + reopened))
+  else
+    PHONE_UNEXPECTED=$((PHONE_UNEXPECTED + 1))
+    echo "unexpected phone reopen racer $i (status $status):" >&2
+    sed -n '1,8p' "$TEST_OUTPUT_DIR/phone-reopen-$i" >&2
+  fi
+  status=$(<"$TEST_OUTPUT_DIR/phone-create-$i.status")
+  if [ "$status" -eq 0 ] && grep -Eq '^[0-9a-f]{8}-[0-9a-f-]{27}$' "$TEST_OUTPUT_DIR/phone-create-$i"; then
+    PHONE_CREATED=$((PHONE_CREATED + 1))
+  elif [ "$status" -eq 0 ] || ! grep -q PLAN_TASK_LIMIT_REACHED "$TEST_OUTPUT_DIR/phone-create-$i"; then
+    PHONE_UNEXPECTED=$((PHONE_UNEXPECTED + 1))
+    echo "unexpected phone create racer $i (status $status):" >&2
+    sed -n '1,8p' "$TEST_OUTPUT_DIR/phone-create-$i" >&2
+  fi
+done
+PHONE_ACTIVE=$(db -Atq -c "select count(*) from public.assignments
+  where user_id = '${PHONE_USER_ID}' and status = 'active'")
+if [ "$PHONE_UNEXPECTED" -ne 0 ] || [ $((PHONE_REOPENED + PHONE_CREATED)) -ne 1 ] \
+   || [ "$PHONE_ACTIVE" -ne "$PHONE_CAP" ]; then
+  echo "phone reopen race failed: reopened=$PHONE_REOPENED created=$PHONE_CREATED active=$PHONE_ACTIVE cap=$PHONE_CAP" >&2
+  exit 1
+fi
+
+# Stop counting on one phone races six syncs from a phone that still holds
+# every task as open. Every task Stop counting freed must stay freed, the kept
+# task stays open, and the cap still holds.
+KEEP_ID=$(db -Atq -c "select id from public.assignments
+  where user_id = '${PHONE_USER_ID}' and title = 'Open 1'")
+FREED_IDS=$(db -Atq -c "select string_agg(id::text, ',') from public.assignments
+  where user_id = '${PHONE_USER_ID}' and status = 'active' and id <> '${KEEP_ID}'")
+FREED_COUNT=$((PHONE_CAP - 1))
+ALL_IDS=$(db -Atq -c "select string_agg(id::text, ',') from public.assignments
+  where user_id = '${PHONE_USER_ID}'")
+for i in $(seq 1 6); do
+  (
+    set +e
+    db -Atq -c "begin;
+      set local role authenticated;
+      set local \"request.jwt.claim.sub\" = '${PHONE_USER_ID}';
+      select public.release_my_other_assignments(array['${KEEP_ID}']::uuid[]);
+      commit;" >"$TEST_OUTPUT_DIR/phone-release-$i" 2>&1
+  ) &
+  (
+    set +e
+    db -Atq -c "begin;
+      set local role authenticated;
+      set local \"request.jwt.claim.sub\" = '${PHONE_USER_ID}';
+      select public.sync_my_assignments(null, '{${ALL_IDS}}'::uuid[]);
+      commit;" >"$TEST_OUTPUT_DIR/phone-sync-$i" 2>&1
+  ) &
+done
+wait
+
+if grep -hiE 'error|fatal|deadlock' "$TEST_OUTPUT_DIR"/phone-release-* "$TEST_OUTPUT_DIR"/phone-sync-*; then
+  echo "phone release race failed with the errors above" >&2
+  exit 1
+fi
+# Then once more in order, with room under the cap and only freed tasks
+# offered, so a sync that brings one back fails every run, not only when the
+# race happens to end on a sync.
+db -q -c "begin;
+  set local role authenticated;
+  set local \"request.jwt.claim.sub\" = '${PHONE_USER_ID}';
+  select public.release_my_other_assignments(array['${KEEP_ID}']::uuid[]);
+  select public.sync_my_assignments(null, '{${FREED_IDS}}'::uuid[]);
+  commit;" >/dev/null
+STILL_FREED=$(db -Atq -c "select count(*) from public.assignments
+  where id = any('{${FREED_IDS}}'::uuid[]) and status = 'archived'")
+KEPT_STATUS=$(db -Atq -c "select status from public.assignments where id = '${KEEP_ID}'")
+PHONE_ACTIVE=$(db -Atq -c "select count(*) from public.assignments
+  where user_id = '${PHONE_USER_ID}' and status = 'active'")
+if [ "$STILL_FREED" -ne "$FREED_COUNT" ] || [ "$KEPT_STATUS" != "active" ] \
+   || [ "$PHONE_ACTIVE" -gt "$PHONE_CAP" ]; then
+  echo "phone release race failed: freed=$STILL_FREED/$FREED_COUNT kept=$KEPT_STATUS active=$PHONE_ACTIVE cap=$PHONE_CAP" >&2
   exit 1
 fi
 
@@ -343,4 +487,4 @@ if [ "$RESTORE_ROWS" -ne 1 ] || [ "$RESTORE_PRO" -ne 1 ] || [ "$RESTORE_OWNER_PR
   exit 1
 fi
 
-printf 'concurrency attacks pass: grading 1/12, AI plan 1/12, task 1/12, rubric 1/12, rubric-owner 1/12, restore 0 deadlocks\n'
+printf 'concurrency attacks pass: grading 1/12, AI plan 1/12, task 1/12, phone reopen-or-create 1/24, stop counting 0 freed tasks back, rubric 1/12, rubric-owner 1/12, restore 0 deadlocks\n'

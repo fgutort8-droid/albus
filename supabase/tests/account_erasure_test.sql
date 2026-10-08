@@ -15,6 +15,18 @@ begin
 end;
 $$;
 
+-- The exact contents of every row that names the account, so a check of the
+-- other account notices a changed field, not just a missing row.
+create function pg_temp.account_fingerprint(p_relation text,p_user uuid) returns text
+language plpgsql as $$
+declare v_fingerprint text;
+begin
+  execute format('select md5(coalesce(string_agg(to_jsonb(t)::text,%L order by to_jsonb(t)::text),%L)) from %s t where position($1 in to_jsonb(t)::text)>0',E'\n','',p_relation::regclass)
+  into v_fingerprint using p_user::text;
+  return v_fingerprint;
+end;
+$$;
+
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,raw_app_meta_data,raw_user_meta_data,created_at,updated_at,is_anonymous)
 select ('d0820000-0000-4000-8000-'||lpad(g::text,12,'0'))::uuid,
  '00000000-0000-0000-0000-000000000000','authenticated','authenticated','erasure-'||g||'@example.invalid','','{}','{}',now(),now(),false
@@ -93,7 +105,8 @@ from pg_class c join pg_namespace n on n.oid=c.relnamespace
 where c.relkind in ('r','p') and (n.nspname in ('public','private') or
  (n.nspname='auth' and c.relname in ('users','identities','sessions','refresh_tokens','one_time_tokens','mfa_factors')));
 create temporary table staying_counts as
-select relation,pg_temp.account_rows(relation,'d0820000-0000-4000-8000-000000000002') as expected from erasure_tables;
+select relation,pg_temp.account_rows(relation,'d0820000-0000-4000-8000-000000000002') as expected,
+ pg_temp.account_fingerprint(relation,'d0820000-0000-4000-8000-000000000002') as fingerprint from erasure_tables;
 
 select is((select is_anonymous from auth.users where id='d0820000-0000-4000-8000-000000000001'),false,'fixture is a real non-anonymous account');
 select is((select count(*)::integer from auth.identities where user_id='d0820000-0000-4000-8000-000000000001'),2,'fixture has Apple and email identities');
@@ -108,7 +121,8 @@ select set_config('request.jwt.claims','',true);
 -- Retained UUID routes are explicit exceptions, listed in the audit.
 select is(pg_temp.account_rows(relation,'d0820000-0000-4000-8000-000000000001'),0,'erased every account reference in '||relation)
 from erasure_tables where relation not in ('identity_links','public.identity_links','subscription_transactions','public.subscription_transactions','private.financial_inbox','private.subscription_transfers') order by relation;
-select is(pg_temp.account_rows(relation,'d0820000-0000-4000-8000-000000000002'),expected,'other account unchanged in '||relation) from staying_counts order by relation;
+select is(pg_temp.account_rows(relation,'d0820000-0000-4000-8000-000000000002'),expected,'other account keeps every row in '||relation) from staying_counts order by relation;
+select is(pg_temp.account_fingerprint(relation,'d0820000-0000-4000-8000-000000000002'),fingerprint,'other account''s rows are unchanged in '||relation) from staying_counts order by relation;
 select is((select count(*)::integer from public.ai_usage where id='d0880000-0000-4000-8000-000000000001' and user_id is null),1,'AI cost row survives without user_id');
 select is((select count(*)::integer from public.security_events where kind='full-account-erasure' and user_id is null),1,'security warning survives without user_id');
 select is((select count(*)::integer from public.identity_links where user_id='d0820000-0000-4000-8000-000000000001'),1,'documented pseudonymous fraud observation survives for its retention window');

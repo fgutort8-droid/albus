@@ -335,12 +335,15 @@ supabase test db --local
 scripts/security-concurrency-local.sh
 ```
 
-The pgTAP suite performs 496 privilege, RLS, plan, rate, risk, cost, replay,
+The pgTAP suite performs 535 privilege, RLS, plan, rate, risk, cost, replay,
 assignment-status and account-erasure assertions across 13 files, each in a
 rolled-back transaction. The erasure assertions explicitly expose retained
 financial UUIDs; see the audit result in §7. The shell test opens twelve
 real Postgres connections for one remaining grading/task/rubric and requires
-exactly one winner in each race. A one-connection test cannot prove locking.
+exactly one winner in each race. It also races phones reopening tasks against
+new tasks for the last place (one winner in 24), and Stop counting against a
+phone that still holds every task (no freed task comes back). A one-connection
+test cannot prove locking.
 
 Also run Edge unit tests, Swift core tests, and iOS unit tests. CI runs database
 containers only when migrations/security tests change to keep GitHub cost low.

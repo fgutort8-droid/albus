@@ -62,6 +62,9 @@ values('d0800000-0000-4000-8000-000000000001','One more local task',now()+interv
 set local role authenticated;
 select is(public.release_my_other_assignments(null),1,'null keep list releases an actual active task');
 select is(public.sync_my_assignments(null,null),0,'null sync lists are empty');
+-- No open task now, so the cap has room: only the archived rule keeps these out.
+select is(public.sync_my_assignments(null,array['d0810000-0000-4000-8000-000000000009','d0810000-0000-4000-8000-000000000002','d0810000-0000-4000-8000-000000000003']::uuid[]),0,'with room under the cap, freed tasks still never reopen');
+select is((select count(*)::integer from public.assignments where id in ('d0810000-0000-4000-8000-000000000009','d0810000-0000-4000-8000-000000000002','d0810000-0000-4000-8000-000000000003') and status='archived'),3,'freed tasks stay archived');
 reset role;
 select is((select status from public.assignments where id='d0810000-0000-4000-8000-000000000010'),'active','other account survives sync and release');
 select is((select status from public.assignments where id='d0810000-0000-4000-8000-000000000009'),'archived','archived row never returns');
