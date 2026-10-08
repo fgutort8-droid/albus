@@ -95,8 +95,19 @@ def main():
     fixture_email = "apple-only-existing-" + uuid.uuid4().hex + "@example.invalid"
     new_email = "apple-only-new-" + uuid.uuid4().hex + "@example.invalid"
     created = []
+    leftover = []
+
+    def remember(body):
+        # Queue any account a response carries, so even one that should never
+        # have been made is removed before a failed check is reported.
+        user = body.get("user") if isinstance(body.get("user"), dict) else body
+        identifier = user.get("id") if isinstance(user, dict) else None
+        if isinstance(identifier, str) and identifier not in created:
+            created.append(identifier)
+
     try:
         status, body = call("signup", {"email": new_email, "password": secrets.token_urlsafe(24)})
+        remember(body)
         check(status == 400 and body.get("code") == "email_provider_disabled", "Password signup was not refused by the email-provider setting")
         print("PASS: password signup refused (400 email_provider_disabled)")
         status, body = call("otp", {"email": new_email, "create_user": True})
@@ -106,14 +117,17 @@ def main():
             status, listing = call(f"admin/users?page={page}&per_page=1000", admin=True, method="GET")
             check(status == 200, "Cannot inspect local users after OTP refusal")
             users = listing.get("users", [])
+            for user in users:
+                if user.get("email") == new_email:
+                    remember(user)
             check(not any(user.get("email") == new_email for user in users), "OTP created a user")
             if len(users) < 1000:
                 break
             page += 1
         print("PASS: new-address OTP refused (422 email_provider_disabled); no user created")
         status, user = call("admin/users", {"email": fixture_email, "email_confirm": True}, admin=True)
+        remember(user)
         check(status in (200, 201) and user.get("id"), "Cannot create local existing-user fixture")
-        created.append(user["id"])
         for create_user in (False, True):
             status, body = call("otp", {"email": fixture_email, "create_user": create_user})
             check(status == 422 and body.get("code") == "email_provider_disabled", "Existing-user OTP remained enabled")
@@ -127,14 +141,23 @@ def main():
               "Forged Apple token did not reach token verification")
         print("PASS: Apple provider enabled; forged ID token refused by token verification")
         status, body = call("signup", {})
+        remember(body)
         check(status in (200, 201) and body.get("user", {}).get("is_anonymous") is True,
               "Anonymous signup failed on the local compatibility stack")
-        created.append(body["user"]["id"])
         print("PASS: local anonymous signup works; production switches it off after testers update")
     finally:
+        # Try every removal before reporting any, so one failure strands no others.
         for identifier in created:
-            status, _ = call("admin/users/" + identifier, admin=True, method="DELETE")
-            check(status == 200, "Could not remove a local test account")
+            try:
+                status, _ = call("admin/users/" + identifier, admin=True, method="DELETE")
+            except OSError:
+                status = None
+            if status != 200:
+                leftover.append(identifier)
+        if leftover:
+            # Said here as well, because a failed check may already be on its way out.
+            print(f"FAIL: {len(leftover)} local test account(s) could not be removed", file=sys.stderr)
+    check(not leftover, "Could not remove every local test account")
     print("PASS: 5 checks; local test accounts removed")
 
 
