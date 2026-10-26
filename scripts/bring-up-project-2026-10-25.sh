@@ -34,7 +34,12 @@ case "$DRY_RUN" in 0|1) ;; *) echo 'DRY_RUN must be 0 or 1'; exit 1;; esac
 stop() { echo "STOPPED: $*; no later step ran." >&2; exit 1; }
 TTY=${ALBUS_TTY:-/dev/tty}   # the tests point this at /dev/null; nothing else sets it
 [ "$REF" != "$OLD_REF" ] || stop 'that is the old project, which this script must never touch'
-for tool in git supabase python3 shasum curl comm; do command -v "$tool" >/dev/null || stop "missing $tool"; done
+for tool in git supabase python3 curl comm; do command -v "$tool" >/dev/null || stop "missing $tool"; done
+# Only this run's token may steer the CLI. Any other SUPABASE_* setting left in
+# the shell is dropped: SUPABASE_PROJECT_ID, for one, wins over the linked project.
+for name in $(env | sed -n 's/^\(SUPABASE_[A-Za-z0-9_]*\)=.*/\1/p'); do
+  [ "$name" = SUPABASE_ACCESS_TOKEN ] || unset "$name"
+done
 
 if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
   read -r -s -p 'Paste the albus-setup access token (typing is hidden), then press Enter: ' SUPABASE_ACCESS_TOKEN <"$TTY" \
@@ -142,7 +147,7 @@ for n in ('SUPABASE_SECRET_KEYS','SUPABASE_PUBLISHABLE_KEYS'):
 for n in ('ALBUS_SUPABASE_SECRET_KEY','ALBUS_SUPABASE_PUBLISHABLE_KEY'):
  if n in names: sys.exit(n+' is set and would win over the new keys; tell Claude')
 print('The platform injects both key sets, and no override is set.')
-for n in ('ANTHROPIC_API_KEY','REVENUECAT_WEBHOOK_SECRET','REVENUECAT_WEBHOOK_SIGNING_SECRET','ALBUS_SIGNAL_PEPPER','APPLE_TEAM_ID','APPLE_KEY_ID','APPLE_PRIVATE_KEY','APPLE_CLIENT_ID'):
+for n in ('ANTHROPIC_API_KEY','REVENUECAT_WEBHOOK_SECRET','REVENUECAT_WEBHOOK_SIGNING_SECRET','REVENUECAT_APP_IDS','ALBUS_SIGNAL_PEPPER','APPLE_TEAM_ID','APPLE_KEY_ID','APPLE_PRIVATE_KEY','APPLE_CLIENT_ID'):
  print(n+': '+('set' if n in names else 'not set yet'))
 PY
 }
@@ -150,19 +155,29 @@ PY
 signin_settings() {
   local key=${ALBUS_PUBLISHABLE_KEY:-}
   if [ -z "$key" ]; then
-    read -r -p 'Paste the publishable key (it starts sb_publishable_), or press Enter to skip this check: ' key 2>/dev/null <"$TTY" || key=''
+    # Hidden like the token prompt, in case the wrong thing is pasted here.
+    read -r -s -p 'Paste the publishable key (it starts sb_publishable_; typing is hidden), or press Enter to skip this check: ' key <"$TTY" || key=''
+    echo
   fi
+  case "$key" in
+    sbp_*|sb_secret_*|eyJ*) key=''; echo 'That was a secret, not the publishable key. It was not used or shown; do not paste it anywhere else.' ;;
+  esac
   SETTINGS_LINE='Sign-in settings: not checked.'
   [ -n "$key" ] || { echo "$SETTINGS_LINE"; return 0; }
   [[ "$key" =~ ^sb_publishable_[A-Za-z0-9_-]{20,100}$ ]] || { echo 'That is not a publishable key, so the sign-in settings were not checked.'; return 0; }
-  if ! curl -s --max-time 20 -H "apikey: $key" "$URL/auth/v1/settings" > "$STAGE/settings.json"; then
-    echo 'Could not read the sign-in settings, so they were not checked.'; return 0
+  local status
+  status=$(curl -s -o "$STAGE/settings.json" -w '%{http_code}' --max-time 20 -H "apikey: $key" "$URL/auth/v1/settings" || true)
+  if [ "$status" != 200 ]; then
+    SETTINGS_LINE="Sign-in settings: not checked (Supabase answered $status: it refused that key, or could not be reached)."
+    echo "$SETTINGS_LINE"; return 0
   fi
   SETTINGS_OUT=$(python3 - "$STAGE/settings.json" <<'PY'
 import json,sys
 try: d=json.load(open(sys.argv[1]))
-except ValueError: print('Sign-in settings: not checked (unreadable answer).'); sys.exit(0)
-ext=d.get('external',{}) if isinstance(d,dict) else {}
+except ValueError: d=None
+if not isinstance(d,dict) or not isinstance(d.get('external'),dict):
+ print('Sign-in settings: not checked (an answer this script does not recognise).'); sys.exit(0)
+ext=d['external']
 todo=[]
 def line(label,ok,now,want):
  print('  %-26s %-8s %s'%(label,now,'ok' if ok else 'STILL TO DO: set it '+want))
@@ -199,6 +214,10 @@ if [ -n "$PENDING" ]; then
   compare
   [ -z "$PENDING" ] || stop 'database changes are still pending after the push; tell Claude'
 fi
+# definer_paths_closed allows one function by name and exact shape:
+# rls_auto_enable(), which Supabase adds to a project created with "Enable
+# automatic RLS". It runs only as a DDL event trigger, never for a client, and
+# its path is pinned to pg_catalog. Any other definer function needs path "".
 cat > "$STAGE/verify.sql" <<'SQL'
 begin read only;
 select
@@ -206,7 +225,7 @@ select
  (select count(*) >= 4 from public.subscription_products) as products_mapped,
  not exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','p') and not c.relrowsecurity) as public_tables_have_rls,
  not exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','p','v','m') and has_table_privilege('anon', c.oid, 'select,insert,update,delete,truncate,references,trigger')) as anon_has_no_table_access,
- not exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('public','private') and p.prosecdef and not coalesce(p.proconfig @> array['search_path=""'],false)) as definer_paths_closed,
+ not exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('public','private') and p.prosecdef and not coalesce(p.proconfig @> array['search_path=""'],false) and not (n.nspname='public' and p.proname='rls_auto_enable' and p.prorettype='event_trigger'::regtype and p.proconfig is not distinct from array['search_path=pg_catalog'])) as definer_paths_closed,
  (select count(*) = 4 from cron.job where active and jobname in ('prune-security-data','reap-abandoned-anonymous','albus-financial-drain','albus-financial-payload-retention')) as jobs_scheduled,
  exists(select 1 from pg_trigger where tgname='assignments_active_limit' and tgrelid='public.assignments'::regclass and tgenabled<>'D') as task_cap_trigger_on,
  pg_get_function_identity_arguments('public.sync_my_assignments(uuid[],uuid[])'::regprocedure) = 'p_finished uuid[], p_open uuid[]' as sync_signature,
@@ -242,8 +261,14 @@ functions_state after || stop 'the functions deployed, but not as reviewed; tell
 probe() {
   local name=$1 status
   shift
-  status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST "$URL/functions/v1/$name" \
+  rm -f "$STAGE/answer.json"
+  status=$(curl -s -o "$STAGE/answer.json" -w '%{http_code}' --max-time 30 -X POST "$URL/functions/v1/$name" \
     -H 'Content-Type: application/json' -d '{}' || true)
+  # The platform also answers 503 when a function fails to start, so a 503
+  # counts only when it is the webhook's own "not configured" answer.
+  if [ "$status" = 503 ] && ! grep -Eq '"error" *: *"NOT_CONFIGURED"' "$STAGE/answer.json" 2>/dev/null; then
+    stop "deployed, but $name answered 503 without saying NOT_CONFIGURED, so it may not have started; tell Claude before anything else"
+  fi
   case " $* " in
     *" $status "*) echo "$name: answers a request with no sign-in with $status, as it should." ;;
     *) stop "deployed, but $name answered $status to a request with no sign-in (expected $*); tell Claude before anything else" ;;

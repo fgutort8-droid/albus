@@ -32,6 +32,7 @@ cat > "$TEST_DIR/bin/supabase" <<'STUB'
 set -euo pipefail
 printf 'supabase %s\n' "$*" >> "$ALBUS_TEST_LOG"
 [ -n "${SUPABASE_ACCESS_TOKEN:-}" ] || { echo 'no token reached the CLI' >&2; exit 98; }
+if env | grep '^SUPABASE_' | grep -qv '^SUPABASE_ACCESS_TOKEN='; then echo 'a stray SUPABASE_ setting reached the CLI' >&2; exit 97; fi
 case "$1 $2" in
   'link --project-ref')
     [ -z "${ALBUS_TEST_LINK_FAILS:-}" ] || exit 1
@@ -97,14 +98,19 @@ STUB
 cat > "$TEST_DIR/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 printf 'curl %s\n' "$*" >> "$ALBUS_TEST_LOG"
+out=; prev=
+for a in "$@"; do [ "$prev" = -o ] && out=$a; prev=$a; done
+[ -n "$out" ] || { echo 'the curl double expects -o' >&2; exit 98; }
+reply() { printf '%s' "$2" > "$out"; printf '%s' "$1"; }  # the body to -o, the status as -w asks
+good='{"external":{"apple":true,"email":false,"anonymous_users":false,"google":false},"disable_signup":false}'
+unconfigured='{"error":"NOT_CONFIGURED","message":"NOT_CONFIGURED"}'
+refused='{"code":401,"message":"Missing authorization header"}'
 case "$*" in
-  *"/auth/v1/settings"*)
-    good='{"external":{"apple":true,"email":false,"anonymous_users":false,"google":false},"disable_signup":false}'
-    printf '%s' "${ALBUS_TEST_SETTINGS:-$good}" ;;
-  *"/functions/v1/revenuecat-webhook"*) printf '%s' "${ALBUS_TEST_STATUS_WEBHOOK:-503}" ;;
-  *"/functions/v1/breakdown"*) printf '%s' "${ALBUS_TEST_STATUS_BREAKDOWN:-401}" ;;
-  *"/functions/v1/grade"*) printf '%s' "${ALBUS_TEST_STATUS_GRADE:-401}" ;;
-  *"/functions/v1/delete-account"*) printf '%s' "${ALBUS_TEST_STATUS_DELETE:-401}" ;;
+  *"/auth/v1/settings"*) reply "${ALBUS_TEST_SETTINGS_STATUS:-200}" "${ALBUS_TEST_SETTINGS:-$good}" ;;
+  *"/functions/v1/revenuecat-webhook"*) reply "${ALBUS_TEST_STATUS_WEBHOOK:-503}" "${ALBUS_TEST_WEBHOOK_BODY:-$unconfigured}" ;;
+  *"/functions/v1/breakdown"*) reply "${ALBUS_TEST_STATUS_BREAKDOWN:-401}" "$refused" ;;
+  *"/functions/v1/grade"*) reply "${ALBUS_TEST_STATUS_GRADE:-401}" "$refused" ;;
+  *"/functions/v1/delete-account"*) reply "${ALBUS_TEST_STATUS_DELETE:-401}" "$refused" ;;
   *) exit 99 ;;
 esac
 STUB
@@ -115,8 +121,7 @@ run() { # DRY_RUN value, then optional script path
   [ -z "${ALBUS_TEST_PRESET_PUSHED:-}" ] || touch "$ALBUS_TEST_STATE/pushed"
   for f in ${ALBUS_TEST_PRESET_DEPLOYED:-}; do touch "$ALBUS_TEST_STATE/deployed-$f"; done
   set +e
-  PATH="$TEST_DIR/bin:$PATH" DRY_RUN=$1 ${ALBUS_SOURCE_ARG:+ALBUS_SOURCE=$ALBUS_SOURCE_ARG} \
-    bash "${2:-$ROOT/scripts/$SCRIPT}" > "$TEST_DIR/output" 2>&1
+  PATH="$TEST_DIR/bin:$PATH" DRY_RUN=$1 bash "${2:-$ROOT/scripts/$SCRIPT}" > "$TEST_DIR/output" 2>&1
   STATUS=$?
   set -e
   if grep -q "$TOKEN" "$TEST_DIR/output" "$ALBUS_TEST_LOG"; then echo 'FAIL: the access token reached the output or a command line' >&2; exit 1; fi
@@ -148,6 +153,13 @@ grep -q 'Sign-in settings: not checked.' "$TEST_DIR/output" || fail 'a skipped s
 no_writes 'preview'
 echo "PASS: a fresh project previews $NMIG pending database changes and four new functions, writing nothing"
 
+# Bash prints read's question on stderr, so a 2> on a read hides the question.
+reads=$(grep -E '^[[:space:]]*read ' "$ROOT/scripts/$SCRIPT")
+[ "$(wc -l <<<"$reads" | tr -d ' ')" = 2 ] || fail 'expected exactly two prompts'
+! grep -v -- ' -s ' <<<"$reads" || fail 'a prompt shows what is typed'
+! grep -- '2>' <<<"$reads" || fail 'a prompt hides its own question'
+echo 'PASS: both prompts hide what is typed and show their question'
+
 ALBUS_TEST_STYLE=box run 1
 expect_pass "'│' list" "pending: $NMIG"
 ALBUS_TEST_STYLE=garbled run 1
@@ -167,7 +179,23 @@ done
 ALBUS_PUBLISHABLE_KEY=not-a-key run 1
 expect_pass 'a malformed publishable key' 'not a publishable key'
 ! called 'auth/v1/settings' || fail 'a malformed key was sent to the settings page'
-echo 'PASS: the dashboard settings are checked and each wrong one is flagged, without blocking the setup'
+printf '%s\n' "$PUBLISHABLE" > "$TEST_DIR/typed"
+ALBUS_TTY="$TEST_DIR/typed" run 1
+expect_pass 'a key typed at the prompt' 'Sign-in settings: all as planned.'
+for secret in "$TOKEN" "sb_secret_$(printf '%030d' 7)" "eyJ$(printf '%030d' 7)"; do
+  printf '%s\n' "$secret" > "$TEST_DIR/typed"
+  ALBUS_TTY="$TEST_DIR/typed" run 1
+  expect_pass 'a secret typed at the key prompt' 'That was a secret, not the publishable key'
+  ! grep -q -- "${secret:0:12}" "$TEST_DIR/output" "$ALBUS_TEST_LOG" || fail 'a secret typed at the key prompt was shown or used'
+  ! called 'auth/v1/settings' || fail 'a secret typed at the key prompt was sent'
+done
+ALBUS_PUBLISHABLE_KEY=$PUBLISHABLE ALBUS_TEST_SETTINGS_STATUS=401 ALBUS_TEST_SETTINGS='{"message":"Invalid API key"}' run 1
+expect_pass 'a key Supabase refuses' 'Sign-in settings: not checked (Supabase answered 401'
+! grep -q 'STILL TO DO' "$TEST_DIR/output" || fail 'a refused key was read as settings'
+ALBUS_PUBLISHABLE_KEY=$PUBLISHABLE ALBUS_TEST_SETTINGS='{"message":"something else"}' run 1
+expect_pass 'an answer without settings' 'not checked (an answer this script does not recognise)'
+! grep -q 'STILL TO DO' "$TEST_DIR/output" || fail 'an answer without settings was read as settings'
+echo 'PASS: the dashboard settings are checked and each wrong one is flagged, without blocking the setup; secrets typed at that prompt are refused unseen, and a refused key is not read as settings'
 
 ALBUS_TEST_APPLIED_COUNT=10 run 1
 expect_pass 'a partly applied project' "already applied: 10; pending: $((NMIG - 10))"
@@ -200,13 +228,28 @@ expect_stop 'a changed function' 'configuration differs from what was reviewed (
 ! called 'supabase link' || fail 'it linked to the project after a fingerprint mismatch'
 echo 'PASS: changed database changes or function code stop it before it touches the project'
 
-(unset SUPABASE_ACCESS_TOKEN; run 1)
+ALBUS_SOURCE="$ROOT" run 1
+expect_pass 'a preview of supplied source' 'Previewing supplied candidate source'
+! called 'git clone' || fail 'a preview of supplied source still cloned main'
+ALBUS_SOURCE="$SRC" run 1
+expect_stop 'a preview of changed supplied source' 'configuration differs from what was reviewed'
+ALBUS_SOURCE="$SRC" run 0
+expect_pass 'a real run with supplied source set' '^DONE:'
+called 'git clone' || fail 'the real run did not read main'
+! grep -q 'Previewing supplied' "$TEST_DIR/output" || fail 'the real run used supplied source'
+echo 'PASS: supplied source can only be previewed, and is fingerprinted like main'
+
+# Prefixes, not subshells: a subshell would keep STATUS from expect_stop.
+SUPABASE_ACCESS_TOKEN= run 1
 expect_stop 'no token' 'could not ask for the access token'
-(SUPABASE_ACCESS_TOKEN='not-a-token'; export SUPABASE_ACCESS_TOKEN; run 1)
+SUPABASE_ACCESS_TOKEN='not-a-token' run 1
 expect_stop 'a malformed token' 'does not look like a Supabase access token'
 ! grep -q 'not-a-token' "$TEST_DIR/output" || fail 'a malformed token was echoed back'
 [ ! -s "$ALBUS_TEST_LOG" ] || fail 'a command ran with a bad token'
 echo 'PASS: a missing or malformed token stops it, and is never echoed'
+SUPABASE_PROJECT_ID=ssvehwhblgqtvqkfbkbj SUPABASE_DB_PASSWORD=x run 1
+expect_pass 'stray SUPABASE_ settings in the shell' 'DRY RUN FINISHED'
+echo 'PASS: SUPABASE_ settings left in the shell never reach the CLI'
 
 ALBUS_TEST_LINK_FAILS=1 run 1
 expect_stop 'a token that cannot reach the project' 'cannot reach the new project'
@@ -223,6 +266,7 @@ echo 'PASS: an unreachable project, a wrong live policy, an unknown function and
 ALBUS_TEST_SECRETS='ANTHROPIC_API_KEY APPLE_CLIENT_ID' run 1
 expect_pass 'secret names' 'ANTHROPIC_API_KEY: set'
 grep -q 'APPLE_PRIVATE_KEY: not set yet' "$TEST_DIR/output" || fail 'a missing secret was not reported'
+grep -q 'REVENUECAT_APP_IDS: not set yet' "$TEST_DIR/output" || fail 'REVENUECAT_APP_IDS was not reported'
 ! grep -q '0000000000' "$TEST_DIR/output" || fail 'a secret digest was printed'
 echo 'PASS: secret names are reported, never their digests'
 
@@ -282,5 +326,7 @@ expect_stop 'a function that answers without a sign-in' 'delete-account answered
 ALBUS_TEST_STATUS_WEBHOOK=200 run 0
 expect_stop 'a webhook that answers without a password' 'revenuecat-webhook answered 200'
 ! grep -q '^DONE:' "$TEST_DIR/output" || fail 'it said DONE after a failed probe'
-echo 'PASS: a wrong live policy or a function that answers without a sign-in stops it'
+ALBUS_TEST_WEBHOOK_BODY='{"code":"BOOT_ERROR","message":"Worker failed to boot"}' run 0
+expect_stop 'a webhook that did not start' 'revenuecat-webhook answered 503 without saying NOT_CONFIGURED'
+echo 'PASS: a wrong live policy, a function that answers without a sign-in, or a webhook that did not start stops it'
 echo "PASS: $SCRIPT preview and real run, with every safeguard failing in turn."

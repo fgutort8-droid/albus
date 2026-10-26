@@ -43,6 +43,7 @@ jobs:
           bash scripts/tests/deploy-auth-dry-run.sh
           bash scripts/tests/deploy-auth-live-run.sh
           bash scripts/tests/set-apple-secrets-test.sh
+          bash scripts/tests/bring-up-project-test.sh
           python3 scripts/tools/test_fetch_logos.py
       - name: Install checksum-pinned Gitleaks
         env:
