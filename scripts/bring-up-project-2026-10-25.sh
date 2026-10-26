@@ -159,15 +159,18 @@ secrets_report() {
   supabase secrets list --project-ref "$REF" --output json > "$STAGE/secrets.json" </dev/null \
     || stop 'could not read the secret names'
   # Names only. The list also carries a digest of each value; it is never printed.
-  python3 - "$STAGE/secrets.json" <<'PY'
+  # A new project lists nothing, not even the keys the platform adds to every
+  # function, until a function is deployed; so they are only expected after.
+  python3 - "$STAGE/secrets.json" "$1" <<'PY' || stop 'the secrets are not as expected'
 import json,sys
-rows=json.load(open(sys.argv[1])); rows=rows.get('secrets',rows) if isinstance(rows,dict) else rows
+rows=json.load(open(sys.argv[1])) or []; rows=rows.get('secrets',rows) if isinstance(rows,dict) else rows
 names={r.get('name') for r in rows if isinstance(r,dict)}
-for n in ('SUPABASE_SECRET_KEYS','SUPABASE_PUBLISHABLE_KEYS'):
- if n not in names: sys.exit(n+' is not injected, so the functions would have no keys; tell Claude')
 for n in ('ALBUS_SUPABASE_SECRET_KEY','ALBUS_SUPABASE_PUBLISHABLE_KEY'):
  if n in names: sys.exit(n+' is set and would win over the new keys; tell Claude')
-print('The platform injects both key sets, and no override is set.')
+missing=[n for n in ('SUPABASE_SECRET_KEYS','SUPABASE_PUBLISHABLE_KEYS') if n not in names]
+if not missing: print('The platform injects both key sets, and no override is set.')
+elif sys.argv[2]=='before': print('Platform keys: not listed yet, as on any new project before its first deploy; checked again after the deploy.')
+else: print('WARNING: after the deploy the platform keys are still not listed ('+', '.join(missing)+'); tell Claude.')
 for n in ('ANTHROPIC_API_KEY','REVENUECAT_WEBHOOK_SECRET','REVENUECAT_WEBHOOK_SIGNING_SECRET','REVENUECAT_APP_IDS','ALBUS_SIGNAL_PEPPER','APPLE_TEAM_ID','APPLE_KEY_ID','APPLE_PRIVATE_KEY','APPLE_CLIENT_ID'):
  print(n+': '+('set' if n in names else 'not set yet'))
 PY
@@ -219,7 +222,7 @@ PY
 functions_state before || stop 'the live functions are not as expected'
 compare
 echo "Database changes on main: $(wc -w <<<"$LOCAL" | tr -d ' '); already applied: $(wc -w <<<"$REMOTE" | tr -d ' '); pending: $(wc -w <<<"$PENDING" | tr -d ' ')"
-secrets_report
+secrets_report before
 signin_settings
 
 if [ "$DRY_RUN" = 1 ]; then
@@ -300,7 +303,7 @@ probe breakdown 401
 probe grade 401
 probe delete-account 401
 probe revenuecat-webhook 401 503
-secrets_report
+secrets_report after
 echo "DONE: the new project's database is set up and checked, and all four functions are deployed. No secrets changed."
 echo "$SETTINGS_LINE"
 echo 'Send Claude everything this printed.'
