@@ -29,9 +29,11 @@ if [ "$pinned" != "$actual" ]; then
 fi
 
 SQL=$(sed -n '/^cat > "\$STAGE\/verify.sql" <<.SQL.$/,/^SQL$/p' "$ROOT/scripts/$SCRIPT" | sed '1d;$d')
-[ "$(head -1 <<<"$SQL")" = 'begin read only;' ] && [ "$(tail -1 <<<"$SQL")" = 'commit;' ] \
+[ "$(head -1 <<<"$SQL")" = select ] && [[ "$(tail -1 <<<"$SQL")" == *' as audit_immutable;' ]] \
   || fail "could not find the checks in $SCRIPT"
-CHECKS=$(sed '1d;$d' <<<"$SQL")
+# Supabase CLI 2.122 sends the file as one prepared statement, which refuses several.
+[ "$(tr -cd ';' <<<"$SQL" | wc -c | tr -d ' ')" = 1 ] || fail 'the checks must be a single statement'
+CHECKS=$SQL
 docker inspect "$DB_CONTAINER" >/dev/null 2>&1 || fail "no database container $DB_CONTAINER; run supabase start first"
 db() { docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -X -q -A -t -x -F '=' -v ON_ERROR_STOP=1; }
 # One key=value line per check. The fault runs first, its own output discarded,
@@ -46,7 +48,7 @@ expect() { # label, the checks' output, the checks that must be false (none: '')
   echo "PASS: $1"
 }
 
-expect 'the migrated database, in the read-only transaction the script sends' "$(printf '%s\n' "$SQL" | db)" ''
+expect 'the migrated database, with the exact query the script sends' "$(printf '%s\n' "$SQL" | db)" ''
 PLATFORM=$(cat "$ROOT/scripts/tests/fixtures/supabase-auto-enable-rls.sql")
 expect "Supabase's automatic-RLS function, as the new project has it" "$(checks "$PLATFORM")" ''
 

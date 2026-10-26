@@ -30,29 +30,33 @@ STUB
 cat > "$TEST_DIR/bin/supabase" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
+[ "${1:-}" != --version ] || { echo "${ALBUS_TEST_CLI_VERSION:-2.122.0}"; exit 0; }
 printf 'supabase %s\n' "$*" >> "$ALBUS_TEST_LOG"
 [ -n "${SUPABASE_ACCESS_TOKEN:-}" ] || { echo 'no token reached the CLI' >&2; exit 98; }
 if env | grep '^SUPABASE_' | grep -qv '^SUPABASE_ACCESS_TOKEN='; then echo 'a stray SUPABASE_ setting reached the CLI' >&2; exit 97; fi
-case "$1 $2" in
+case "$1 ${2:-}" in
   'link --project-ref')
     [ -z "${ALBUS_TEST_LINK_FAILS:-}" ] || exit 1
     mkdir -p supabase/.temp; printf '%s' "$3" > supabase/.temp/project-ref ;;
   'migration list')
-    case "${ALBUS_TEST_STYLE:-pipe}" in pipe) sep='|' ;; box) sep='│' ;; garbled) sep='¦' ;; esac
-    printf '   Local %s Remote %s Time (UTC)\n  --------%s--------%s----\n' "$sep" "$sep" "$sep" "$sep"
-    i=0
-    for f in supabase/migrations/*.sql; do
-      v=$(basename "$f"); v=${v%%_*}; i=$((i + 1))
-      if [ -f "$ALBUS_TEST_STATE/pushed" ]; then applied=1
-      elif [ -n "${ALBUS_TEST_APPLIED_VERSIONS:-}" ]; then
-        [[ " $ALBUS_TEST_APPLIED_VERSIONS " == *" $v "* ]] && applied=1 || applied=0
-      else
-        [ "$i" -le "${ALBUS_TEST_APPLIED_COUNT:-0}" ] && applied=1 || applied=0
-      fi
-      if [ "$applied" = 1 ]; then printf '   %s %s %s %s\n' "$v" "$sep" "$v" "$sep"
-      else printf '   %s %s        %s\n' "$v" "$sep" "$sep"; fi
-    done
-    for v in ${ALBUS_TEST_REMOTE_ONLY:-}; do printf '          %s %s %s\n' "$sep" "$v" "$sep"; done ;;
+    [[ " $* " == *" --output-format json "* ]] || { echo 'the migration list must be asked for as JSON' >&2; exit 96; }
+    python3 - <<'PY'
+import glob,json,os
+state=os.environ['ALBUS_TEST_STATE']; style=os.environ.get('ALBUS_TEST_STYLE','json')
+count=int(os.environ.get('ALBUS_TEST_APPLIED_COUNT','0')); versions=os.environ.get('ALBUS_TEST_APPLIED_VERSIONS','').split()
+rows=[]
+for i,f in enumerate(sorted(glob.glob('supabase/migrations/*.sql')),1):
+    v=os.path.basename(f).split('_')[0]
+    applied=os.path.exists(state+'/pushed') or (v in versions if versions else i<=count)
+    rows.append({'local':v,'remote':v if applied else '','time':v})
+rows+=[{'local':'','remote':v,'time':v} for v in os.environ.get('ALBUS_TEST_REMOTE_ONLY','').split()]
+if style=='garbled': print('Local | Remote | Time (UTC)')
+elif style=='no-list': print(json.dumps({'message':'Migrations listed'}))
+else:
+    if style=='with-progress': print(json.dumps({'type':'info','message':'Connecting to remote database...'}))
+    print(json.dumps({'migrations':rows,'message':'Migrations listed'}))
+PY
+    ;;
   'functions list')
     python3 - <<'PY'
 import json,os
@@ -65,7 +69,7 @@ for name in jwt:
         if name==os.environ.get('ALBUS_TEST_WRONG_JWT'): want=not want
         rows.append({'slug':name,'verify_jwt':want,'version':1,'status':'ACTIVE'})
 if os.environ.get('ALBUS_TEST_EXTRA_FUNCTION'): rows.append({'slug':os.environ['ALBUS_TEST_EXTRA_FUNCTION'],'verify_jwt':True,'version':1})
-print(json.dumps(rows))
+print('null' if not rows and os.environ.get('ALBUS_TEST_FUNCTIONS_NULL') else json.dumps(rows))
 PY
     ;;
   'secrets list')
@@ -159,12 +163,21 @@ reads=$(grep -E '^[[:space:]]*read ' "$ROOT/scripts/$SCRIPT")
 ! grep -v -- ' -s ' <<<"$reads" || fail 'a prompt shows what is typed'
 ! grep -- '2>' <<<"$reads" || fail 'a prompt hides its own question'
 echo 'PASS: both prompts hide what is typed and show their question'
+# Supabase CLI 2.122 sends the checks as one prepared statement, which refuses several.
+checks=$(sed -n '/^cat > "\$STAGE\/verify.sql" <<.SQL.$/,/^SQL$/p' "$ROOT/scripts/$SCRIPT" | sed '1d;$d')
+[ "$(head -1 <<<"$checks")" = select ] && [ "$(tr -cd ';' <<<"$checks" | wc -c | tr -d ' ')" = 1 ] \
+  || fail 'the database checks must be a single select statement'
+echo 'PASS: the database checks are one select statement'
 
-ALBUS_TEST_STYLE=box run 1
-expect_pass "'│' list" "pending: $NMIG"
+ALBUS_TEST_STYLE=with-progress run 1
+expect_pass 'a list after a progress line' "pending: $NMIG"
 ALBUS_TEST_STYLE=garbled run 1
-expect_stop 'an unreadable migration list' 'could not read the migration list'
-echo "PASS: both table styles read; an unreadable list stops it"
+expect_stop 'a migration list that is not JSON' 'could not read the migration list'
+ALBUS_TEST_STYLE=no-list run 1
+expect_stop 'JSON without a migration list' 'could not read the migration list'
+ALBUS_TEST_FUNCTIONS_NULL=1 run 1
+expect_pass 'no functions, printed as null' 'breakdown: not live yet'
+echo "PASS: the migration list is read as JSON and anything else stops it; null means no functions"
 
 ALBUS_PUBLISHABLE_KEY=$PUBLISHABLE run 1
 expect_pass 'good settings' 'Sign-in settings: all as planned.'
@@ -247,6 +260,22 @@ expect_stop 'a malformed token' 'does not look like a Supabase access token'
 ! grep -q 'not-a-token' "$TEST_DIR/output" || fail 'a malformed token was echoed back'
 [ ! -s "$ALBUS_TEST_LOG" ] || fail 'a command ran with a bad token'
 echo 'PASS: a missing or malformed token stops it, and is never echoed'
+SUPABASE_ACCESS_TOKEN="$TOKEN$TOKEN" run 1
+expect_stop 'a token pasted twice' 'if you pasted it twice'
+[ ! -s "$ALBUS_TEST_LOG" ] || fail 'a command ran with a token pasted twice'
+SUPABASE_ACCESS_TOKEN="sbp_v0_$(printf '%040d' 7)" run 1
+expect_pass 'a token in the newer sbp_v0_ style' 'DRY RUN FINISHED'
+echo 'PASS: a token pasted twice stops it unshown; the newer token style is accepted'
+for old in 2.98.2 2.116.9 1.250.0 'not a version'; do
+  ALBUS_TEST_CLI_VERSION=$old run 1
+  expect_stop "Supabase tool $old" 'needs 2.117 or newer'
+  [ ! -s "$ALBUS_TEST_LOG" ] || fail "a command ran with Supabase tool $old"
+done
+for new in 2.117.0 'supabase 3.0.1'; do
+  ALBUS_TEST_CLI_VERSION=$new run 1
+  expect_pass "Supabase tool $new" 'DRY RUN FINISHED'
+done
+echo 'PASS: a Supabase tool older than 2.117 stops it before anything runs'
 SUPABASE_PROJECT_ID=ssvehwhblgqtvqkfbkbj SUPABASE_DB_PASSWORD=x run 1
 expect_pass 'stray SUPABASE_ settings in the shell' 'DRY RUN FINISHED'
 echo 'PASS: SUPABASE_ settings left in the shell never reach the CLI'
