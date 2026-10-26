@@ -1,7 +1,7 @@
 # Backend
 
-Four Edge Functions carry the server product. The three student endpoints are
-implemented and require a verified user JWT. RevenueCat is the only public
+Four Edge Functions carry the server product. The three student endpoints
+require a verified user JWT. RevenueCat is the only public
 endpoint; it fails closed until its two webhook secrets and product allowlist
 are configured.
 
@@ -9,11 +9,40 @@ are configured.
 |---|---|---|
 | `POST /breakdown` | user JWT | Assignment → rubric-grounded, startable steps, persisted atomically |
 | `POST /grade` | user JWT | Work + the student's saved rubric → persisted grading; blind reading when there is none |
+| `POST /delete-account` | user JWT | Deletes the caller's account; revokes Sign in with Apple when its keys are set |
 | `POST /revenuecat-webhook` | RevenueCat auth + body HMAC | Purchase events → server entitlement |
 
 Almost everything else in the app runs on-device. Scheduling, re-planning,
 tool matching, notifications, progress and per-user calibration need no
 server — see the architecture notes for the full ledger.
+
+## The live project
+
+From October 2026 the backend runs in project `yqhzmgikkawxjzvdjvsf` (Albus,
+West EU (Ireland), the fgutort8-droid organization). The previous project,
+`ssvehwhblgqtvqkfbkbj`, sits in an organization whose login was lost: nothing
+is deployed to it any more, and nothing points at it once the new app build
+ships.
+
+`scripts/bring-up-project-2026-10-25.sh` builds the new project from `main`:
+every migration, a read-only check of the result, then the four functions
+with their gateway policies. It takes an access token with hidden typing, not
+the CLI's saved login, and refuses the old project. Secrets are set
+separately; none is in this repository:
+
+| Secret | Comes from |
+|---|---|
+| `ANTHROPIC_API_KEY` | a new key in the Anthropic console |
+| `REVENUECAT_WEBHOOK_SECRET`, `REVENUECAT_WEBHOOK_SIGNING_SECRET` | the webhook in RevenueCat |
+| `REVENUECAT_APP_IDS` | the App Store app's RevenueCat id, once the app exists |
+| `ALBUS_SIGNAL_PEPPER` | random; optional, derived from the secret key when unset |
+| `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`, `APPLE_CLIENT_ID` | the Sign in with Apple key |
+
+The project was created with "Enable automatic RLS", so it also holds
+`public.rls_auto_enable()` and its `ensure_rls` event trigger, which Supabase
+adds and no migration creates. It turns RLS on for each new public table, as
+the migrations already do. It is a definer function with its path pinned to
+`pg_catalog`; the setup's check allows that shape for that one function only.
 
 ## Accounts
 
