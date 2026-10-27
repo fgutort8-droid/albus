@@ -29,7 +29,11 @@ every migration, a read-only check of the result, then the four functions
 with their gateway policies. It takes an access token with hidden typing, not
 the CLI's saved login, and refuses the old project. It needs Supabase CLI
 2.117 or newer: older versions refuse the current `sbp_v0_` access tokens.
-Secrets are set separately; none is in this repository:
+Secrets are set separately, and none is in this repository.
+`scripts/set-secrets-2026-10-27.sh` sets the Anthropic key, both RevenueCat
+webhook secrets and the pepper, from the clipboard, and points the owner at the
+new webhook address. The other secrets come once the App Store app and the Sign
+in with Apple key exist:
 
 | Secret | Comes from |
 |---|---|
