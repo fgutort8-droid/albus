@@ -73,9 +73,8 @@ enum NotificationActions {
 
 /// What this build is actually allowed to do.
 ///
-/// Follows the pattern `CaptchaService` established: present, inert, and one
-/// configuration value away from working — rather than absent and rediscovered
-/// later.
+/// Present, inert, and one configuration value away from working — rather
+/// than absent and rediscovered later.
 enum NotificationCapabilities {
 
     /// True only once `DEVELOPMENT_TEAM` is set and the app is signed.

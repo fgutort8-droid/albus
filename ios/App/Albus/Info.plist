@@ -37,10 +37,6 @@
 	<string>$(SUPABASE_PUBLISHABLE_KEY)</string>
 	<key>SUPABASE_URL</key>
 	<string>$(SUPABASE_URL)</string>
-	<key>TURNSTILE_ORIGIN</key>
-	<string>$(TURNSTILE_ORIGIN)</string>
-	<key>TURNSTILE_SITE_KEY</key>
-	<string>$(TURNSTILE_SITE_KEY)</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

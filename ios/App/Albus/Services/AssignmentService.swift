@@ -20,6 +20,43 @@ struct AssignmentService {
         self.client = client
     }
 
+    /// Tells the server which of this phone's tasks are finished and which
+    /// are open, so its count of open tasks, which the plan's cap uses,
+    /// matches. Only ever this phone's own tasks, so it is right however many
+    /// phones the student uses, and harmless to repeat: the server changes
+    /// only what differs. A task reopened past the cap stays closed there.
+    ///
+    /// - Returns: how many tasks the server changed, or nil when it could not
+    ///   be reached.
+    func sync(finished: [UUID], open: [UUID]) async -> Int? {
+        guard let client else { return nil }
+        guard !finished.isEmpty || !open.isEmpty else { return 0 }
+        do {
+            return try await client
+                .rpc("sync_my_assignments", params: [
+                    "p_finished": finished.map { $0.uuidString.lowercased() },
+                    "p_open": open.map { $0.uuidString.lowercased() },
+                ])
+                .execute().value
+        } catch {
+            print("[Albus] syncing task status with the server failed")
+            return nil
+        }
+    }
+
+    /// Stops the server counting every open task but `keeping`, the ones open
+    /// on this phone. The others were made on another phone, or before a
+    /// reinstall, and only the student knows whether that phone is still in
+    /// use, so this runs only when they ask.
+    ///
+    /// - Returns: how many tasks stopped counting.
+    func releaseOthers(keeping remoteIDs: [UUID]) async throws -> Int {
+        guard let client else { throw Backend.ConfigError.missing("Supabase") }
+        return try await client
+            .rpc("release_my_other_assignments", params: ["p_keep": remoteIDs.map { $0.uuidString.lowercased() }])
+            .execute().value
+    }
+
     /// True when the row is gone from the server — or was never there.
     func delete(remoteID: UUID) async -> Bool {
         guard let client else { return false }

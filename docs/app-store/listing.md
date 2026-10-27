@@ -39,10 +39,9 @@ KEEP YOUR MARK SCHEMES CLOSE
 Save your own rubrics and mark schemes for later reference. Browse a searchable
 collection of study tools, with links that open in Safari when you choose them.
 
-START WITHOUT A PASSWORD
-Albus creates an anonymous account during setup. No email address or password is
-required. Your local plans remain available offline; online features need a
-connection.
+NO PASSWORD TO REMEMBER
+Sign in with Apple in one tap. Your plans live on your phone and stay available
+offline; online features need a connection.
 
 Albus helps you plan your work. It does not guarantee grades or that every workload
 will fit the time available.
@@ -60,10 +59,18 @@ pretend that dependency is already complete.
 
 ## App Review notes — paste only after release gates pass
 
-Albus is a study planner. It uses anonymous accounts: no email, password or demo
-login is required. On first launch, choose your study preferences, add the first
-deadline and finish onboarding. The app creates its anonymous account at that
-point. If a CAPTCHA is configured, complete the displayed challenge.
+Albus is a study planner. On first launch, sign in with **Sign in with Apple**
+(the reviewer's own Apple ID works; no demo account is needed). Then choose your
+study preferences, add the first deadline and finish onboarding. Settings →
+Account shows how you signed in and signs out; Settings → Delete account deletes
+the account (Apple asks you to confirm first, and Albus revokes its Sign in with
+Apple token).
+
+Why the account comes first (guideline 5.1.1(v)): Albus's step plans and its
+marking are written by an AI model on our server, and each account has its own
+limits on them, enforced there, which reinstalling the app would otherwise
+reset. The account is also what the student deletes in Settings. Sign in with
+Apple takes one tap, and the student can hide their email address from us.
 
 Feature paths:
 
@@ -82,7 +89,7 @@ Feature paths:
    marking. The extracted text is sent to the AI provider; grades are guidance.
 7. **Subscription review, once payments/app is merged:** use Apple's sandbox
    purchase environment with a sandbox Apple account. The Apple account is for
-   the purchase only; Albus still uses anonymous authentication. Verify Settings
+   the purchase only; signing in to Albus is separate. Verify Settings
    → Restore purchases and Manage subscription. Do not supply a production
    customer account or expect a production charge.
 8. **Account deletion (requires the owner's deployed migration):** Settings → Delete
@@ -103,8 +110,8 @@ Do not promise a numeric rating before completing it. Source:
 | Question / content descriptor | Proposed answer | Code basis / qualification |
 | --- | --- | --- |
 | Parental controls | No | No parent role or parent-managed feature limits. |
-| Age assurance | No | No age verification or declared-age-range API. CAPTCHA is not age assurance. |
-| Unrestricted web access | No | Tools open external Safari; CAPTCHA is a fixed widget, not an address-bar browser. |
+| Age assurance | No | No age verification or declared-age-range API. |
+| Unrestricted web access | No | Tools open external Safari; there is no in-app browser. |
 | User-generated content | No under Apple's distribution definition | Work/rubrics are private to the student; no public sharing/feed. This does not mean no private user content is collected. |
 | Social media | No | No feed or redistribution. |
 | Social media disabled under 13 | Not applicable | No social-media feature or age gate. |

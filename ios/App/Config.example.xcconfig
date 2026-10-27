@@ -8,21 +8,6 @@
 SUPABASE_URL = https:/$()/YOUR_PROJECT_REF.supabase.co
 SUPABASE_PUBLISHABLE_KEY = sb_publishable_xxxxxxxxxxxxxxxxxxxx
 
-// ── CAPTCHA (Cloudflare Turnstile) ───────────────────────────────────────
-// LEAVE EMPTY until all three steps below are done together. A site key here
-// without the matching secret in Supabase — or a secret in Supabase without a
-// key here — rejects every new sign-up.
-//
-//   1. Create a Turnstile widget at https://dash.cloudflare.com → Turnstile.
-//      Set its hostname to whatever you put in TURNSTILE_ORIGIN below.
-//   2. Paste the SITE key here, and the SECRET key into
-//      Supabase → Authentication → Settings → Bot and Abuse Protection.
-//   3. Rebuild. Onboarding presents the challenge before creating the account.
-//
-// Enabling only one side is the failure mode to avoid — see ios/README.md.
-TURNSTILE_SITE_KEY =
-TURNSTILE_ORIGIN = https:/$()/albus.app
-
 // ── RevenueCat ───────────────────────────────────────────────────────────
 // Public SDK keys from RevenueCat → Apps & providers. Both are designed to
 // ship inside an app; neither is a secret. Leave both EMPTY and the app runs

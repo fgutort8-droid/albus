@@ -28,8 +28,7 @@ Info.plist. [Apple's export guidance](https://developer.apple.com/documentation/
 allows an exempt declaration for operating-system encryption.
 
 Inspected app networking: `Backend.swift` uses URLSession and system HTTPS;
-`CaptchaService.swift` uses WKWebView HTTPS; auth storage delegates to system
-Keychain via `SessionStorage.swift`. No custom cipher, VPN, bundled TLS library,
+auth storage delegates to system Keychain via `SessionStorage.swift`. No custom cipher, VPN, bundled TLS library,
 end-to-end encryption or app-owned CryptoKit/CommonCrypto implementation found.
 
 Resolved Supabase Auth contains PKCE SHA-256 hashing and system
@@ -99,8 +98,8 @@ Metadata length checks: subtitle 30/30; promotional text 136/170; keywords 88/10
   Review notes explicitly mark their payment-client dependency.
 - Account deletion and payments backend are now merged on the audited base.
   Backend migration deployment belongs to the owner; this branch does not deploy.
-- Resolve the policy/partner questions in `app-privacy.md`, particularly optional
-  Cloudflare CAPTCHA, provider logging, and operational support emails.
+- Resolve the policy/partner questions in `app-privacy.md`, particularly provider
+  logging and operational support emails.
 - Final AI-content age-rating answers need release-model assessment. No paid
   model call, production account creation or production request was used here.
 - Local source findings are not presented as production configuration inspection.

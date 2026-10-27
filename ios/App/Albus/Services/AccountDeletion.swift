@@ -27,6 +27,9 @@ final class AccountDeletion {
     private(set) var isBusy = false
     private(set) var generation = 0
     var errorMessage: String?
+    /// Why the server last refused, when it did. The screen asks Apple to
+    /// confirm and tries again after `needsApple`.
+    private(set) var refused: DeletionRefusal?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -53,6 +56,7 @@ final class AccountDeletion {
         guard !isBusy else { return false }
         isBusy = true
         errorMessage = nil
+        refused = nil
         defer { isBusy = false }
 
         if !requiresCleanup {
@@ -70,10 +74,19 @@ final class AccountDeletion {
                 asked = true
                 try await deleteRemote()
             } catch is AccountUnreachable {
-                // The account cannot be reached from this device any more, and
-                // for an anonymous account there is no other way in. Carrying
-                // on is the only outcome that keeps the promise this screen
-                // made; refusing would leave the work here for good.
+                // The account cannot be reached from this device any more.
+                // Carrying on is the only outcome that keeps the promise this
+                // screen made; refusing would leave the work here for good. An
+                // account that can still sign in elsewhere can be deleted from
+                // there too.
+            } catch let refusal as DeletionRefusal {
+                // The server answered that it deleted nothing, so no question
+                // is outstanding and the phone keeps everything.
+                defaults.removeObject(forKey: Self.requestKey)
+                defaults.removeObject(forKey: Self.requestedAtKey)
+                refused = refusal
+                errorMessage = refusal.message
+                return false
             } catch {
                 // A dropped response cannot establish whether the server committed.
                 // Keep local work and credentials so the same idempotent RPC can retry.
@@ -111,10 +124,10 @@ final class AccountDeletion {
     ///
     /// Two facts together are conclusive, and neither is on its own: the
     /// student asked for deletion, and the stored credential has since been
-    /// refused. An anonymous account has no password and no second way in, so
-    /// a refused credential means this phone can never reach that account
-    /// again — which, for an account that was asked to be deleted, is because
-    /// it is gone.
+    /// refused. For an account that was asked to be deleted, a refused
+    /// credential is because it is gone. Even if it were refused for another
+    /// reason, the student asked for this phone to be cleared, and an account
+    /// that still exists can be signed into and deleted again.
     ///
     /// Without this, that student's next launch shows onboarding, because the
     /// session cannot be restored, while every assignment, rubric and mark

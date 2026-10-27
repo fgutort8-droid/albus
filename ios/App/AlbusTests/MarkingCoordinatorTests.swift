@@ -613,6 +613,8 @@ struct MarkingSnapshots {
                 .environment(FocusSession())
                 .environment(SessionService(client: nil, storage: storage))
                 .environment(NotificationRouter())
+                .environment(NotificationCoordinator())
+                .environment(LocalAccount(defaults: UserDefaults(suiteName: "albus.tests.\(UUID().uuidString)")!))
                 .modelContainer(container)
         }
 
