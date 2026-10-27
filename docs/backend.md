@@ -27,8 +27,9 @@ ships.
 `scripts/bring-up-project-2026-10-25.sh` builds the new project from `main`:
 every migration, a read-only check of the result, then the four functions
 with their gateway policies. It takes an access token with hidden typing, not
-the CLI's saved login, and refuses the old project. Secrets are set
-separately; none is in this repository:
+the CLI's saved login, and refuses the old project. It needs Supabase CLI
+2.117 or newer: older versions refuse the current `sbp_v0_` access tokens.
+Secrets are set separately; none is in this repository:
 
 | Secret | Comes from |
 |---|---|

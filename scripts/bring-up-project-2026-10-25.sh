@@ -18,7 +18,8 @@
 #
 # It asks for a Supabase access token (typing is hidden) instead of using the
 # login saved on this Mac, which belongs to the OLD project. It refuses to
-# touch the old project.
+# touch the old project. It needs Supabase CLI 2.117 or newer: older ones
+# refuse current access tokens (sbp_v0_...).
 #
 # Undo: fix forward. The new project holds only what this script puts there.
 set -euo pipefail
@@ -40,14 +41,20 @@ for tool in git supabase python3 curl comm; do command -v "$tool" >/dev/null || 
 for name in $(env | sed -n 's/^\(SUPABASE_[A-Za-z0-9_]*\)=.*/\1/p'); do
   [ "$name" = SUPABASE_ACCESS_TOKEN ] || unset "$name"
 done
+CLI_VERSION=$(supabase --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+IFS=. read -r cli_major cli_minor _ <<<"${CLI_VERSION:-0.0.0}"
+[ "$cli_major" -gt 2 ] || { [ "$cli_major" -eq 2 ] && [ "$cli_minor" -ge 117 ]; } \
+  || stop "the Supabase tool here is version ${CLI_VERSION:-unknown}, and this needs 2.117 or newer; run: brew upgrade supabase/tap/supabase"
 
 if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
   read -r -s -p 'Paste the albus-setup access token (typing is hidden), then press Enter: ' SUPABASE_ACCESS_TOKEN <"$TTY" \
     || stop 'could not ask for the access token; run this in Terminal'
   echo
 fi
-[[ "$SUPABASE_ACCESS_TOKEN" =~ ^sbp_[A-Za-z0-9_]{20,200}$ ]] \
-  || stop 'that does not look like a Supabase access token (it starts sbp_)'
+# What the CLI accepts: sbp_, an optional short kind (oauth_, v0_), then 40 hex
+# digits. Anything else, such as the token pasted twice, stops here, unshown.
+[[ "$SUPABASE_ACCESS_TOKEN" =~ ^sbp_([a-z][a-z0-9]{0,7}_)?[a-f0-9]{40}$ ]] \
+  || stop 'that does not look like a Supabase access token (sbp_ and 40 more letters and digits); if you pasted it twice, run this again and paste it once'
 export SUPABASE_ACCESS_TOKEN
 
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/albus-bring-up.XXXXXX")
@@ -90,14 +97,27 @@ echo "Linked to the new project $REF."
 
 lines() { tr ' ' '\n' <<<"$1" | sed '/^$/d' | sort; }
 compare() {
-  local out files
-  out=$(supabase migration list --linked </dev/null) || stop 'could not read migration history'
-  # Different CLI versions draw the table with "|" or "│". Read either, and
-  # stop unless it lists exactly the files on main: an unreadable list must
-  # never look like "nothing pending".
-  out=$(printf '%s\n' "$out" | sed 's/│/|/g')
-  LOCAL=$(awk -F'|' 'NF>=3 {l=$1;gsub(/ /,"",l);if(l~/^[0-9]+$/)print l}' <<<"$out" | sort | xargs)
-  REMOTE=$(awk -F'|' 'NF>=3 {r=$2;gsub(/ /,"",r);if(r~/^[0-9]+$/)print r}' <<<"$out" | sort | xargs)
+  local parsed files
+  # Ask for JSON: the CLI's table, and its default format, change with the
+  # version and with whether it thinks an AI tool is running it. Stop unless
+  # the list names exactly the files on main: an unreadable list must never
+  # look like "nothing pending".
+  supabase migration list --linked --output-format json > "$STAGE/migrations.json" </dev/null \
+    || stop 'could not read migration history'
+  parsed=$(python3 - "$STAGE/migrations.json" <<'PY'
+import json,sys
+rows=None
+for line in open(sys.argv[1]):
+ try: d=json.loads(line)
+ except ValueError: continue
+ if isinstance(d,dict) and isinstance(d.get('migrations'),list): rows=d['migrations']
+if rows is None or not all(isinstance(r,dict) for r in rows): sys.exit(1)
+for side in ('local','remote'):
+ print(' '.join(v for v in (r.get(side) for r in rows) if isinstance(v,str) and v.isdigit()))
+PY
+) || stop 'could not read the migration list, or it does not match main; stopping rather than guessing'
+  LOCAL=$(lines "$(sed -n 1p <<<"$parsed")" | xargs)
+  REMOTE=$(lines "$(sed -n 2p <<<"$parsed")" | xargs)
   files=$(for f in supabase/migrations/*.sql; do v=$(basename "$f"); echo "${v%%_*}"; done | sort | xargs)
   [ -n "$LOCAL" ] && [ "$LOCAL" = "$files" ] \
     || stop 'could not read the migration list, or it does not match main; stopping rather than guessing'
@@ -116,7 +136,8 @@ functions_state() {
     || stop 'could not read the live functions'
   python3 - "$STAGE/functions.json" "$1" <<'PY'
 import json,sys
-rows=json.load(open(sys.argv[1])); rows=rows.get('functions',rows.get('rows',[])) if isinstance(rows,dict) else rows
+rows=json.load(open(sys.argv[1])) or []   # the CLI prints null when no function exists
+rows=rows.get('functions',rows.get('rows',[])) if isinstance(rows,dict) else rows
 want={'breakdown':True,'grade':True,'delete-account':True,'revenuecat-webhook':False}
 def find(name): return [r for r in rows if r.get('slug',r.get('name'))==name]
 for r in rows:
@@ -218,8 +239,9 @@ fi
 # rls_auto_enable(), which Supabase adds to a project created with "Enable
 # automatic RLS". It runs only as a DDL event trigger, never for a client, and
 # its path is pinned to pg_catalog. Any other definer function needs path "".
+# One statement: Supabase CLI 2.122 sends the file as a single prepared
+# statement, which refuses several. A plain select only reads.
 cat > "$STAGE/verify.sql" <<'SQL'
-begin read only;
 select
  (select count(*) = 3 from public.plans) as plans_seeded,
  (select count(*) >= 4 from public.subscription_products) as products_mapped,
@@ -236,7 +258,6 @@ select
  (select relrowsecurity from pg_class where oid='private.financial_inbox'::regclass) as inbox_rls,
  not has_table_privilege('authenticated','private.financial_inbox','select,insert,update,delete') as inbox_clients_closed,
  not has_table_privilege('service_role','private.financial_audit','update,delete') as audit_immutable;
-commit;
 SQL
 supabase db query --linked --file "$STAGE/verify.sql" --output json > "$STAGE/verify.json" </dev/null \
   || stop 'the database changes are applied, but the checks could not run, so nothing was deployed; tell Claude'
