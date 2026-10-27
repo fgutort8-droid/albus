@@ -74,10 +74,13 @@ PY
     ;;
   'secrets list')
     python3 - <<'PY'
-import json,os
-names=[] if os.environ.get('ALBUS_TEST_NO_PLATFORM_KEYS') else ['SUPABASE_SECRET_KEYS','SUPABASE_PUBLISHABLE_KEYS','SUPABASE_URL']
+import glob,json,os
+# Like a real new project: nothing is listed, not even the platform's keys,
+# until a function has been deployed.
+deployed=glob.glob(os.environ['ALBUS_TEST_STATE']+'/deployed-*')
+names=['SUPABASE_SECRET_KEYS','SUPABASE_PUBLISHABLE_KEYS','SUPABASE_URL'] if deployed and not os.environ.get('ALBUS_TEST_NO_PLATFORM_KEYS') else []
 names+=os.environ.get('ALBUS_TEST_SECRETS','').split()
-print(json.dumps([{'name':n,'value':'00'*32} for n in names]))
+print('null' if not names and os.environ.get('ALBUS_TEST_SECRETS_NULL') else json.dumps([{'name':n,'value':'00'*32} for n in names]))
 PY
     ;;
   'db push')
@@ -177,7 +180,9 @@ ALBUS_TEST_STYLE=no-list run 1
 expect_stop 'JSON without a migration list' 'could not read the migration list'
 ALBUS_TEST_FUNCTIONS_NULL=1 run 1
 expect_pass 'no functions, printed as null' 'breakdown: not live yet'
-echo "PASS: the migration list is read as JSON and anything else stops it; null means no functions"
+ALBUS_TEST_SECRETS_NULL=1 run 1
+expect_pass 'no secrets, printed as null' 'ANTHROPIC_API_KEY: not set yet'
+echo "PASS: the migration list is read as JSON and anything else stops it; null means no functions or secrets"
 
 ALBUS_PUBLISHABLE_KEY=$PUBLISHABLE run 1
 expect_pass 'good settings' 'Sign-in settings: all as planned.'
@@ -286,11 +291,11 @@ ALBUS_TEST_LIVE=revenuecat-webhook ALBUS_TEST_WRONG_JWT=revenuecat-webhook run 1
 expect_stop 'a live function with the wrong policy' 'already live with the wrong sign-in check'
 ALBUS_TEST_EXTRA_FUNCTION=old-thing run 1
 expect_stop 'an unexpected function' 'an unexpected function is live: old-thing'
-ALBUS_TEST_NO_PLATFORM_KEYS=1 run 1
-expect_stop 'missing platform keys' 'is not injected'
+run 1
+grep -q 'Platform keys: not listed yet' "$TEST_DIR/output" || fail 'a new project with no keys listed was not explained'
 ALBUS_TEST_SECRETS='ALBUS_SUPABASE_SECRET_KEY' run 1
 expect_stop 'an override key' 'would win over the new keys'
-echo 'PASS: an unreachable project, a wrong live policy, an unknown function and bad keys each stop it'
+echo 'PASS: an unreachable project, a wrong live policy, an unknown function and an override key each stop it; unlisted keys before a deploy do not'
 
 ALBUS_TEST_SECRETS='ANTHROPIC_API_KEY APPLE_CLIENT_ID' run 1
 expect_pass 'secret names' 'ANTHROPIC_API_KEY: set'
@@ -314,6 +319,8 @@ d3=$(line_of 'functions deploy delete-account'); d4=$(line_of 'functions deploy 
 ! grep -q 'ssvehwhblgqtvqkfbkbj' "$ALBUS_TEST_LOG" || fail 'the old project was named in a command'
 for n in breakdown grade delete-account; do grep -q "$n: answers a request with no sign-in with 401" "$TEST_DIR/output" || fail "$n probe"; done
 grep -q 'revenuecat-webhook: answers a request with no sign-in with 503' "$TEST_DIR/output" || fail 'webhook probe'
+grep -q 'Platform keys: not listed yet' "$TEST_DIR/output" && grep -q 'The platform injects both key sets' "$TEST_DIR/output" \
+  || fail 'the platform keys were not checked again after the deploy'
 echo 'PASS: the real run applies the changes, checks the database, deploys all four, and probes each'
 
 ALBUS_TEST_PRESET_PUSHED=1 ALBUS_TEST_PRESET_DEPLOYED='breakdown grade delete-account revenuecat-webhook' ALBUS_TEST_STATUS_WEBHOOK=401 run 0
@@ -326,6 +333,12 @@ ALBUS_PUBLISHABLE_KEY=$PUBLISHABLE ALBUS_TEST_SETTINGS='{"external":{"apple":tru
 expect_pass 'a real run with email still on' '^DONE:'
 [ "$(tail -2 "$TEST_DIR/output" | head -1)" = 'Sign-in settings: still to do in the dashboard: Email provider.' ] || fail 'the closing summary did not repeat what is still to do'
 echo 'PASS: the closing message repeats what is still to do in the dashboard'
+
+ALBUS_TEST_NO_PLATFORM_KEYS=1 run 0
+expect_pass 'a real run whose keys are still not listed after the deploy' '^DONE:'
+grep -q 'WARNING: after the deploy the platform keys are still not listed (SUPABASE_SECRET_KEYS, SUPABASE_PUBLISHABLE_KEYS)' "$TEST_DIR/output" \
+  || fail 'keys still missing after the deploy were not warned about'
+echo 'PASS: keys still not listed after the deploy are warned about, not hidden'
 
 ALBUS_TEST_FALSE_CHECK=anon_has_no_table_access run 0
 expect_stop 'a failed database check' 'the checks did not all pass, so nothing was deployed'
