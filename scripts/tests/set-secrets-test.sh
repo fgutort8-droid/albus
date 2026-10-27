@@ -94,6 +94,13 @@ case "$*" in
   *) exit 99 ;;
 esac
 STUB
+# The real generator, unless a case makes it fail.
+REAL_OPENSSL=$(command -v openssl)
+cat > "$TEST_DIR/bin/openssl" <<STUB
+#!/usr/bin/env bash
+[ -z "\${ALBUS_TEST_OPENSSL_FAILS:-}" ] || exit 1
+exec "$REAL_OPENSSL" "\$@"
+STUB
 chmod +x "$TEST_DIR/bin/"*
 export ALBUS_TEST_ACCEPTED_KEYS=$GOOD_KEY
 
@@ -201,6 +208,17 @@ expect_stop 'a webhook still not configured' 'answered 503 to a request without 
 ALBUS_TEST_WEBHOOK_STATUS=200 run 0 "$GOOD_KEY" "$SIGN"
 expect_stop 'a webhook that accepts no password' 'answered 200'
 echo 'PASS: a failed store, a missing secret or a webhook that does not refuse stops it'
+
+ALBUS_TEST_OPENSSL_FAILS=1 run 0 "$GOOD_KEY" "$SIGN"
+expect_stop 'a generator that fails for the pepper' 'making the signal pepper'
+! grep -qw ALBUS_SIGNAL_PEPPER <<<"$(stored)" || fail 'a pepper was stored although none was made'
+ALBUS_TEST_PRESET=ALBUS_SIGNAL_PEPPER ALBUS_TEST_OPENSSL_FAILS=1 run 0 "$GOOD_KEY" "$SIGN"
+expect_stop 'a generator that fails for the password' 'making the Authorization password'
+! grep -qw REVENUECAT_WEBHOOK_SECRET <<<"$(stored)" || fail 'a password was stored although none was made'
+[ -z "$(clipboard)" ] || fail 'the clipboard was left holding something after a failed generator'
+ALBUS_TEST_OPENSSL_FAILS=1 run 1
+expect_stop 'a preview whose generator fails' 'making the signal pepper'
+echo 'PASS: a random generator that fails stops it, and no empty secret is ever stored'
 
 ALBUS_TEST_LIST_FAILS=1 run 0
 expect_stop 'an unreachable project' 'could not reach the new project'

@@ -102,6 +102,14 @@ anthropic_accepts() {
   [ "$status" = 200 ]
 }
 
+# 32 random bytes as 64 hex digits, or stop: an empty or short secret must
+# never be stored, and a failure inside $(...) would otherwise go unnoticed.
+random_hex() {
+  local value
+  value=$(openssl rand -hex 32) && [[ "$value" =~ ^[0-9a-f]{64}$ ]] || stop "making $1"
+  printf '%s' "$value"
+}
+
 names() {
   supabase secrets list --project-ref "$REF" --output json > "$WORK/names.json" </dev/null \
     || stop 'could not reach the new project with this token'
@@ -119,9 +127,15 @@ case "$BEFORE" in *" ALBUS_SIGNAL_PEPPER "*) KEEP_PEPPER=1 ;; *) KEEP_PEPPER=0 ;
 
 if [ "$DRY_RUN" = 1 ]; then
   echo '[dry run] would read a new Anthropic key from your clipboard, check Anthropic accepts it, and store it'
-  [ "$KEEP_PEPPER" = 1 ] && echo '[dry run] would keep ALBUS_SIGNAL_PEPPER as it is' || store ALBUS_SIGNAL_PEPPER "$(openssl rand -hex 32)"
+  if [ "$KEEP_PEPPER" = 1 ]; then
+    echo '[dry run] would keep ALBUS_SIGNAL_PEPPER as it is'
+  else
+    PEPPER=$(random_hex 'the signal pepper')
+    store ALBUS_SIGNAL_PEPPER "$PEPPER"
+  fi
   echo "[dry run] would put the new webhook address on your clipboard: $WEBHOOK_URL"
-  store REVENUECAT_WEBHOOK_SECRET "$(openssl rand -hex 32)"
+  AUTH=$(random_hex 'the Authorization password')
+  store REVENUECAT_WEBHOOK_SECRET "$AUTH"
   echo "[dry run] would read RevenueCat's signing secret from your clipboard and store it"
   echo 'DRY RUN FINISHED: no secrets were changed.'
   exit 0
@@ -155,7 +169,9 @@ echo '== Step 2 of 4: the signal pepper'
 if [ "$KEEP_PEPPER" = 1 ]; then
   echo '   Already set; kept, so earlier abuse signals still match.'
 else
-  store ALBUS_SIGNAL_PEPPER "$(openssl rand -hex 32)" || stop 'storing the signal pepper on the server'
+  PEPPER=$(random_hex 'the signal pepper')
+  store ALBUS_SIGNAL_PEPPER "$PEPPER" || stop 'storing the signal pepper on the server'
+  unset PEPPER
 fi
 
 echo "== Step 3 of 4: point RevenueCat's webhook at the new server"
@@ -164,8 +180,7 @@ echo "   The new address is on your clipboard: $WEBHOOK_URL"
 echo '   In RevenueCat: Integrations, then Webhooks, then Albus server.'
 echo '     1. Click in "Webhook URL", select what is there, and press Cmd+V.'
 pause
-AUTH=$(openssl rand -hex 32)
-[ "${#AUTH}" -eq 64 ] || stop 'making the Authorization password'
+AUTH=$(random_hex 'the Authorization password')
 store REVENUECAT_WEBHOOK_SECRET "$AUTH" || stop 'storing the Authorization password on the server'
 printf '%s' "$AUTH" | pbcopy
 echo '   The Authorization password is on your clipboard now.'
