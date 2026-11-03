@@ -45,3 +45,19 @@ launch is not. Don't widen it.
 
 `confidence` is `high` only when a real timer produced the number. Completions
 inferred from the session window are `low` and should be weighted down.
+
+## Task status from the phone
+
+`sync_my_assignments(p_finished uuid[], p_open uuid[]) → integer` updates only
+the signed-in student's tasks. It finishes active rows first, then reopens
+completed rows one at a time through the normal active-task trigger. A reopen
+refused by the plan cap is skipped. Archived rows, foreign rows and IDs present
+in both lists remain unchanged. The return value counts changed rows, so
+repeating the same state is harmless.
+
+`release_my_other_assignments(p_keep uuid[]) → integer` archives the student's
+other active tasks after the app obtains their agreement. Empty/null keep lists
+release every active place. Completed tasks and children/results remain intact.
+Both RPCs derive the owner from `auth.uid()`, accept at most 500 entries per
+array, and allow `authenticated` callers only. Neither changes the separate
+weekly AI-plan allowance.

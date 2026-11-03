@@ -9,9 +9,16 @@ on:
     paths:
       - 'supabase/migrations/**'
       - 'supabase/tests/**'
+      - 'supabase/functions/delete-account/**'
+      - 'supabase/functions/_shared/**'
+      - 'scripts/security/delete-account-boundary.py'
       - 'supabase/config.toml'
       - 'scripts/security-concurrency-local.sh'
       - 'scripts/security/financial-concurrency.py'
+      - 'scripts/security/apple-only-signin.py'
+      - 'scripts/bring-up-project-2026-10-25.sh'
+      - 'scripts/tests/bring-up-project-db-test.sh'
+      - 'scripts/tests/fixtures/supabase-auto-enable-rls.sql'
       - '.github/workflows/database-security.yml'
 
 permissions:
@@ -31,12 +38,18 @@ jobs:
         run: supabase start
       - name: Rebuild the schema from migrations alone
         run: supabase db reset --local --no-seed --yes
+      - name: The new-project setup's database checks catch every planted fault
+        run: bash scripts/tests/bring-up-project-db-test.sh
       - name: Run policy and financial-safety assertions
         run: supabase test db --local
+      - name: Only Sign in with Apple can make an account
+        run: python3 scripts/security/apple-only-signin.py
       - name: Race the last available slots
         run: scripts/security-concurrency-local.sh
       - name: Race payment events, processors and account cleanup
         run: python3 scripts/security/financial-concurrency.py
+      - name: Only a student's own token deletes their account
+        run: python3 scripts/security/delete-account-boundary.py
       - name: Stop local services
         if: always()
         run: supabase stop --no-backup

@@ -1,7 +1,7 @@
 # Backend
 
-Four Edge Functions carry the server product. The three student endpoints are
-implemented and require a verified user JWT. RevenueCat is the only public
+Four Edge Functions carry the server product. The three student endpoints
+require a verified user JWT. RevenueCat is the only public
 endpoint; it fails closed until its two webhook secrets and product allowlist
 are configured.
 
@@ -9,11 +9,59 @@ are configured.
 |---|---|---|
 | `POST /breakdown` | user JWT | Assignment → rubric-grounded, startable steps, persisted atomically |
 | `POST /grade` | user JWT | Work + the student's saved rubric → persisted grading; blind reading when there is none |
+| `POST /delete-account` | user JWT | Deletes the caller's account; revokes Sign in with Apple when its keys are set |
 | `POST /revenuecat-webhook` | RevenueCat auth + body HMAC | Purchase events → server entitlement |
 
 Almost everything else in the app runs on-device. Scheduling, re-planning,
 tool matching, notifications, progress and per-user calibration need no
 server — see the architecture notes for the full ledger.
+
+## The live project
+
+From October 2026 the backend runs in project `yqhzmgikkawxjzvdjvsf` (Albus,
+West EU (Ireland), the fgutort8-droid organization). The previous project,
+`ssvehwhblgqtvqkfbkbj`, sits in an organization whose login was lost: nothing
+is deployed to it any more, and nothing points at it once the new app build
+ships.
+
+`scripts/bring-up-project-2026-10-25.sh` builds the new project from `main`:
+every migration, a read-only check of the result, then the four functions
+with their gateway policies. It takes an access token with hidden typing, not
+the CLI's saved login, and refuses the old project. It needs Supabase CLI
+2.117 or newer: older versions refuse the current `sbp_v0_` access tokens.
+Secrets are set separately, and none is in this repository.
+`scripts/set-secrets-2026-10-27.sh` sets the Anthropic key, both RevenueCat
+webhook secrets and the pepper, from the clipboard, and points the owner at the
+new webhook address. The other secrets come once the App Store app and the Sign
+in with Apple key exist:
+
+| Secret | Comes from |
+|---|---|
+| `ANTHROPIC_API_KEY` | a new key in the Anthropic console |
+| `REVENUECAT_WEBHOOK_SECRET`, `REVENUECAT_WEBHOOK_SIGNING_SECRET` | the webhook in RevenueCat |
+| `REVENUECAT_APP_IDS` | the App Store app's RevenueCat id, once the app exists |
+| `ALBUS_SIGNAL_PEPPER` | random; optional, derived from the secret key when unset |
+| `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`, `APPLE_CLIENT_ID` | the Sign in with Apple key |
+
+The project was created with "Enable automatic RLS", so it also holds
+`public.rls_auto_enable()` and its `ensure_rls` event trigger, which Supabase
+adds and no migration creates. It turns RLS on for each new public table, as
+the migrations already do. It is a definer function with its path pinned to
+`pg_catalog`; the setup's check allows that shape for that one function only.
+
+## Accounts
+
+Students sign in first with native Sign in with Apple. GoTrue verifies the ID
+token and nonce against the bundle ID. Email/password sign-in and email OTP are
+disabled. Old anonymous sessions still refresh and link Apple in place through
+manual linking, keeping the same account UUID. A new phone signs in to the same
+account and plan; tasks stay on the phone. Production turns anonymous sign-ins
+off after testers update, while local stacks keep them on for compatibility
+tests. The app has no CAPTCHA; Apple's ID-token grant is exempt from it.
+
+The owner applies production provider settings separately in the dashboard;
+see [the sign-in runbook](security/sign-in-runbook.md). The local checks are
+`python3 scripts/security/apple-only-signin.py --workdir <local-stack>`.
 
 ---
 
@@ -235,8 +283,9 @@ lives outside the repo:
    product ids, in one group with Pro above Plus, and Billing Grace Period off.
 2. RevenueCat: connect the app. The client logs in with the Supabase user id,
    lowercased. Leave restore behaviour on the default, **Transfer to new App
-   User ID**: accounts are anonymous, so a new phone is a new account, and
-   `transfer_subscriptions` moves the plan and its usage history.
+   User ID** for legacy-account restores. New Apple sign-ins recover the same
+   account on a new phone. If a signed transfer does occur, `transfer_subscriptions`
+   still moves the plan and its usage history.
 3. RevenueCat → Integrations → Webhooks: point at
    `https://<project>.functions.supabase.co/revenuecat-webhook`; configure both
    `REVENUECAT_WEBHOOK_SECRET` (the Authorization header) and
@@ -358,10 +407,11 @@ expected; none is an oversight.
   `auth.uid()`, schema-qualify their relations, and take no user-id parameter.
   AI reservation/finalization and every internal function that *does* take a
   uid are service-only; the obsolete client-callable forms were dropped.
-- **`auth_allow_anonymous_sign_ins`** — the entire product is anonymous-first.
-  Every user holds the `authenticated` role via an anonymous session; this is
-  the design, not a leak. `public.plans` appears here because it is readable by
-  every signed-in user, which is intended: it is a price list.
-- **`auth_leaked_password_protection`, `auth_insufficient_mfa_options`** — the
-  app has no passwords and sends no email. Both become relevant only when Apple
-  Sign-In is switched on.
+- **`auth_allow_anonymous_sign_ins`** is expected only on the local compatibility
+  stack and during the tester rollout. Disable it in production after testers
+  update; existing sessions can still refresh and link Apple. `public.plans`
+  remains readable by every signed-in user because it is a price list.
+- **`auth_leaked_password_protection`** — the app has no passwords or email
+  sign-in, so this setting cannot protect its Apple sign-in flow.
+- **`auth_insufficient_mfa_options`** — student identity uses native Apple sign-in;
+  operator MFA on Supabase and the other provider accounts remains required.
