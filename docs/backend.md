@@ -33,7 +33,8 @@ Secrets are set separately, and none is in this repository.
 `scripts/set-secrets-2026-10-27.sh` sets the Anthropic key, both RevenueCat
 webhook secrets and the pepper, from the clipboard, and points the owner at the
 new webhook address. The other secrets come once the App Store app and the Sign
-in with Apple key exist:
+in with Apple key exist; `scripts/set-apple-secrets.sh` sets the four `APPLE_*`
+ones from the downloaded `.p8` key, with the same token prompt:
 
 | Secret | Comes from |
 |---|---|
