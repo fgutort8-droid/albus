@@ -221,7 +221,8 @@ struct AlbusApp: App {
     private func wireNotifications() {
         UNUserNotificationCenter.current().delegate = router
         router.onEngagement = { [notifications] in notifications.recordEngagement() }
-        coordinator.onScheduleChanged = { [notifications, coordinator, preferences, container] in
+        coordinator.onScheduleChanged = { [notifications, coordinator, preferences, container, session, localAccount] in
+            guard localAccount.allowsReminders(signedIn: session.userID) else { return }
             notifications.scheduleRebuild(context: container.mainContext,
                                           preferences: preferences,
                                           coordinator: coordinator)
@@ -230,6 +231,10 @@ struct AlbusApp: App {
 
     @MainActor
     private func rebuildNotifications() async {
+        // Launch comes through here signed in or not. Signing out keeps the
+        // tasks on the phone, so without this a relaunch would put their names
+        // back on the lock screen.
+        guard localAccount.allowsReminders(signedIn: session.userID) else { return }
         await notifications.rebuild(context: container.mainContext,
                                     preferences: preferences,
                                     coordinator: coordinator)

@@ -238,6 +238,9 @@ final class PlanCoordinator {
                 // or edited it. Theirs stands.
                 save(context, "link assignment")
             }
+            // Finished on the phone while the AI wrote it: `settleStatus` had
+            // no server copy to report that to, and the server made it open.
+            if current.statusValue == .completed { statusChangesOnPhone += 1 }
             status = .idle
 
         } catch let failure as PlanService.Failure where failure.plansLocally {

@@ -128,6 +128,30 @@ struct InstantPlanTests {
         #expect(added.remoteID == Self.serverID, "still linked to the server's copy")
     }
 
+    @Test("a task finished before the server's copy is linked is reported once it is")
+    func finishedWhileTheAIWrites() async throws {
+        let context = try store()
+        let coordinator = coordinator()
+        let adding = Task {
+            await coordinator.addAssignment(essay(), context: context,
+                                            availability: availability, now: now)
+        }
+        #expect(try await eventually { try assignment(in: context)?.subtasks.isEmpty == false })
+        let added = try #require(try assignment(in: context))
+        for step in Array(added.subtasks) {
+            coordinator.setCompleted(step, true, context: context, availability: availability, now: now)
+        }
+        #expect(added.statusValue == .completed)
+        #expect(coordinator.statusChangesOnPhone == 0, "the server has no copy of it to change yet")
+
+        HeldPlanTransport.state.release()
+        await adding.value
+
+        #expect(added.remoteID == Self.serverID)
+        #expect(added.statusValue == .completed, "the student's finished plan stands")
+        #expect(coordinator.statusChangesOnPhone == 1, "reported once the server's copy is linked")
+    }
+
     @Test("an assignment deleted while the AI writes it is deleted on the server too")
     func deletedWhileRefining() async throws {
         let context = try store()

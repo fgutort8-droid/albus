@@ -148,6 +148,26 @@ struct LocalAccountTests {
         #expect(local.generation == before + 1)
     }
 
+    @Test("reminders only while the account the tasks belong to is signed in")
+    func remindersFollowTheOwner() {
+        let preferences = Preferences(defaults: isolated())
+        let local = LocalAccount(defaults: isolated())
+        local.arrived(me, arrival: .signedIn, hasLocalData: false, preferences: preferences)
+        #expect(local.allowsReminders(signedIn: me))
+        #expect(!local.allowsReminders(signedIn: nil), "signed out: the tasks stay, their reminders do not")
+
+        let before = local.generation
+        local.signedOut()
+        #expect(local.generation == before + 1,
+                "work started for the account, such as a marking, can no longer save")
+
+        local.arrived(someoneElse, arrival: .signedIn, hasLocalData: true, preferences: preferences)
+        #expect(local.awaitingDecision == someoneElse)
+        #expect(!local.allowsReminders(signedIn: someoneElse),
+                "another account, still deciding about these tasks, sees none of them")
+        #expect(!local.allowsReminders(signedIn: me), "nor does their owner while that decision is open")
+    }
+
     @Test("a deleted account is forgotten")
     func forget() {
         let defaults = isolated()

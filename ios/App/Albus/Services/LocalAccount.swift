@@ -110,6 +110,14 @@ final class LocalAccount {
         generation += 1
     }
 
+    /// Whether reminders may be built now. They name tasks on the lock
+    /// screen, so only while the account those tasks belong to is signed in,
+    /// and not while another account decides about them.
+    func allowsReminders(signedIn userID: UUID?) -> Bool {
+        guard let userID else { return false }
+        return owner == userID && awaitingDecision == nil
+    }
+
     /// The account was deleted and the phone cleared.
     func forget() {
         defaults.removeObject(forKey: Self.ownerKey)
