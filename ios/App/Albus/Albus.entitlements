@@ -6,6 +6,12 @@
          (-34018), the auth session is never stored, and the app creates a NEW
          anonymous account on every launch — silently resetting the free-tier
          quota each time. Found by a probe that wrote and read back one value. -->
+    <!-- Sign in with Apple (2 Oct 2026). The App ID must have the capability
+         ticked in the developer portal too, or signing fails. -->
+    <key>com.apple.developer.applesignin</key>
+    <array>
+        <string>Default</string>
+    </array>
     <key>keychain-access-groups</key>
     <array>
         <string>$(AppIdentifierPrefix)com.felipegutierrez.albus</string>

@@ -33,7 +33,7 @@ scripts/            local CI, adversarial concurrency tests, deploy
 | | State |
 |---|---|
 | Database, RLS, financial controls | **built** — local adversarial suite; live deployment pending |
-| Accounts (anonymous-first) | **done** |
+| Accounts (Sign in with Apple; old anonymous accounts link Apple in place) | **done** |
 | `POST /breakdown` — study plans | **done**, deployed |
 | Rate/cost limiting | **built** — request, attempt, allowance, per-account and global USD fuses |
 | Scheduler, estimator, notifications | **built** and unit-tested |
@@ -113,8 +113,8 @@ multi-connection attack suites documented there.
 
 ## Before launch
 
-- [ ] Configure Turnstile keys and enable CAPTCHA on client and server together.
-- [ ] Sign in with Apple, once the Developer account is configured
+- [ ] Sign in with Apple, once the Developer account is configured (the only
+      sign-in; no CAPTCHA is needed, as GoTrue never asks for one on Apple's sign-in)
 - [x] ~~Schedule `reap_abandoned_anonymous_users`~~ — running daily at 04:17
 - [x] Schedule privacy/security-data retention — running daily at 04:43
 - [ ] Rotate the Anthropic key and configure the signal pepper

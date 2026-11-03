@@ -19,6 +19,7 @@ import AlbusCore
 struct GraderScreen: View {
     @Environment(\.modelContext) private var context
     @Environment(AccountDeletion.self) private var accountDeletion
+    @Environment(LocalAccount.self) private var localAccount
     @Environment(\.dismiss) private var dismiss
     /// Owns the marking, so it carries on if the student leaves this screen.
     @Environment(MarkingCoordinator.self) private var marking
@@ -945,7 +946,11 @@ struct GraderScreen: View {
     }
 
     private func submit() async {
+        // The account this marking is for. A result that comes back after the
+        // phone deleted that account, signed it out or handed over to another
+        // is not saved: it would land among whoever's tasks the phone holds now.
         let accountGeneration = accountDeletion.generation
+        let localGeneration = localAccount.generation
         stage = .marking
         failure = nil
 
@@ -960,8 +965,9 @@ struct GraderScreen: View {
             title: workTitle,
             isBlind: isBlind,
             context: context,
-            mayStore: { [accountDeletion] in
+            mayStore: { [accountDeletion, localAccount] in
                 !accountDeletion.requiresCleanup && accountDeletion.generation == accountGeneration
+                    && localAccount.generation == localGeneration
             })
 
         // Dropped once marked: holding an essay in memory behind a visible

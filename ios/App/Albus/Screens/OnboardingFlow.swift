@@ -2,15 +2,11 @@ import SwiftUI
 import SwiftData
 import AlbusCore
 
-/// First launch: three questions, one deadline, a plan.
+/// After signing in: three questions, one deadline, a plan.
 ///
-/// This is also where the account is created. Albus has no signup wall, but
-/// "no wall" cannot mean "no check" — anonymous sign-up is the endpoint a
-/// script would farm, so the account is created here, at the end, where a
-/// CAPTCHA challenge can be attached to it.
+/// The account already exists by now: `SignInScreen` makes it.
 struct OnboardingFlow: View {
     @Environment(\.modelContext) private var context
-    @Environment(SessionService.self) private var session
     @Environment(PlanCoordinator.self) private var coordinator
     @Environment(Preferences.self) private var preferences
 
@@ -29,12 +25,6 @@ struct OnboardingFlow: View {
     @State private var deadline = Calendar.current.date(byAdding: .day, value: 3, to: .now) ?? .now
     @State private var hours = 2.0
 
-    // Account creation
-    @State private var showingCaptcha = false
-    @State private var failure: String?
-    /// The CAPTCHA pass, fetched while the student answers the questions.
-    @State private var prefetch = CaptchaPrefetch()
-
     // Building step: drives the cactus's breathing pulse.
     @State private var pulsing = false
 
@@ -48,29 +38,7 @@ struct OnboardingFlow: View {
             case .meetAlbus:  meetAlbusStep
             }
         }
-        .background {
-            // Behind the opaque background, so nobody sees it. See
-            // `CaptchaPrefetchPage` for why it is on screen at all.
-            if prefetchRuns {
-                CaptchaPrefetchPage(prefetch: prefetch, generation: prefetch.generation)
-                    .frame(width: 320, height: 120)
-                    .opacity(0.01)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-        }
-        .onDisappear { prefetch.stop() }
         .animation(Tokens.Motion.sheet, value: step)
-        .sheet(isPresented: $showingCaptcha) {
-            CaptchaSheet { token in
-                showingCaptcha = false
-                Task {
-                    if token != nil { step = .building }
-                    await proceed(await accountCreation.finishVisibleCheck(pass: token))
-                }
-            }
-            .presentationDetents([.height(320)])
-        }
     }
 
     // MARK: - 1. Profile
@@ -128,7 +96,6 @@ struct OnboardingFlow: View {
             subtitle: "This is where your first plan begins.",
             actionTitle: "Build my plan",
             isEnabled: taskTitle.trimmingCharacters(in: .whitespaces).count >= 2,
-            footnote: Self.agreement,
             action: begin
         ) {
             VStack(alignment: .leading, spacing: Tokens.Spacing.xl) {
@@ -173,22 +140,8 @@ struct OnboardingFlow: View {
                             .tint(Tokens.Palette.accent)
                     }
                 }
-
-                if let failure {
-                    StatusBanner(tone: .error, message: failure, retryTitle: "Retry", retry: begin)
-                }
             }
         }
-    }
-
-    /// Shown beside the button that creates the account, so the age rule and
-    /// the terms are in front of the student before there is an account.
-    static var agreement: AttributedString {
-        let text = "By tapping Build my plan, you confirm you're 13 or older, with a parent's "
-            + "or guardian's agreement if you're under 16, and you accept the "
-            + "[Terms of service](\(AppLinks.terms.absoluteString)) and "
-            + "[Privacy policy](\(AppLinks.privacy.absoluteString))."
-        return (try? AttributedString(markdown: text)) ?? AttributedString(text)
     }
 
     // `TaskKind` used to be declared here with six cases, while AddTaskSheet
@@ -225,17 +178,9 @@ struct OnboardingFlow: View {
                     .foregroundStyle(Tokens.Palette.inkSecondary)
             }
             Spacer()
-            if let failure {
-                StatusBanner(tone: .error, message: failure, retryTitle: "Back") {
-                    step = .deadline
-                }
+            ProgressBar(fraction: 0.66)
                 .padding(.horizontal, Tokens.Spacing.xl)
                 .padding(.bottom, Tokens.Spacing.xxl)
-            } else {
-                ProgressBar(fraction: 0.66)
-                    .padding(.horizontal, Tokens.Spacing.xl)
-                    .padding(.bottom, Tokens.Spacing.xxl)
-            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Building your plan")
@@ -286,82 +231,33 @@ struct OnboardingFlow: View {
         }
     }
 
-    // MARK: - Account + first plan
+    // MARK: - First plan
 
-    /// Whether the quiet check's hidden page should be running: CAPTCHA is on,
-    /// there is no account yet, and a pass is on its way. Once the account
-    /// exists, nothing needs another pass.
-    private var prefetchRuns: Bool {
-        guard Captcha.isEnabled, prefetch.state == .fetching else { return false }
-        if case .signedIn = session.state { return false }
-        return true
-    }
-
-    /// Where the account gets created. See `AccountCreation`.
-    private var accountCreation: AccountCreation {
-        AccountCreation(
-            captchaEnabled: Captcha.isEnabled,
-            isSignedIn: { [session] in
-                if case .signedIn = session.state { return true }
-                return false
-            },
-            prefetch: prefetch,
-            signUp: { [session] pass in await session.createAccount(captchaToken: pass) }
-        )
-    }
-
-    /// Saves the profile, then creates the account: with the pass the quiet
-    /// check fetched during onboarding, or through the visible challenge when
-    /// the quiet check cannot provide one.
+    /// Saves the answers, then builds the first plan.
     private func begin() {
-        failure = nil
         preferences.name = name
         preferences.program = program
         preferences.load = load
 
         step = .building
-        Task { await proceed(await accountCreation.start()) }
-    }
-
-    /// Acts on how account creation went and, once there is an account,
-    /// generates the first plan.
-    private func proceed(_ outcome: AccountCreation.Outcome) async {
-        switch outcome {
-        case .created:
-            break
-        case .needsVisibleCheck:
-            step = .deadline
-            showingCaptcha = true
-            return
-        case .checkIncomplete:
-            failure = "That check didn't complete. Try once more."
-            step = .deadline
-            return
-        case .signUpFailed:
-            failure = "Couldn't set up your account. Check your connection."
-            step = .deadline
-            return
+        Task {
+            // The student names their own subjects once they are in the app;
+            // the first assignment does not need one.
+            await coordinator.addAssignment(
+                NewAssignment(
+                    title: taskTitle.trimmingCharacters(in: .whitespaces),
+                    taskType: taskType,
+                    deadline: deadline,
+                    estimatedMinutes: Int(hours * 60),
+                    course: nil
+                ),
+                context: context,
+                availability: preferences.availability
+            )
+            // A failed generation must not trap the student in onboarding: the
+            // assignment is saved either way, and Task detail explains the gap.
+            step = .meetAlbus
         }
-
-        step = .building
-
-        // The student names their own subjects once they are in the app; the
-        // first assignment does not need one.
-        await coordinator.addAssignment(
-            NewAssignment(
-                title: taskTitle.trimmingCharacters(in: .whitespaces),
-                taskType: taskType,
-                deadline: deadline,
-                estimatedMinutes: Int(hours * 60),
-                course: nil
-            ),
-            context: context,
-            availability: preferences.availability
-        )
-
-        // A failed generation must not trap the student in onboarding: the
-        // assignment is saved either way, and Task detail explains the gap.
-        step = .meetAlbus
     }
 
     private func field<Content: View>(_ label: String,
@@ -383,7 +279,6 @@ private struct OnboardingScaffold<Content: View>: View {
     let subtitle: String
     let actionTitle: String
     let isEnabled: Bool
-    var footnote: AttributedString? = nil
     let action: () -> Void
     @ViewBuilder var content: Content
 
@@ -412,16 +307,6 @@ private struct OnboardingScaffold<Content: View>: View {
             }
             .scrollContentBackground(.hidden)
             .scrollDismissesKeyboard(.interactively)
-
-            if let footnote {
-                Text(footnote)
-                    .font(Tokens.Typography.caption)
-                    .foregroundStyle(Tokens.Palette.inkSecondary)
-                    .tint(Tokens.Palette.accent)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, Tokens.Spacing.xl)
-                    .padding(.bottom, Tokens.Spacing.m)
-            }
 
             PrimaryButton(title: actionTitle, isEnabled: isEnabled, action: action)
                 .padding(.horizontal, Tokens.Spacing.xl)

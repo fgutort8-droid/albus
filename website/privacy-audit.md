@@ -53,3 +53,48 @@ Reviewed against `main` after #30 (payment events saved before they are applied)
 | An account with a payment still queued is never removed as unused | `reap_abandoned_anonymous_users` spares any account named in a `user_id` column; since `20261001190000` the enqueue also holds the account's row while recording. |
 | Age | Terms and policy now say 13 or older, with a parent or guardian agreeing under 16 (stricter than Spain's 14). |
 | Terms | New `/terms/`, Spanish law with EU consumers' mandatory protections kept; Apple's standard EULA still covers the app and is linked from the first paragraph. The app's Terms links (paywall, Settings) now open this page. |
+
+## 2 October 2026: sign-in with Apple and email codes
+
+Students now sign in before set-up (the owner's decision); see `SignInScreen.swift`
+and `SessionService.swift`. Reviewed against this branch (`auth/app`); the server
+half is `auth/server`.
+
+| Claim | Evidence |
+| --- | --- |
+| We keep the email address (or Apple's relay address) only to sign in | Apple: `SignInScreen` requests the `email` scope only, never the full name; GoTrue stores the identity in `auth.identities`. Email: `sendEmailCode` sends the typed address to `/auth/v1/otp`. No other code reads `user.email` except Settings, which shows it to the student. |
+| Cloudflare's check can run for email sign-in, never for Apple | The email code request goes through `AccountCreation` with the Turnstile pass; GoTrue's `isIgnoreCaptchaRoute` skips the check for `grant_type=id_token`. |
+| A new phone gets the account and plan back, not the tasks | No task download exists. Nothing is freed on sign-in: the phone reports its own finished tasks (`finish_my_assignments`), and tasks counted on the server but not on this phone are freed only when the student taps Stop counting on Home (`release_my_other_assignments`). |
+| Signing out keeps the tasks; another account is asked before they go | `LocalAccount.decide` (tested in `LocalAccountTests`), `AccountSwitchScreen`. |
+| Deleting an Apple account tells Apple | `AccountDeletionScreen` asks Apple for a fresh code; `delete-account` exchanges and revokes it (server half). |
+| Sign-in codes expire after 10 minutes | `otp_expiry = 600` in `supabase/config.toml` (server half) and the dashboard setting. |
+| Resend sends the codes | Owner's choice of provider in YOUR_STEPS; change the providers table if another is used. |
+
+## 6 October 2026: Sign in with Apple only
+
+The owner dropped the email code (no domain or email provider). The rows above
+about email codes, Cloudflare and Resend no longer apply; the policy, terms and
+support page were changed to match.
+
+| Claim | Evidence |
+| --- | --- |
+| You sign in with Apple; there is no other way in | `SignInScreen` shows only `SignInWithAppleButton`. `SessionService` has no email or password sign-in; the only account-making calls are `signInWithIdToken` and `linkIdentityWithIdToken`. |
+| We keep the email address Apple shares, only to find the account if the student writes to us | `SignInScreen` requests the `email` scope only, never the name. Nothing in the app sends email; Settings shows "Apple", not the address. |
+| No Cloudflare check | `CaptchaService`, `CaptchaPrefetch` and `AccountCreation` were deleted; `Info.plist` and `project.yml` no longer carry a Turnstile key. GoTrue never asks for a CAPTCHA on `grant_type=id_token`. |
+| The server's count of open tasks follows the phone | `PlanCoordinator.settleStatus` reports every finish and reopen; `syncServerCount` sends `sync_my_assignments(p_finished, p_open)`; Stop counting sends `release_my_other_assignments(p_keep)` and nothing if the phone can't read its tasks. |
+
+## 7 October 2026: what deleting an account keeps
+
+The server-side erasure audit (task 08B, `docs/security-model.md` §7) checked
+every table that points at an account. The policy had said financial records
+"no longer link to your account"; some still carry the account's random
+identifier, so the deletion paragraph now says so. Apple revocation is also
+best effort, and the policy now says what happens when Apple can't be reached.
+
+| Claim | Evidence |
+| --- | --- |
+| Deletion removes the account, its email address and student content | `delete_my_account()` deletes the `auth.users` row; profiles, courses, assignments, subtasks, sessions, logs, rubrics, gradings and entitlements cascade (`account_erasure_test.sql`). |
+| Payment and security records hold no name, email or study content | `ai_usage`, `security_events` and `subscription_revenue` set `user_id` to null; `financial_audit` keeps only a SHA-256 hash. |
+| Subscription records and queued payment events still carry the random identifier | `subscription_transactions.ownership_origin_user_id` and `ownership_path`, `private.subscription_transfers.source_ids` and `destination_id`, and `private.financial_inbox.user_id` until 30 days after the event is applied. |
+| RevenueCat keeps its record of the purchases | Its customer id is the account's id; Albus sends no deletion request to RevenueCat. |
+| If Apple can't be reached, the account is still deleted | `delete-account` (task 08A) records a warning and deletes when Apple's exchange or revoke fails, or its keys are missing; it stops only for a missing or expired code, or a different Apple ID. |

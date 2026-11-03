@@ -25,7 +25,7 @@ security and subscription access. Do not select advertising/marketing purposes.
 | Apple data type | Collected? | Evidence / scope |
 | --- | --- | --- |
 | Name | No | `OnboardingFlow.swift` stores the optional display name in `Preferences.swift` on the device. `ProfileService.swift` sends subject names, not the student's name. A `profiles.display_name` column alone is not evidence of collection by this client. |
-| Email Address | No | `SessionService.swift` uses anonymous auth; no email field or email login. External support email is addressed separately below. |
+| Email Address | Yes | Since Oct 2026 students sign in with Apple only. Apple can share the address or a private relay address (`SignInScreen.swift` requests the `email` scope only, never the name). Stored by Supabase Auth with the account and used only to find the account when the student writes to support; Albus sends no email. External support email is addressed separately below. |
 | Phone Number | No | No phone field, telephony read or phone-auth flow in app sources. |
 | Physical Address | No | No address collection or shipping flow. |
 | Other User Contact Info | No | No social handle/contact field sent by the client. |
@@ -46,7 +46,7 @@ security and subscription access. Do not select advertising/marketing purposes.
 | Other User Content | Yes | `PlanService.swift`, `ProfileService.swift`, `RubricService.swift`, `GradingService.swift`: assignment/subject names, deadlines, rubrics, submitted text, presentation instructions and work titles. `grade/index.ts` persists feedback and quotes; `grade_prompt.ts` caps each quote at 400 characters. Full text also reaches Anthropic, whose retention is not assumed to be zero. |
 | Browsing History | No | `ToolsScreen.swift` opens fixed tool URLs externally with `openURL`. It does not receive Safari browsing history. |
 | Search History | No | Tool filtering is local `@State query` in `ToolsScreen.swift`; no search endpoint or query logging. |
-| User ID | Yes | `SessionService.swift`, `_shared/auth.ts`, ownership columns and request JWTs. Anonymous UUIDs remain account identifiers. |
+| User ID | Yes | `SessionService.swift`, `_shared/auth.ts`, ownership columns and request JWTs, plus the identifier Sign in with Apple issues for Albus (`auth.identities`). Accounts made anonymously before 2 Oct 2026 keep their UUIDs. |
 | Device ID | Yes | `DeviceSignal.swift` sends IDFV; `_shared/signals.ts` stores a keyed hash associated with an account. No IDFA collection. |
 | Purchase History | Yes, backend path | `revenuecat-webhook/index.ts` and `0010_ratelimit_and_subscriptions.sql` accept/store product and transaction state linked to the account. In-app buying is blocked on payments/app; retaining this disclosure covers the existing backend and intended release. |
 | Product Interaction | Yes | `_shared/quota.ts` / `ai_usage` retain requested AI feature, attempt/completion state and usage counts to enforce allowances and control service cost. This is not an advertising event stream. |
@@ -79,12 +79,9 @@ this task; none of its files were changed here.
 - Clarification: no third-party study-activity analytics SDK does **not** mean no
   Product Interaction data. AI request accounting is described by the policy and
   is disclosed here as functionality, not marketing analytics.
-- **Policy gap:** `CaptchaService.swift` can load Cloudflare Turnstile when a
-  release site key is configured. PR #6 does not name Cloudflare. Its placeholder
-  configuration disables the widget; the owner's real release settings were not
-  inspected. Before enabling it, name the provider and verify its data handling
-  against [Cloudflare's Turnstile privacy addendum](https://www.cloudflare.com/turnstile-privacy-policy/).
-  The addendum identifies IP address, TLS fingerprint, user agent and origin/site key as signals. Confirm the release integration and retention rather than assuming the widget is data-free.
+- **Cloudflare:** none. The Turnstile CAPTCHA client was removed in Oct 2026,
+  when sign-in became Apple only (GoTrue never asks for a CAPTCHA on an Apple
+  ID-token sign-in), so no build loads Cloudflare's script.
 - **Partner verification needed:** Supabase's auth/hosting logs may contain raw
   IP/request metadata beyond the app's hashed tables. The policy acknowledges
   provider logs, but their production configuration/retention was not inspected.

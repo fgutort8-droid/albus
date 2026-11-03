@@ -59,6 +59,8 @@ struct HomeScreen: View {
     /// The assignment awaiting a yes. Held rather than a bool so the dialog can
     /// name the thing it is about to destroy.
     @State private var confirmingDelete: Assignment?
+    @State private var confirmingRelease = false
+    @State private var releaseFailed = false
     @State private var focusing: PlanSessionRecord?
 
     enum Filter: String, CaseIterable, Identifiable {
@@ -98,6 +100,9 @@ struct HomeScreen: View {
                     await coordinator.addAssignment(draft, context: context,
                                                     availability: preferences.availability,
                                                     taskLimit: entitlements.plan.tasks.limit)
+                    // Refused, perhaps by a plan full of another phone's
+                    // tasks: read the plan again, so Home can say so.
+                    if case .failed = coordinator.status { await entitlements.refresh() }
                 }
             }
         }
@@ -119,6 +124,18 @@ struct HomeScreen: View {
             Text(confirmingDelete.map {
                 "\($0.title) — its plan, scheduled time and any marking go with it. This cannot be undone."
             } ?? "")
+        }
+        .confirmationDialog(uncountedOnPhone == 1 ? "Stop counting that task?"
+                                                  : "Stop counting those \(uncountedOnPhone) tasks?",
+                            isPresented: $confirmingRelease, titleVisibility: .visible) {
+            Button("Stop counting") { Task { await releaseUncounted() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(uncountedOnPhone == 1
+                 ? "It was made on another phone, or before Albus was reinstalled. If you still use "
+                   + "that phone, it stays there, but it won't count toward your plan any more."
+                 : "They were made on another phone, or before Albus was reinstalled. If you still use "
+                   + "that phone, they stay there, but they won't count toward your plan any more.")
         }
         .fullScreenCover(item: $focusing) { record in
             FocusModeScreen(record: record)
@@ -155,6 +172,7 @@ struct HomeScreen: View {
                 header(now: now)
                 status
                 freeLimitNotice
+                uncountedNotice
 
                 if let next = upNext(now: now) {
                     UpNextCard(record: next, now: now) {
@@ -367,6 +385,43 @@ struct HomeScreen: View {
                        + "\(limit == 1 ? "task" : "tasks") open at once. "
                        + "Finish one, or move up a plan.",
                 retryTitle: "See plans") { showingPaywall = true }
+        }
+    }
+
+    /// Open tasks the server counts that are not on this phone: made on
+    /// another phone, or before Albus was reinstalled. They can fill the plan
+    /// with nothing open here, and only the student knows whether that other
+    /// phone is still in use, so they choose whether those stop counting.
+    private var uncountedOnPhone: Int {
+        let open = assignments.filter { !$0.isComplete && !$0.isArchived }
+        return PlanCoordinator.uncountedOnPhone(
+            used: entitlements.plan.tasks.used, limit: entitlements.plan.tasks.limit,
+            openHere: open.count, openHereOnServer: open.count(where: { $0.remoteID != nil }))
+    }
+
+    @ViewBuilder private var uncountedNotice: some View {
+        let missing = uncountedOnPhone
+        // While the phone is still telling the server what it finished, the
+        // count is out of date: a task finished a moment ago would show here.
+        if missing > 0, !coordinator.serverCountSettling {
+            StatusBanner(
+                tone: .warning,
+                message: "Your plan still counts \(missing) open "
+                       + "\(missing == 1 ? "task that isn't" : "tasks that aren't") "
+                       + "on this phone, so you can't add more here.",
+                retryTitle: "Stop counting") { confirmingRelease = true }
+        }
+        if releaseFailed {
+            StatusBanner(tone: .error, message: "Couldn't stop counting them. Check your connection and try again.")
+        }
+    }
+
+    private func releaseUncounted() async {
+        releaseFailed = false
+        do {
+            try await coordinator.releaseOthers(context: context) { await entitlements.refresh() }
+        } catch {
+            releaseFailed = true
         }
     }
 
