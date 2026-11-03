@@ -49,6 +49,12 @@ adds and no migration creates. It turns RLS on for each new public table, as
 the migrations already do. It is a definer function with its path pinned to
 `pg_catalog`; the setup's check allows that shape for that one function only.
 
+`scripts/deploy-advisor-fixes-2026-11-03.sh` applies the one migration added
+since the setup, `20261028120000_security_advisor_fixes.sql`, which switches
+off the unused `pg_graphql`. It stops unless that is the only change the
+project lacks, and afterwards checks with a read-only query that GraphQL is off
+and that students can still read the plans and call their own functions.
+
 ## Accounts
 
 Students sign in first with native Sign in with Apple. GoTrue verifies the ID
