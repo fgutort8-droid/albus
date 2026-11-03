@@ -87,9 +87,13 @@ store() {
 looks_like_secret() {
   [ "${#1}" -ge 20 ] && [ "${#1}" -le 512 ] && [[ "$1" =~ ^[A-Za-z0-9_+/=.:@%~,-]+$ ]]
 }
-# An API key, not an admin key: functions must never hold an admin key.
+# An Anthropic API key: sk-ant-, then a kind that Anthropic varies (api03-,
+# usr-, ...), so Anthropic's own check below has the last word. Refused here
+# whatever Anthropic says: an admin key, which the functions must never hold,
+# and a sign-in or session token, which is not an API key at all.
 looks_like_anthropic_key() {
-  [[ "$1" == sk-ant-api* ]] && [ "${#1}" -ge 40 ] && [ "${#1}" -le 300 ] && [[ "$1" =~ ^[A-Za-z0-9_-]+$ ]]
+  [[ "$1" == sk-ant-* && "$1" != sk-ant-admin* && "$1" != sk-ant-oat* && "$1" != sk-ant-ort* && "$1" != sk-ant-sid* ]] \
+    && [ "${#1}" -ge 40 ] && [ "${#1}" -le 300 ] && [[ "$1" =~ ^[A-Za-z0-9_-]+$ ]]
 }
 # Asks Anthropic whether it accepts the key: a free request that lists models,
 # with the key in a header file only you can read, so it never shows in ps.
@@ -144,16 +148,20 @@ fi
 echo '== Step 1 of 4: the Anthropic API key'
 echo '   At platform.claude.com:'
 echo '     1. Settings, then Limits: check the monthly spend limit is the one you chose.'
-echo '     2. API keys: create a key named albus-new, then click its copy button.'
-echo "        Don't paste it anywhere: this script reads it from the clipboard."
+echo '     2. API keys: create a new key, named albus-new or similar. If it offers an'
+echo '        expiry, choose none: the AI stops working the day the key expires.'
+echo '     3. Click Copy in the window that shows the whole key. The list only shows'
+echo "        it shortened. Don't paste it anywhere: this script reads the clipboard."
 tries=0
 while :; do
   pause
   KEY=$(pbpaste)
-  if ! looks_like_anthropic_key "$KEY"; then
-    echo '   The clipboard does not hold an Anthropic API key (it starts sk-ant-api). Copy it again.'
+  if [[ "$KEY" == sk-ant-* && ( "$KEY" == *...* || "$KEY" == *…* ) ]]; then
+    echo '   That is the shortened key from the list. Copy the whole key, from the window that shows it once when you create a key.'
+  elif ! looks_like_anthropic_key "$KEY"; then
+    echo '   The clipboard does not hold an Anthropic API key (one starting sk-ant-, not an admin key). Copy it again.'
   elif ! anthropic_accepts "$KEY"; then
-    echo '   Anthropic did not accept that key. Copy the new albus-new key again.'
+    echo '   Anthropic did not accept that key. Copy the new key again.'
   else
     break
   fi

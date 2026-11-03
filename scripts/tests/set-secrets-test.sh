@@ -18,6 +18,12 @@ TOKEN="sbp_$(printf '%040d' 7)"
 GOOD_KEY="sk-ant-api03-$(printf '%086d' 7)AA"
 OTHER_KEY="sk-ant-api03-$(printf '%086d' 8)AA"
 ADMIN_KEY="sk-ant-admin01-$(printf '%086d' 7)AA"
+# Anthropic's newer kind of API key, and a sign-in token that is no API key.
+USR_KEY="sk-ant-usr-1$(printf '%085d' 7)AA"
+OAUTH_TOKEN="sk-ant-oat01-$(printf '%086d' 7)AA"
+# What the key list shows, shortened, and a key broken by a space.
+SHORTENED_KEY="sk-ant-api03-$(printf '%030d' 7)...$(printf '%030d' 8)AA"
+SPACED_KEY="sk-ant-api03-$(printf '%040d' 7) $(printf '%040d' 8)AA"
 SIGN="rc_whsec_$(printf '%040d' 9)"
 URL=https://yqhzmgikkawxjzvdjvsf.supabase.co/functions/v1/revenuecat-webhook
 mkdir -p "$TEST_DIR/bin" "$ALBUS_TEST_STATE"
@@ -115,7 +121,7 @@ run() { # DRY_RUN value, then what the owner copies, in order
   # No secret may reach the output or a command line: the stand-ins, and what
   # the script made and stored itself.
   local secret
-  for secret in "$TOKEN" "$GOOD_KEY" "$OTHER_KEY" "$ADMIN_KEY" "$SIGN" \
+  for secret in "$TOKEN" "$GOOD_KEY" "$OTHER_KEY" "$ADMIN_KEY" "$USR_KEY" "$OAUTH_TOKEN" "$SHORTENED_KEY" "$SPACED_KEY" "$SIGN" \
     $(cut -s -d= -f2- "$ALBUS_TEST_STATE/stored" 2>/dev/null); do
     if grep -qF -- "$secret" "$TEST_DIR/output" "$ALBUS_TEST_LOG"; then
       echo 'FAIL: a secret reached the output or a command line' >&2; exit 1
@@ -178,11 +184,33 @@ expect_stop 'an admin key' 'reading the Anthropic key'
 grep -q 'does not hold an Anthropic API key' "$TEST_DIR/output" || fail 'an admin key was not refused as one'
 [ -z "$(stored)" ] || fail 'something was stored after the key was refused'
 [ -z "$(clipboard)" ] || fail 'the clipboard was left holding something after a stop'
+! grep -q 'api.anthropic.com' "$ALBUS_TEST_LOG" || fail 'an admin key was sent to Anthropic'
+# A sign-in token is not an API key, so it is never sent or stored either.
+ALBUS_TEST_ACCEPTED_KEYS="$GOOD_KEY $OAUTH_TOKEN" run 0 "$OAUTH_TOKEN" "$OAUTH_TOKEN" "$OAUTH_TOKEN"
+expect_stop 'a sign-in token' 'reading the Anthropic key'
+grep -q 'does not hold an Anthropic API key' "$TEST_DIR/output" || fail 'a sign-in token was not refused as one'
+[ -z "$(stored)" ] || fail 'something was stored after a sign-in token'
+! grep -q 'api.anthropic.com' "$ALBUS_TEST_LOG" || fail 'a sign-in token was sent to Anthropic'
+# The shortened key from the list is named as such, and never sent; the
+# whole key copied next is used.
+ALBUS_TEST_ACCEPTED_KEYS="$GOOD_KEY $SHORTENED_KEY" run 0 "$SHORTENED_KEY" "$GOOD_KEY" "$SIGN"
+expect_pass 'the shortened key, then the whole one' '^DONE:'
+grep -q 'That is the shortened key from the list' "$TEST_DIR/output" || fail 'the shortened key was not named'
+[ "$(grep -c 'api.anthropic.com' "$ALBUS_TEST_LOG")" = 1 ] || fail 'the shortened key was sent to Anthropic'
+[ "$(value_of ANTHROPIC_API_KEY)" = "$GOOD_KEY" ] || fail 'the whole key was not the one stored'
+# A key with anything but letters, digits, - and _ in it is no key, even if accepted.
+ALBUS_TEST_ACCEPTED_KEYS="$SPACED_KEY" run 0 "$SPACED_KEY" "$SPACED_KEY" "$SPACED_KEY"
+expect_stop 'a key broken by a space' 'reading the Anthropic key'
+[ -z "$(stored)" ] && ! grep -q 'api.anthropic.com' "$ALBUS_TEST_LOG" || fail 'a broken key was sent or stored'
+# Anthropic's newer kinds of API key are stored once Anthropic accepts them.
+ALBUS_TEST_ACCEPTED_KEYS="$USR_KEY" run 0 "$USR_KEY" "$SIGN"
+expect_pass 'a newer kind of API key' '^DONE:'
+[ "$(value_of ANTHROPIC_API_KEY)" = "$USR_KEY" ] || fail 'a newer kind of API key was not stored exactly'
 run 0 "$OTHER_KEY" "$OTHER_KEY" "$OTHER_KEY"
 expect_stop 'a key Anthropic refuses' 'reading the Anthropic key'
 grep -q 'Anthropic did not accept that key' "$TEST_DIR/output" || fail 'a refused key was not explained'
 [ -z "$(stored)" ] || fail 'a key Anthropic refuses was stored'
-echo 'PASS: only an API key that Anthropic accepts is stored; an admin key never is'
+echo 'PASS: only an API key that Anthropic accepts is stored, of any kind; an admin key or sign-in token never is'
 
 run 0 "$GOOD_KEY" @auth "$SIGN"
 expect_pass 'the password copied again, then the signing secret' '^DONE:'
