@@ -375,6 +375,41 @@ test cannot prove locking.
 Also run Edge unit tests, Swift core tests, and iOS unit tests. CI runs database
 containers only when migrations/security tests change to keep GitHub cost low.
 
+### Security Advisor in CI
+
+After rebuilding every migration, `scripts/security/advisor-lints.sh` downloads
+Supabase Splinter at commit `fccca4b1c4d8b48b8ccd69bd6b30e84adcb92975` and verifies
+SHA-256 `d8d558baad3e03832e521c527907fa50a9a172fabd899dd0f5c2504a5a0e9349` before
+executing all 29 lints together in a rolled-back local database transaction.
+The upstream SQL is not vendored. Every finding prints its lint name, level,
+categories, object metadata and detail; no lints are skipped on the local stack.
+This checks the rebuilt database, not hosted Auth settings or deployment drift.
+Migration `20261028120000_security_advisor_fixes.sql` disables the unused
+`pg_graphql` extension without cascading to application objects; REST table
+privileges and student RPCs remain available. The regression test checks that
+neither resolver nor wrapper can return application data through GraphQL.
+
+A `SECURITY` finding at `ERROR` or `WARN` exits 1 unless its lint name and exact
+object metadata match `scripts/security/advisor-allowlist.json`; `PERFORMANCE`
+and `INFO` findings are printed without blocking. Download, checksum, SQL and
+allowlist errors exit 2. A clean or fully justified run exits 0. The eight
+student RPC exceptions retain their `auth.uid()` scoping; `my_tier()` accepts
+no account argument and returns Free when no caller identity is present.
+
+To justify a finding, review its privileges and authorization first, then add
+an entry with `name` (the lint name), `object` (the complete JSON metadata printed
+by the gate, including function arguments) and `reason` (one checkable sentence).
+Never allowlist a whole lint or omit overload arguments. Run the gate and
+`scripts/tests/advisor-gate-test.sh` after changing an entry; that test plants
+five required faults separately, checks that another function and a new overload
+cannot inherit an exception, verifies non-blocking findings and SQL errors,
+and proves the final clean run passes after rollback.
+
+Both scripts default to `supabase_db_<project_id>` from `supabase/config.toml`;
+set `ALBUS_DB_CONTAINER=supabase_db_albus_advisor` for the isolated audit copy.
+The gate's `--fixture-sql` option is for local tests only and executes the fixture
+and advisor in the same transaction before rollback.
+
 ## 9. Explicit blockers before production
 
 - Rotate the previously exposed Anthropic key and set the dedicated signal
