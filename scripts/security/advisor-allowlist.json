@@ -1,0 +1,90 @@
+[
+  {
+    "name": "authenticated_security_definer_function_executable",
+    "object": {
+      "arguments": "p_title text, p_task_type text, p_deadline timestamp with time zone, p_estimated_minutes integer, p_subtasks jsonb, p_course_id uuid, p_assessment_type_id uuid, p_notes text, p_rubric_id uuid, p_priority text",
+      "language": "plpgsql",
+      "name": "create_assignment_with_plan",
+      "schema": "public",
+      "security_definer": true
+    },
+    "reason": "Rejects a missing auth.uid(), creates the assignment and subtasks for that caller, and retains ownership triggers and task limits."
+  },
+  {
+    "name": "authenticated_security_definer_function_executable",
+    "object": {
+      "arguments": "p_display_name text, p_color_key text, p_template_code text",
+      "language": "plpgsql",
+      "name": "create_course",
+      "schema": "public",
+      "security_definer": true
+    },
+    "reason": "Rejects a missing auth.uid() and inserts a course owned by that caller under the per-student course limit."
+  },
+  {
+    "name": "authenticated_security_definer_function_executable",
+    "object": {
+      "arguments": "",
+      "language": "plpgsql",
+      "name": "delete_my_account",
+      "schema": "public",
+      "security_definer": true
+    },
+    "reason": "Deletes only the auth.users row selected by auth.uid() and rejects a missing caller identity."
+  },
+  {
+    "name": "authenticated_security_definer_function_executable",
+    "object": {
+      "arguments": "",
+      "language": "plpgsql",
+      "name": "my_plan",
+      "schema": "public",
+      "security_definer": true
+    },
+    "reason": "Returns plan and usage for auth.uid() only, accepts no account argument, and rejects a missing caller identity."
+  },
+  {
+    "name": "authenticated_security_definer_function_executable",
+    "object": {
+      "arguments": "",
+      "language": "sql",
+      "name": "my_tier",
+      "schema": "public",
+      "security_definer": true
+    },
+    "reason": "Passes only auth.uid() to effective_tier, accepts no account argument, and returns the Free tier when the caller identity is absent."
+  },
+  {
+    "name": "authenticated_security_definer_function_executable",
+    "object": {
+      "arguments": "p_keep uuid[]",
+      "language": "plpgsql",
+      "name": "release_my_other_assignments",
+      "schema": "public",
+      "security_definer": true
+    },
+    "reason": "Rejects a missing auth.uid() and archives only that caller’s active assignments outside the supplied keep list."
+  },
+  {
+    "name": "authenticated_security_definer_function_executable",
+    "object": {
+      "arguments": "p_finished uuid[], p_open uuid[]",
+      "language": "plpgsql",
+      "name": "sync_my_assignments",
+      "schema": "public",
+      "security_definer": true
+    },
+    "reason": "Rejects a missing auth.uid() and updates only that caller’s assignments while retaining the active-task cap."
+  },
+  {
+    "name": "authenticated_security_definer_function_executable",
+    "object": {
+      "arguments": "p_id uuid, p_name text, p_source text, p_body text, p_total_marks integer, p_items jsonb",
+      "language": "plpgsql",
+      "name": "upsert_rubric",
+      "schema": "public",
+      "security_definer": true
+    },
+    "reason": "Rejects a missing auth.uid(), refuses an existing rubric owned by another student, and scopes rubric-item writes to the caller."
+  }
+]

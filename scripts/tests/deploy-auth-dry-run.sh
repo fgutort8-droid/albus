@@ -75,10 +75,11 @@ expect_stop() {
 }
 
 # A dated script pins the exact server code it was reviewed with. Once main
-# moves on, it rightly refuses to run, and there is nothing left to test.
+# moves on (changed code, or a migration newer than the reviewed one), it
+# rightly refuses to run, and there is nothing left to test.
 export ALBUS_TEST_PENDING=20261006120000 ALBUS_TEST_STYLE=pipe
 preview
-if [ "$STATUS" -ne 0 ] && grep -q 'configuration differs' "$TEST_DIR/output"; then
+if [ "$STATUS" -ne 0 ] && grep -Eq 'configuration differs|newer than the reviewed one' "$TEST_DIR/output"; then
   echo "SKIP $SCRIPT: server code has changed since this one-time deployment was reviewed"
   exit 0
 fi
