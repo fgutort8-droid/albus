@@ -21,6 +21,8 @@ on:
       - 'scripts/tests/advisor-gate-test.sh'
       - 'scripts/bring-up-project-2026-10-25.sh'
       - 'scripts/tests/bring-up-project-db-test.sh'
+      - 'scripts/deploy-advisor-fixes-2026-11-03.sh'
+      - 'scripts/tests/deploy-advisor-fixes-db-test.sh'
       - 'scripts/tests/fixtures/supabase-auto-enable-rls.sql'
       - '.github/workflows/database-security.yml'
 
@@ -47,6 +49,8 @@ jobs:
         run: scripts/tests/advisor-gate-test.sh
       - name: The new-project setup's database checks catch every planted fault
         run: bash scripts/tests/bring-up-project-db-test.sh
+      - name: The 3 Nov security fix's check reads the real database right
+        run: bash scripts/tests/deploy-advisor-fixes-db-test.sh
       - name: Run policy and financial-safety assertions
         run: supabase test db --local
       - name: Only Sign in with Apple can make an account
