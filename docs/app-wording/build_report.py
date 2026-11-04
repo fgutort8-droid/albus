@@ -169,7 +169,7 @@ def main():
     core_files=sorted((ROOT/PREFIX['N']/'Copy').glob('Corpus*.swift'))
     files=app_files+core_files;count=0
     with (OUT/'string-inventory.tsv').open('w') as out:
-        writer=csv.writer(out,delimiter='\t');writer.writerow(['file','line','source'])
+        writer=csv.writer(out,delimiter='\t',lineterminator='\n');writer.writerow(['file','line','source'])
         for f in files:
             for n,line in enumerate(f.read_text().splitlines(),1):
                 if '"' in line:

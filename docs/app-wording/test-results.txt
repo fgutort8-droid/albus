@@ -34,3 +34,5 @@ xcodegen exit: 0
 Static scope check: 29 Swift files passed; protected paths unchanged.
 Audit generator: 79 claim groups, 137 changed spans, 115 notifications, 225 external claims; 75 files / 1977 quoted lines.
 git diff --check: exit 0
+
+Post-report whitespace check initially flagged the TSV writer’s CRLF line endings (exit 2). Generator changed to LF; final whole-branch diff check passed (exit 0). No application source changed.
