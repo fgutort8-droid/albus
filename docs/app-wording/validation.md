@@ -2,7 +2,7 @@
 
 ## Scope
 
-The source-only comparison checks all changed Swift files against `48185b6`, ignoring displayed string contents, comments and whitespace. Its only structural exceptions are the three owner-authorized removed paywall perk tuples and the reference-price text interpolation. Notification template IDs, metadata and required placeholder sets are preserved. All 29 changed Swift files pass. Protected paths, dependencies, project configuration and server code are unchanged.
+The source-only comparison checks all changed Swift files against `48185b6`, ignoring displayed string contents, comments and whitespace. Its only structural exceptions are the three owner-authorized removed paywall perk tuples, the reference-price text interpolation, and the Settings AI-plans label, which says fair use only when the allowance is unlimited. Notification template IDs, metadata and required placeholder sets are preserved. All 29 changed Swift files pass. Protected paths, dependencies, project configuration and server code are unchanged.
 
 The comparison is a focused guard for this diff, not a general Swift parser. Compilation and the existing unit tests provide the additional validation. The audit generator resolves every referenced evidence anchor and recreates the inventory, exact changes, claim table, notification table and external-catalogue appendix without network access.
 
@@ -59,3 +59,31 @@ rm -rf /tmp/albus-wording-dd /tmp/albus-wording-core-dd
 ```
 
 Both directories were removed after the final successful runs. Compact test output is committed here; the full logs and six PNGs remain in `/tmp` for this session. No push or PR was performed.
+
+## Re-verification by Claude Code, 4 November 2026
+
+Run in this worktree at `3e6199d`, then again after the fixes below.
+
+- `build_report.py` reproduced every committed audit file at `3e6199d` exactly (no `git diff`), and `verify_scope.py` passed all 29 Swift files.
+- A separate parser compared all 115 notification templates with `48185b6`. IDs, kind, workload, register and placeholder sets are identical. Every title is at most 40 characters and every body at most 110, with no exclamation marks. 61 texts changed.
+- The whole Swift diff against `48185b6` was read line by line, not only the report.
+- The 4 November section of `website/privacy-audit.md` on `main` (`1509386`) agrees with the app copy. The subject name is never sent to the AI, so “pitch answers at the right level” was false. “Fair use” and “estimate” match the terms. The retained payment and security records on the deletion screen match the privacy policy. Anonymous accounts cannot exist on the new project, so the two “Add Apple” lines shown only to anonymous accounts are unreachable but accurate.
+- In place of the skipped Gitleaks scan, the branch diff was searched for Anthropic, Supabase, Stripe and RevenueCat key formats, JWTs, private keys, and the project and team IDs. Nothing was found. `ios/App/Config.xcconfig` is ignored and untracked.
+
+Fixes added in this commit:
+
+- `SettingsScreen.swift`: the AI-plans row said “(fair use)” on Free too, where five a week is a plan limit. The label now says fair use only when the allowance is unlimited.
+- `GraderScreen.swift`: the marking meter's no-limit branch said “Unlimited”. No plan has unlimited marking, so it now says “No plan limit”, as Settings does.
+- `GraderScreen.swift`: the comment above the waiting lines still described the old step-by-step lines.
+- `reported.md`: four new owner items. They are the rubric wording on the website, the days phrase in quiet-app reminders, the Plus badge, and four tool names that point elsewhere.
+
+Results after the fixes:
+
+```text
+swift test (AlbusCore): Test run with 120 tests in 25 suites passed after 0.630 seconds.
+xcodegen exit: 0
+xcodebuild test -only-testing:AlbusTests, four service overrides empty:
+Test run with 339 tests in 41 suites passed after 53.223 seconds. ** TEST SUCCEEDED ** exit code: 0
+```
+
+The built test app's four service values in `Info.plist` were checked to be empty, without printing them. No UI test, sign-in or live call ran. `/tmp/albus-wording-dd` and `/tmp/albus-wording-core-dd` were removed afterwards.

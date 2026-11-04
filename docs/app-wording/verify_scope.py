@@ -34,6 +34,11 @@ for name in changed:
     if name.endswith('SettingsScreen.swift'):
         old = old.replace('Text(entitlements.plan.priceLabel)',
                           'Text("Reference: \\(entitlements.plan.priceLabel)/month")')
+        # Free's five a week is a plan limit, not fair use, so only an
+        # unlimited allowance is labelled fair use.
+        old = old.replace('allowanceRow("AI plans", aiPlans, unit: "this week")',
+                          'allowanceRow(aiPlans.isUnlimited ? "AI plans (fair use)" : "AI plans", aiPlans,\n'
+                          '                                         unit: "this week")')
     if '/Notifications/Copy/Corpus' in name:
         pattern = re.compile(r'\.init\("([^"]+)",[^\n]+\n\s*"([^"]*)",\n\s*"([^"]*)"')
         def requirements(text):

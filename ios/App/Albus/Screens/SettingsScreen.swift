@@ -114,7 +114,8 @@ struct SettingsScreen: View {
                     VStack(spacing: Tokens.Spacing.s) {
                         allowanceRow("Active tasks", entitlements.plan.tasks)
                         if let aiPlans = entitlements.plan.aiPlans {
-                            allowanceRow("AI plans (fair use)", aiPlans, unit: "this week")
+                            allowanceRow(aiPlans.isUnlimited ? "AI plans (fair use)" : "AI plans", aiPlans,
+                                         unit: "this week")
                         }
                         allowanceRow("Marking", entitlements.plan.grader, unit: "this week")
                         allowanceRow("Synced rubrics", entitlements.plan.rubrics)

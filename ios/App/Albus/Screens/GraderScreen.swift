@@ -584,11 +584,10 @@ struct GraderScreen: View {
 
     /// Thirty to forty seconds is a long time to look at a spinner.
     ///
-    /// The lines are what is actually happening, in order, rather than filler:
-    /// a student who reads them learns what marking involves, and one who does
-    /// not still gets a screen that is visibly alive. Nothing here is a
-    /// progress claim — the model does not report progress, so neither does
-    /// this.
+    /// The lines say what the feedback can hold and what happens next, never
+    /// what the model is doing at that moment: it does not report progress, so
+    /// neither does this. A student who does not read them still gets a screen
+    /// that is visibly alive.
     private var markingBeats: [String] {
         markingIsBlind
             ? ["Albus is preparing your feedback.",
@@ -747,7 +746,7 @@ struct GraderScreen: View {
             }
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: left)
         } else {
-            Text("Unlimited")
+            Text("No plan limit")
                 .font(Tokens.Typography.overline)
                 .foregroundStyle(Tokens.Palette.inkSecondary)
         }
