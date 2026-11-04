@@ -125,17 +125,17 @@ struct PaywallScreen: View {
             case .free:
                 [("5 AI plans a week", "After that, Albus plans on your phone."),
                  ("5 active tasks", "Planned, scheduled, and rebuilt when your week moves."),
-                 ("3 saved rubrics", "Paste a mark scheme once and reuse it."),
+                 ("3 synced rubrics", "Paste a mark scheme once and reuse it."),
                  ("No marking", "The Grader needs Plus or Pro.")]
             case .plus:
                 [("Unlimited AI plans within fair use", "When AI is unavailable, Albus plans on your phone."),
                  ("10 active tasks", "For a term carrying more than one deadline."),
-                 ("5 saved rubrics", "Paste a mark scheme once and reuse it."),
+                 ("5 synced rubrics", "Paste a mark scheme once and reuse it."),
                  ("2 markings a week", "An estimated mark and feedback against your rubric.")]
             case .pro:
                 [("Unlimited AI plans within fair use", "When AI is unavailable, Albus plans on your phone."),
                  ("Unlimited tasks", "No plan limit; account safety limits apply."),
-                 ("Unlimited rubrics", "No plan limit; account safety limits apply."),
+                 ("Unlimited synced rubrics", "No plan limit; account safety limits apply."),
                  ("5 markings a week", "Mark a draft, revise it, mark it again.")]
             }
         }

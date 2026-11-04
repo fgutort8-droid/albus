@@ -117,7 +117,7 @@ struct SettingsScreen: View {
                             allowanceRow("AI plans (fair use)", aiPlans, unit: "this week")
                         }
                         allowanceRow("Marking", entitlements.plan.grader, unit: "this week")
-                        allowanceRow("Saved rubrics", entitlements.plan.rubrics)
+                        allowanceRow("Synced rubrics", entitlements.plan.rubrics)
                     }
 
                     PrimaryButton(title: entitlements.isPaid ? "Change plan" : "See the plans") {

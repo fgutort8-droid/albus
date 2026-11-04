@@ -494,7 +494,7 @@ struct GraderScreen: View {
         VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
             HStack(spacing: Tokens.Spacing.s) {
                 AlbusCactus(size: 26, mood: .cooked)
-                Text("I don't have a rubric")
+                Text("No extra rubric")
                     .font(Tokens.Typography.cardTitle)
                     .foregroundStyle(Tokens.Palette.ink)
                 Spacer()
@@ -503,8 +503,8 @@ struct GraderScreen: View {
                         .foregroundStyle(Tokens.Palette.accent)
                 }
             }
-            Text("Albus will read it and say what looks strong or weak — but it "
-                 + "won't be a grade, and it won't award marks.")
+            Text("Albus uses your task's saved rubric if it has one. Otherwise, "
+                 + "you get feedback without a grade or marks.")
                 .font(Tokens.Typography.caption)
                 .foregroundStyle(Tokens.Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)

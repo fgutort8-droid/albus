@@ -431,14 +431,14 @@ struct HomeScreen: View {
             EmptyState(icon: "tray", title: assignments.isEmpty ? "Nothing here yet" : "No open work",
                        message: assignments.isEmpty
                          ? "Add an assignment and Albus will break it into steps and look for time for them."
-                         : "Everything you have added is finished. Add the next thing when you're ready.",
+                         : "No active assignments. Add the next thing when you're ready.",
                        actionTitle: "Add an assignment") { addingTask = true }
         case .dueSoon:
             EmptyState(icon: "calendar", title: "Nothing due this week",
                        message: "No unfinished assignment is due in the next seven days.")
         case .overdue:
             EmptyState(icon: "checkmark.circle", title: "Nothing overdue",
-                       message: "You're on top of every deadline.")
+                       message: "Nothing on your list is overdue.")
         case .needsTime:
             EmptyState(icon: "calendar", title: "No work to review",
                        message: "Unplaced work due in the next seven days or already overdue appears here after your plan is rebuilt.")

@@ -46,7 +46,7 @@ enum NotificationActions {
                                      options: [.foreground]),
                 // No `.destructive`: dismissing a nudge is an ordinary choice,
                 // and styling it as damage would be a small lie about it.
-                UNNotificationAction(identifier: ID.notToday, title: "Not today", options: [])
+                UNNotificationAction(identifier: ID.notToday, title: "Dismiss", options: [])
             ],
             intentIdentifiers: [], options: []
         ),
