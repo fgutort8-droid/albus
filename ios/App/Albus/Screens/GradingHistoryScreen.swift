@@ -27,7 +27,7 @@ struct GradingHistoryScreen: View {
                     EmptyState(
                         icon: "checkmark.seal",
                         title: "Nothing marked yet",
-                        message: "Everything Albus marks lands here, so you can put a "
+                        message: "Your saved markings on this phone appear here, so you can compare a "
                                + "draft next to the version you fixed."
                     )
                 } else {

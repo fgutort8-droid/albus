@@ -85,7 +85,7 @@ struct PlanService {
             case .unusableResponse:
                 ModelResponseFailure.retryableDescription
             case .unavailable:
-                "Albus can't plan right now. Your assignment is saved."
+                "Albus can't write an AI plan right now."
             case .rejected(let why):
                 why
             }

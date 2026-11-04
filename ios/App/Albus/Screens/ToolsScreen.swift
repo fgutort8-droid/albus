@@ -57,7 +57,7 @@ struct ToolsScreen: View {
 
                 if visible.isEmpty {
                     EmptyState(icon: "magnifyingglass", title: "Nothing matches",
-                               message: "Try a subject, or what you're trying to do — \"cite\", \"graph\", \"focus\".")
+                               message: "Try a tool name, category, or what you're trying to do — \"cite\", \"graph\", \"focus\".")
                 } else {
                     ForEach(grouped, id: \.0) { key, tools in
                         // A chosen category is already named by its chip, lit

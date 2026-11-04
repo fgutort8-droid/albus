@@ -591,17 +591,17 @@ struct GraderScreen: View {
     /// this.
     private var markingBeats: [String] {
         markingIsBlind
-            ? ["Reading it through.",
-               "Working out what it is trying to do.",
-               "Finding the parts that are carrying it.",
-               "Finding the parts that are not.",
-               "Writing it up."]
-            : ["Reading it through.",
-               "Lining it up against your criteria.",
-               "Marking each strand in turn.",
-               "Finding the sentences that cost you marks.",
-               "Working out what the next band needs.",
-               "Writing it up."]
+            ? ["Albus is preparing your feedback.",
+               "You can keep using Albus while you wait.",
+               "Your feedback can highlight strengths.",
+               "It can also suggest what to improve.",
+               "Your feedback will appear here when it is ready."]
+            : ["Albus is preparing your feedback.",
+               "Your rubric guides the feedback.",
+               "Any marks are estimates.",
+               "Your teacher's mark may differ.",
+               "You can keep using Albus while you wait.",
+               "Your feedback will appear here when it is ready."]
     }
 
     @ViewBuilder private var markingStage: some View {
