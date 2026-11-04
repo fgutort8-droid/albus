@@ -95,7 +95,7 @@ struct AddTaskSheet: View {
                     .font(Tokens.Typography.caption)
                     .foregroundStyle(Tokens.Palette.accent)
                 Text(selectedRubric == nil
-                     ? "Optional. With a rubric, Albus shapes the steps around the criteria and can mark your work against them later."
+                     ? "Optional. Use a rubric to guide your plan. Plus and Pro can estimate a mark against it later."
                      : selectedRubric!.summary)
                     .font(Tokens.Typography.micro)
                     .foregroundStyle(Tokens.Palette.inkMuted)
@@ -243,7 +243,7 @@ private struct NewSubjectSheet: View {
                     .textInputAutocapitalization(.words)
             }
 
-            Text("Albus uses your subjects to pitch answers at the right level.")
+            Text("Albus uses your subjects to organise tasks and suggest study tools.")
                 .font(Tokens.Typography.micro)
                 .foregroundStyle(Tokens.Palette.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)

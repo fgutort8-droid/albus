@@ -32,7 +32,7 @@ enum WorkExtractor {
             case .unreadable:
                 "Albus couldn't open that file."
             case .empty:
-                "There's no text in that — try a clearer photo, or paste it instead."
+                "Albus couldn't read any text — try a clearer photo, or paste it instead."
             case .tooLarge:
                 "That file is too big to read on the phone."
             }

@@ -206,7 +206,7 @@ struct TaskDetailScreen: View {
             }
             Button("Keep it", role: .cancel) {}
         } message: {
-            Text("Its plan, scheduled time and any marking go with it. This cannot be undone.")
+            Text("Its plan, scheduled time and saved marking go with it. A marking in progress may still appear in your history. This cannot be undone.")
         }
     }
 
@@ -281,7 +281,7 @@ struct TaskDetailScreen: View {
                          message: "This assignment has no plan yet. Albus couldn't reach the planner when you added it.",
                          retryTitle: "Add a step") { addingStep = true }
         } else if let next = steps.first(where: { $0.completedAt == nil }) {
-            AlbusNote("**\(next.title)** is the step that makes the rest shorter.", isBusy: true)
+            AlbusNote("**\(next.title)** is next in your plan.", isBusy: true)
         } else {
             AlbusNote("Every step is done. **Hand it in** and take the evening back.")
         }

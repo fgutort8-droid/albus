@@ -255,8 +255,8 @@ struct GraderScreen: View {
                 Spacer()
                 meter
             }
-            Text("Reads every paragraph and marks it against your rubric, "
-                 + "quoting your own sentences back to you.")
+            Text("Estimates a mark against your rubric and gives feedback, "
+                 + "with examples from your writing. Your teacher's mark may differ.")
                 .font(Tokens.Typography.caption)
                 .foregroundStyle(Tokens.Palette.inkSecondary)
         }
@@ -338,14 +338,14 @@ struct GraderScreen: View {
         [("Give me the work", "Pick a task, upload a file, photograph it, or paste it."),
          ("Say what marks it", "A rubric you've saved, or one you hand me now."),
          ("Tell me how you're marked", "Out of 100, IB 1–7, letters — whatever your course uses."),
-         ("Get the marks back", "Where they went, quoted from your own writing.")]
+         ("Get the marks back", "Estimated marks and feedback, with examples from your writing.")]
     }
 
     // MARK: - 1 · The work
 
     @ViewBuilder private var workStage: some View {
         stageTitle("What am I marking?",
-                   "Anything on your list brings its rubric and deadline with it.")
+                   "Pick a task to use its title and saved rubric. Add the work below.")
 
         // Arriving from an assignment answers this question before the student
         // sees the screen. Saying so is the difference between "already sorted"
@@ -369,7 +369,7 @@ struct GraderScreen: View {
         VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
             SectionHeader(label: "Or bring it in") { EmptyView() }
             importRow("Upload a file", "PDF or plain text", "arrow.up.doc") { importing = true }
-            importRow("Take a photo", "Handwriting is fine", "camera") {
+            importRow("Take a photo", "Clear handwriting works best", "camera") {
                 workPhotoPicking = true
             }
         }
@@ -445,7 +445,7 @@ struct GraderScreen: View {
 
     @ViewBuilder private var rubricStage: some View {
         stageTitle("What should I mark it against?",
-                   "A rubric is the difference between a grade and an opinion.")
+                   "Your rubric gives Albus criteria for estimating a mark.")
 
         if !rubrics.isEmpty {
             VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
@@ -525,7 +525,7 @@ struct GraderScreen: View {
     @ViewBuilder private var presentationStage: some View {
         stageTitle("How does your course mark this?",
                    "Albus can't know your scale. Tell it, and the result comes "
-                   + "back in the form you'll actually be graded in.")
+                   + "back as an estimate in that format.")
 
         TextEditor(text: $presentation)
             .font(Tokens.Typography.body)
@@ -623,7 +623,7 @@ struct GraderScreen: View {
                 .id(beat)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
 
-            Text("\(markingWordCount) words. About half a minute.")
+            Text("\(markingWordCount) words. This can take a moment.")
                 .font(Tokens.Typography.micro)
                 .foregroundStyle(Tokens.Palette.inkMuted)
 

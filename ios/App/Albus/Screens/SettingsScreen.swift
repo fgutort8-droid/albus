@@ -99,14 +99,14 @@ struct SettingsScreen: View {
                         // Free's price is its name: "Free … Free" said nothing
                         // the first word hadn't.
                         if entitlements.isPaid {
-                            Text(entitlements.plan.priceLabel)
+                            Text("Reference: \(entitlements.plan.priceLabel)/month")
                                 .font(Tokens.Typography.body)
                                 .foregroundStyle(Tokens.Palette.inkSecondary)
                         }
                     }
 
                     if let renews = entitlements.plan.expiresAt, entitlements.isPaid {
-                        Text("Renews \(renews.formatted(date: .abbreviated, time: .omitted))")
+                        Text("Access until \(renews.formatted(date: .abbreviated, time: .omitted))")
                             .font(Tokens.Typography.caption)
                             .foregroundStyle(Tokens.Palette.inkMuted)
                     }
@@ -114,7 +114,7 @@ struct SettingsScreen: View {
                     VStack(spacing: Tokens.Spacing.s) {
                         allowanceRow("Active tasks", entitlements.plan.tasks)
                         if let aiPlans = entitlements.plan.aiPlans {
-                            allowanceRow("AI plans", aiPlans, unit: "this week")
+                            allowanceRow("AI plans (fair use)", aiPlans, unit: "this week")
                         }
                         allowanceRow("Marking", entitlements.plan.grader, unit: "this week")
                         allowanceRow("Saved rubrics", entitlements.plan.rubrics)
@@ -351,7 +351,7 @@ struct SettingsScreen: View {
                 VStack(alignment: .leading, spacing: Tokens.Spacing.m) {
                     aboutRow("Signed in with", signInLabel)
                     if session.signInMethod == .anonymous {
-                        Text("This account isn't saved yet. Add Apple so you can sign back in if you change phones.")
+                        Text("Add Apple so you can sign back in if you change phones. Your tasks stay on this phone.")
                             .font(Tokens.Typography.caption)
                             .foregroundStyle(Tokens.Palette.inkSecondary)
                             .fixedSize(horizontal: false, vertical: true)

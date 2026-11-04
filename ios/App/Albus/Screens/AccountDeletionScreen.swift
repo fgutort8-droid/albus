@@ -20,11 +20,11 @@ struct AccountDeletionScreen: View {
                 Text(recovering ? "Finish deleting your account" : "Delete account")
                     .font(Tokens.Typography.cardTitle)
                 if recovering {
-                    Text("Your account is deleted. Albus needs to finish clearing this phone before you can start again.")
+                    Text("Albus needs to finish clearing this phone before you can start again.")
                 } else {
-                    Text("Your account, assignments, saved rubrics and marks will be deleted. This can't be undone. Signing in again afterwards starts a new, empty account.")
+                    Text("Your account, assignments, saved rubrics and marks will be deleted. This can't be undone. Signing in again afterwards starts a new, empty account. Payment and security records may be retained; see the privacy policy.")
                     if needsApple {
-                        Text("Apple will ask you to confirm it's you, so Albus can also stop using your Sign in with Apple.")
+                        Text("Apple will ask you to confirm it's you, so Albus can ask Apple to revoke access. If Apple cannot be reached, deletion can still go ahead.")
                     }
                     Text("Deleting your account does NOT cancel an Apple subscription. Apple will keep billing you until you cancel in iPhone Settings → your name → Subscriptions.")
                         .fontWeight(.semibold)

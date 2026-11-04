@@ -128,7 +128,7 @@ struct GradeResultView: View {
                         .font(Tokens.Typography.title)
                         .foregroundStyle(Tokens.Palette.ink)
                     Text("Add the rubric this is marked against and Albus can give "
-                         + "you the actual grade.")
+                         + "you an estimated mark and feedback.")
                         .font(Tokens.Typography.caption)
                         .foregroundStyle(Tokens.Palette.inkSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -138,7 +138,7 @@ struct GradeResultView: View {
                     Text("Marked")
                         .font(Tokens.Typography.title)
                         .foregroundStyle(Tokens.Palette.ink)
-                    Text("This rubric doesn't carry marks, so Albus commented instead of scoring.")
+                    Text("Albus returned feedback without a score.")
                         .font(Tokens.Typography.caption)
                         .foregroundStyle(Tokens.Palette.inkSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -386,8 +386,8 @@ struct GradingBasisBanner: View {
                 Image(systemName: "checkmark.seal.fill")
                     .foregroundStyle(Tokens.SubjectColor.green.color)
                 Text(basis == .personal
-                     ? "Graded against your rubric"
-                     : "Graded against your course's marking criteria")
+                     ? "Estimated against your rubric"
+                     : "Estimated against your course's marking criteria")
                     .font(Tokens.Typography.caption)
                     .foregroundStyle(Tokens.Palette.inkSecondary)
             }

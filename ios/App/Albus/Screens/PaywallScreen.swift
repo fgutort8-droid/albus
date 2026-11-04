@@ -106,13 +106,13 @@ struct PaywallScreen: View {
         /// including Free — a plan with no stated purpose reads as a trap.
         var pitch: String {
             switch self {
-            case .free: "The planner, in full."
+            case .free: "Plan your study time."
             case .plus: "Albus marks your work."
-            case .pro:  "More marking, and no limits."
+            case .pro:  "More marking. More room for tasks."
             }
         }
 
-        var tag: String? { self == .plus ? "MOST PICKED" : nil }
+        var tag: String? { self == .plus ? "WITH MARKING" : nil }
 
         /// The four things that change across plans, in the same order every
         /// time, so the eye can run down a column rather than read three lists.
@@ -126,20 +126,17 @@ struct PaywallScreen: View {
                 [("5 AI plans a week", "After that, Albus plans on your phone."),
                  ("5 active tasks", "Planned, scheduled, and rebuilt when your week moves."),
                  ("3 saved rubrics", "Paste a mark scheme once and reuse it."),
-                 ("No marking", "The Grader needs Plus."),
-                 ("The core tools", "The study tools Albus picks for a step.")]
+                 ("No marking", "The Grader needs Plus or Pro.")]
             case .plus:
-                [("Unlimited AI plans", "A step-by-step plan for every assignment."),
+                [("Unlimited AI plans within fair use", "When AI is unavailable, Albus plans on your phone."),
                  ("10 active tasks", "For a term carrying more than one deadline."),
                  ("5 saved rubrics", "Paste a mark scheme once and reuse it."),
-                 ("2 markings a week", "Your work, your rubric, a real grade."),
-                 ("The expanded tools", "More of the library, picked per step.")]
+                 ("2 markings a week", "An estimated mark and feedback against your rubric.")]
             case .pro:
-                [("Unlimited AI plans", "A step-by-step plan for every assignment."),
-                 ("Unlimited tasks", "However much you are actually carrying."),
-                 ("Unlimited rubrics", "However many mark schemes you carry."),
-                 ("5 markings a week", "Mark a draft, revise it, mark it again."),
-                 ("Every study tool", "The whole library, picked per step.")]
+                [("Unlimited AI plans within fair use", "When AI is unavailable, Albus plans on your phone."),
+                 ("Unlimited tasks", "No plan limit; account safety limits apply."),
+                 ("Unlimited rubrics", "No plan limit; account safety limits apply."),
+                 ("5 markings a week", "Mark a draft, revise it, mark it again.")]
             }
         }
     }
