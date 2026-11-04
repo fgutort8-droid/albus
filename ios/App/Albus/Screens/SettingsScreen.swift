@@ -191,7 +191,7 @@ struct SettingsScreen: View {
                     .font(Tokens.Typography.caption)
                     .foregroundStyle(Tokens.Palette.inkMuted)
             } else if allowance.isUnlimited {
-                Text("Unlimited")
+                Text("No plan limit")
                     .font(Tokens.Typography.caption)
                     .foregroundStyle(Tokens.Palette.inkSecondary)
             } else if let left = allowance.remaining, let limit = allowance.limit {

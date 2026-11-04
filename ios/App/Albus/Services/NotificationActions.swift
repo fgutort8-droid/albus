@@ -53,7 +53,7 @@ enum NotificationActions {
         UNNotificationCategory(
             identifier: Category.deadline,
             actions: [
-                UNNotificationAction(identifier: ID.start, title: "Open plan",
+                UNNotificationAction(identifier: ID.start, title: "Open task",
                                      options: [.foreground])
             ],
             intentIdentifiers: [], options: []

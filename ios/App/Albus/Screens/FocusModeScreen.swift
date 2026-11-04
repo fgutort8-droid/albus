@@ -82,7 +82,7 @@ struct FocusModeScreen: View {
             Button("Stop, still to do") { end(completed: false) }
             Button("Keep going", role: .cancel) {}
         } message: {
-            Text("Albus records the \(DurationText.short(minutes: max(1, session.focusedSeconds / 60))) you actually focused, not the \(DurationText.short(minutes: record.plannedSeconds / 60)) planned.")
+            Text("Albus records the \(DurationText.short(minutes: max(1, session.focusedSeconds / 60))) on your timer, rather than the \(DurationText.short(minutes: record.plannedSeconds / 60)) planned.")
         }
     }
 
