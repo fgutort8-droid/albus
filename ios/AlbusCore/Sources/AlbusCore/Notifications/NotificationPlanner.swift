@@ -458,7 +458,13 @@ public struct NotificationPlanner: Sendable {
             facts[.weekMinutes] = durationPhrase(context.weeklyFocusedMinutes)
 
         case .dormantSoft, .dormantFinal:
-            if let nearest = open.min(by: { $0.deadline < $1.deadline }) {
+            // A day or more after this reminder, not merely the nearest: these
+            // fire days after the plan was made, and an assignment overdue or
+            // due later that day by then read "One week Sci in today". With
+            // nothing that far ahead, no assignment is named, and only the
+            // lines that need none can be picked.
+            if let nearest = open.filter({ days(from: when, to: $0.deadline) >= 1 })
+                .min(by: { $0.deadline < $1.deadline }) {
                 facts[.assignment] = nearest.title
                 facts[.days] = dayPhrase(from: when, to: nearest.deadline)
             }
@@ -491,9 +497,9 @@ public struct NotificationPlanner: Sendable {
     ///
     /// Every template using this reads "{assignment} in {days}", so a negative
     /// value produced "Sci is the past out and today owes it 162 minutes".
-    /// Callers now only pass deadlines ahead of the fire date; clamping here as
-    /// well means no sentence can come out ungrammatical even if one slips
-    /// through — an overdue assignment has its own kind, with its own corpus.
+    /// The lines that use it pass only deadlines on a later day than the fire
+    /// date, and an overdue assignment has its own kind, with its own corpus.
+    /// The clamp is a backstop, not a phrasing: "in today" still reads wrong.
     private func dayPhrase(from: Date, to: Date) -> String {
         switch days(from: from, to: to) {
         case ..<1: return "today"

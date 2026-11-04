@@ -499,4 +499,49 @@ struct NotificationQueueRegressionTests {
         let nudges = result.filter { $0.kind == .windowNudge }
         #expect(nudges.contains { ($0.title + $0.body).contains("45 minutes") })
     }
+
+    /// A quiet-app reminder named the nearest open assignment even when it was
+    /// overdue, or due later that day, by the time the reminder fired, so
+    /// `{days}` came out as "today" in lines written for a day or more ahead.
+    @Test("a quiet-app reminder never names a deadline less than a day away")
+    func dormancyNamesOnlyDeadlinesAhead() {
+        var reminders = 0
+        // Eleven different days, so the seeded pick lands on lines that name
+        // the assignment as well as lines that do not.
+        for opened in 10...20 {
+            let result = planner.plan(context(
+                assignments: [assignment("Sci", dueDay: opened + 2, dueHour: 17),
+                              assignment("Art", dueDay: opened + 3, dueHour: 17)],
+                lastOpened: at(opened, 8),
+                at: at(opened, 9)
+            ))
+            for notification in result
+            where notification.kind == .dormantSoft || notification.kind == .dormantFinal {
+                reminders += 1
+                let text = notification.title + " " + notification.body
+                #expect(!text.contains("today"), "said: \(text)")
+                #expect(!text.contains("Sci") && !text.contains("Art"), "said: \(text)")
+            }
+        }
+        #expect(reminders > 0)
+    }
+
+    @Test("a quiet-app reminder still names a deadline days away")
+    func dormancyStillNamesDeadlinesAhead() {
+        var named = false
+        for opened in 10...20 {
+            let result = planner.plan(context(
+                assignments: [assignment("Art", dueDay: opened + 10, dueHour: 17)],
+                lastOpened: at(opened, 8),
+                at: at(opened, 9)
+            ))
+            for notification in result
+            where notification.kind == .dormantSoft || notification.kind == .dormantFinal {
+                let text = notification.title + " " + notification.body
+                #expect(!text.contains("today"), "said: \(text)")
+                named = named || text.contains("Art")
+            }
+        }
+        #expect(named)
+    }
 }
