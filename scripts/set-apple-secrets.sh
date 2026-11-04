@@ -1,23 +1,40 @@
 #!/usr/bin/env bash
-# Felipe-run: puts the four Sign in with Apple secrets into the live project,
-# so delete-account can revoke Apple's tokens when a student deletes their
-# account. The key never reaches the screen, terminal history or a file that
-# outlives this run.
+# Felipe-run: puts the four Sign in with Apple secrets into the new Albus
+# project, so delete-account can revoke Apple's tokens when a student deletes
+# their account. The key never reaches the screen, terminal history or a file
+# that outlives this run.
 #
 # Run: bash scripts/set-apple-secrets.sh /path/to/AuthKey_XXXXXXXXXX.p8
 #
 # The key ID is read from the file name Apple gives it; the team ID is asked
 # for (it is not secret, but it stays out of this public repository). The
 # client ID is the app's bundle ID.
+#
+# It asks for the albus-setup access token (typing is hidden) instead of using
+# the login saved on this Mac, which belongs to the OLD project, and refuses the
+# old project. It needs Supabase CLI 2.117 or newer.
 set -euo pipefail
-REF=ssvehwhblgqtvqkfbkbj
+REF=yqhzmgikkawxjzvdjvsf
+OLD_REF=ssvehwhblgqtvqkfbkbj
 CLIENT_ID=com.felipegutierrez.albus
 NAMES='APPLE_TEAM_ID APPLE_KEY_ID APPLE_PRIVATE_KEY APPLE_CLIENT_ID'
 # Before the secrets are sent, a stop changes nothing. From then on, they may
 # be set, and sending the same four again is safe.
 stop() { echo "STOPPED: $*; nothing was set." >&2; exit 1; }
 stop_after_sending() { echo "STOPPED: $*. They may or may not be set; running this again is safe. Tell Claude." >&2; exit 1; }
+TTY=${ALBUS_TTY:-/dev/tty}   # the tests point this at a file; nothing else sets it
+[ "$REF" != "$OLD_REF" ] || stop 'that is the old project, which this script must never touch'
 for tool in supabase python3 openssl; do command -v "$tool" >/dev/null || stop "missing $tool"; done
+# Only this run's token may steer the CLI. Any other SUPABASE_* setting left in
+# the shell is dropped: SUPABASE_PROJECT_ID, for one, wins over --project-ref.
+for name in $(env | sed -n 's/^\(SUPABASE_[A-Za-z0-9_]*\)=.*/\1/p'); do
+  [ "$name" = SUPABASE_ACCESS_TOKEN ] || unset "$name"
+done
+CLI_VERSION=$(supabase --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+IFS=. read -r cli_major cli_minor _ <<<"${CLI_VERSION:-0.0.0}"
+[ "$cli_major" -gt 2 ] || { [ "$cli_major" -eq 2 ] && [ "$cli_minor" -ge 117 ]; } \
+  || stop "the Supabase tool here is version ${CLI_VERSION:-unknown}, and this needs 2.117 or newer; run: brew upgrade supabase/tap/supabase"
+
 [ $# -eq 1 ] || stop 'give the path to the .p8 file Apple let you download'
 KEY_FILE=$1
 [ -f "$KEY_FILE" ] || stop "no file at $KEY_FILE"
@@ -30,12 +47,25 @@ CURVE=$(openssl pkey -in "$KEY_FILE" -noout -text_pub 2>/dev/null) \
 grep -Eq 'prime256v1|P-256' <<<"$CURVE" \
   || stop 'that file is not a P-256 private key, which a Sign in with Apple key is'
 KEY_ID=$(basename "$KEY_FILE" | sed -nE 's/^AuthKey_([A-Z0-9]{10})\.p8$/\1/p')
+# One reader for every question, so answers given in a row are read in order.
+exec 3<"$TTY" || stop 'could not ask anything; run this in a Terminal tab'
 if [ -z "$KEY_ID" ]; then
-  read -r -p 'Key ID (10 capital letters and digits, shown with the key in Apple Developer): ' KEY_ID
+  read -r -p 'Key ID (10 capital letters and digits, shown with the key in Apple Developer): ' KEY_ID <&3 \
+    || stop 'could not ask for the key ID; run this in a Terminal tab'
 fi
 [[ "$KEY_ID" =~ ^[A-Z0-9]{10}$ ]] || stop 'a key ID is 10 capital letters and digits'
-read -r -p 'Team ID (10 capital letters and digits, top right in Apple Developer): ' TEAM_ID
+read -r -p 'Team ID (10 capital letters and digits, top right in Apple Developer): ' TEAM_ID <&3 \
+  || stop 'could not ask for the team ID; run this in a Terminal tab'
 [[ "$TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || stop 'a team ID is 10 capital letters and digits'
+
+if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+  read -r -s -p 'Paste the albus-setup access token (typing is hidden), then press Enter: ' SUPABASE_ACCESS_TOKEN <&3 \
+    || stop 'could not ask for the access token; run this in a Terminal tab'
+  echo
+fi
+[[ "$SUPABASE_ACCESS_TOKEN" =~ ^sbp_([a-z][a-z0-9]{0,7}_)?[a-f0-9]{40}$ ]] \
+  || stop 'that does not look like a Supabase access token (sbp_ and 40 more letters and digits); if you pasted it twice, run this again and paste it once'
+export SUPABASE_ACCESS_TOKEN
 
 umask 077
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/albus-apple-secrets.XXXXXX")
@@ -60,7 +90,7 @@ supabase secrets list --project-ref "$REF" --output json > "$STAGE/secrets.json"
 # Names only. The list also carries a digest of each value; it is never printed.
 python3 - "$STAGE/secrets.json" $NAMES <<'PY'
 import json,sys
-rows=json.load(open(sys.argv[1])); rows=rows.get('secrets',rows) if isinstance(rows,dict) else rows
+rows=json.load(open(sys.argv[1])) or []; rows=rows.get('secrets',rows) if isinstance(rows,dict) else rows
 names={r.get('name') for r in rows if isinstance(r,dict)}
 missing=[n for n in sys.argv[2:] if n not in names]
 if missing: sys.exit('STOPPED: sent, but not listed: '+', '.join(missing)+'. Running this again is safe. Tell Claude.')

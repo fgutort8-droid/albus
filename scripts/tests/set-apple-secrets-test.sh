@@ -7,11 +7,20 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 TEST_DIR=$(mktemp -d "${TMPDIR:-/tmp}/albus-apple-secrets-test.XXXXXX")
 trap 'rm -rf "$TEST_DIR"' EXIT
 export ALBUS_TEST_LOG="$TEST_DIR/calls" ALBUS_TEST_ENV_COPY="$TEST_DIR/received.env"
+# Stand-ins built at run time, so nothing token-shaped sits in the repository:
+# the older form, and the current one with its kind (sbp_v0_).
+TOKEN="sbp_$(printf '%040d' 7)"
+TOKEN_V0="sbp_v0_$(printf '%040d' 9)"
+export SUPABASE_ACCESS_TOKEN=$TOKEN ALBUS_TEST_EXPECTED_TOKEN=$TOKEN
 mkdir -p "$TEST_DIR/bin"
 cat > "$TEST_DIR/bin/supabase" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
+[ "${1:-}" != --version ] || { echo "${ALBUS_TEST_CLI_VERSION:-2.122.0}"; exit 0; }
 printf '%s\n' "$*" >> "$ALBUS_TEST_LOG"
+# Exactly the token this run was given, compared without printing either.
+[ "${SUPABASE_ACCESS_TOKEN:-}" = "$ALBUS_TEST_EXPECTED_TOKEN" ] || { echo 'not the given token reached the CLI' >&2; exit 98; }
+if env | grep '^SUPABASE_' | grep -qv '^SUPABASE_ACCESS_TOKEN='; then echo 'a stray SUPABASE_ setting reached the CLI' >&2; exit 97; fi
 case "$1 $2" in
   'secrets set')
     [ -z "${ALBUS_TEST_SET_FAILS:-}" ] || exit 1
@@ -35,15 +44,24 @@ openssl ecparam -name prime256v1 -genkey -noout 2>/dev/null \
   | openssl pkcs8 -topk8 -nocrypt -out "$KEY" 2>/dev/null
 BODY=$(sed -n 2p "$KEY")
 
-run() {
+run() { # the key file, then what is typed at the prompts, one line each
+  local key=$1; shift
   rm -f "$ALBUS_TEST_ENV_COPY"; : > "$ALBUS_TEST_LOG"
+  printf '%s\n' "$@" > "$TEST_DIR/typed"
   set +e
-  printf '%s\n' "$2" | PATH="$TEST_DIR/bin:$PATH" bash "$ROOT/scripts/set-apple-secrets.sh" "$1" \
+  ALBUS_TTY="${ALBUS_TTY:-$TEST_DIR/typed}" PATH="$TEST_DIR/bin:$PATH" bash "$ROOT/scripts/set-apple-secrets.sh" "$key" \
     > "$TEST_DIR/output" 2>&1
   STATUS=$?
   set -e
   ! grep -qF -- "$BODY" "$TEST_DIR/output" || { echo 'FAIL: key material reached the screen' >&2; exit 1; }
+  ! grep -qF -e "$TOKEN" -e "$TOKEN_V0" "$TEST_DIR/output" "$ALBUS_TEST_LOG" || { echo 'FAIL: the access token reached the screen or a command line' >&2; exit 1; }
 }
+nothing_set() { ! grep -q 'secrets set' "$ALBUS_TEST_LOG"; }
+
+# Bash prints read's question on stderr, so a 2> on a read hides the question.
+token_read=$(grep -E '^[[:space:]]*read .*SUPABASE_ACCESS_TOKEN' "$ROOT/scripts/set-apple-secrets.sh")
+grep -q -- ' -s ' <<<"$token_read" && ! grep -q -- '2>' <<<"$token_read" \
+  || { echo 'FAIL: the token prompt must hide typing and show its question' >&2; exit 1; }
 
 run "$KEY" 'TEAMID1234'
 [ "$STATUS" -eq 0 ] || { cat "$TEST_DIR/output" >&2; echo 'FAIL: a valid key was refused' >&2; exit 1; }
@@ -54,21 +72,48 @@ grep -q '^APPLE_CLIENT_ID=com.felipegutierrez.albus$' "$ALBUS_TEST_ENV_COPY" || 
   || { echo 'FAIL: private key is not one quoted line with \n breaks' >&2; exit 1; }
 [ "$(wc -l < "$ALBUS_TEST_ENV_COPY" | tr -d ' ')" = 4 ] || { echo 'FAIL: env file is not exactly four lines' >&2; exit 1; }
 grep -q 'No value was shown or saved' "$TEST_DIR/output" || { echo 'FAIL: names not confirmed' >&2; exit 1; }
+[ "$(grep -c -- '--project-ref yqhzmgikkawxjzvdjvsf' "$ALBUS_TEST_LOG")" = 2 ] && ! grep -q ssvehwhblgqtvqkfbkbj "$ALBUS_TEST_LOG" \
+  || { cat "$ALBUS_TEST_LOG" >&2; echo 'FAIL: the secrets did not go to the new project, and only there' >&2; exit 1; }
 leftover=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'albus-apple-secrets.*' -newer "$KEY" 2>/dev/null | head -1)
 [ -z "$leftover" ] || { echo "FAIL: the env file outlived the run ($leftover)" >&2; exit 1; }
-echo 'PASS: a valid key sets four secrets as one-line values, and nothing is left behind'
+echo 'PASS: a valid key sets four secrets in the new project as one-line values, and nothing is left behind'
+
+SUPABASE_ACCESS_TOKEN='' run "$KEY" 'TEAMID1234' "$TOKEN"
+[ "$STATUS" -eq 0 ] && grep -q 'No value was shown or saved' "$TEST_DIR/output" \
+  || { cat "$TEST_DIR/output" >&2; echo 'FAIL: a token typed at the prompt was not used' >&2; exit 1; }
+SUPABASE_ACCESS_TOKEN='' ALBUS_TEST_EXPECTED_TOKEN=$TOKEN_V0 run "$KEY" 'TEAMID1234' "$TOKEN_V0"
+[ "$STATUS" -eq 0 ] && grep -q 'No value was shown or saved' "$TEST_DIR/output" \
+  || { cat "$TEST_DIR/output" >&2; echo 'FAIL: a current-form token typed at the prompt did not reach the CLI as given' >&2; exit 1; }
+SUPABASE_ACCESS_TOKEN=$TOKEN_V0 ALBUS_TEST_EXPECTED_TOKEN=$TOKEN_V0 run "$KEY" 'TEAMID1234'
+[ "$STATUS" -eq 0 ] || { cat "$TEST_DIR/output" >&2; echo 'FAIL: a current-form token from the shell did not reach the CLI as given' >&2; exit 1; }
+SUPABASE_ACCESS_TOKEN='' run "$KEY" 'TEAMID1234' "$TOKEN$TOKEN"
+[ "$STATUS" -ne 0 ] && grep -q 'paste it once' "$TEST_DIR/output" && nothing_set \
+  || { cat "$TEST_DIR/output" >&2; echo 'FAIL: a token pasted twice was not refused before setting anything' >&2; exit 1; }
+SUPABASE_ACCESS_TOKEN='' ALBUS_TTY=/dev/null run "$KEY"
+[ "$STATUS" -ne 0 ] && grep -q 'run this in a Terminal tab' "$TEST_DIR/output" && nothing_set \
+  || { cat "$TEST_DIR/output" >&2; echo 'FAIL: no terminal to ask in did not stop it before setting anything' >&2; exit 1; }
+ALBUS_TEST_CLI_VERSION=2.98.2 run "$KEY" 'TEAMID1234'
+[ "$STATUS" -ne 0 ] && grep -q 'needs 2.117 or newer' "$TEST_DIR/output" && [ ! -s "$ALBUS_TEST_LOG" ] \
+  || { cat "$TEST_DIR/output" >&2; echo 'FAIL: an old Supabase CLI was used' >&2; exit 1; }
+SUPABASE_PROJECT_ID=ssvehwhblgqtvqkfbkbj SUPABASE_DB_PASSWORD=x run "$KEY" 'TEAMID1234'
+[ "$STATUS" -eq 0 ] || { cat "$TEST_DIR/output" >&2; echo 'FAIL: stray SUPABASE_ settings were not dropped' >&2; exit 1; }
+echo 'PASS: a typed token of either form reaches the CLI exactly; a malformed token, no terminal or an old CLI stops it before anything is set; stray settings are dropped'
 
 openssl ecparam -name secp384r1 -genkey -noout 2>/dev/null \
   | openssl pkcs8 -topk8 -nocrypt -out "$TEST_DIR/AuthKey_WRONG12345.p8" 2>/dev/null
 run "$TEST_DIR/AuthKey_WRONG12345.p8" 'TEAMID1234'
-[ "$STATUS" -ne 0 ] && grep -q 'not a P-256 private key' "$TEST_DIR/output" && ! grep -q 'secrets set' "$ALBUS_TEST_LOG" \
+[ "$STATUS" -ne 0 ] && grep -q 'not a P-256 private key' "$TEST_DIR/output" && nothing_set \
   || { cat "$TEST_DIR/output" >&2; echo 'FAIL: a key on the wrong curve was not refused before setting anything' >&2; exit 1; }
 echo 'PASS: a key on the wrong curve is refused before anything is set'
 
 run "$KEY" 'not-an-id'
-[ "$STATUS" -ne 0 ] && grep -q 'a team ID is 10 capital letters and digits' "$TEST_DIR/output" && ! grep -q 'secrets set' "$ALBUS_TEST_LOG" \
+[ "$STATUS" -ne 0 ] && grep -q 'a team ID is 10 capital letters and digits' "$TEST_DIR/output" && nothing_set \
   || { cat "$TEST_DIR/output" >&2; echo 'FAIL: a malformed team ID was not refused before setting anything' >&2; exit 1; }
-echo 'PASS: a malformed team ID is refused before anything is set'
+cp "$KEY" "$TEST_DIR/key-renamed.p8"
+run "$TEST_DIR/key-renamed.p8" 'ABCDE12345' 'TEAMID1234'
+[ "$STATUS" -eq 0 ] && grep -q '^APPLE_KEY_ID=ABCDE12345$' "$ALBUS_TEST_ENV_COPY" \
+  || { cat "$TEST_DIR/output" >&2; echo 'FAIL: a key ID typed for a renamed file was not used' >&2; exit 1; }
+echo 'PASS: a malformed team ID is refused before anything is set; a renamed file asks for its key ID'
 
 ALBUS_TEST_DROP=1 run "$KEY" 'TEAMID1234'
 [ "$STATUS" -ne 0 ] && grep -q 'sent, but not listed: APPLE_TEAM_ID' "$TEST_DIR/output" \
@@ -85,4 +130,4 @@ for failing in ALBUS_TEST_SET_FAILS ALBUS_TEST_LIST_FAILS; do
     || { cat "$TEST_DIR/output" >&2; echo "FAIL: $failing was misreported" >&2; exit 1; }
 done
 echo 'PASS: a failure after sending never says nothing was set'
-echo 'PASS: the Apple-secrets helper never shows the key and checks what it set.'
+echo 'PASS: the Apple-secrets helper never shows the key or the token, and checks what it set.'
