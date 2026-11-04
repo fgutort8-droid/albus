@@ -98,3 +98,21 @@ best effort, and the policy now says what happens when Apple can't be reached.
 | Subscription records and queued payment events still carry the random identifier | `subscription_transactions.ownership_origin_user_id` and `ownership_path`, `private.subscription_transfers.source_ids` and `destination_id`, and `private.financial_inbox.user_id` until 30 days after the event is applied. |
 | RevenueCat keeps its record of the purchases | Its customer id is the account's id; Albus sends no deletion request to RevenueCat. |
 | If Apple can't be reached, the account is still deleted | `delete-account` (task 08A) records a warning and deletes when Apple's exchange or revoke fails, or its keys are missing; it stops only for a missing or expired code, or a different Apple ID. |
+
+## 4 November 2026: the new project, and what the app charges
+
+Reviewed against `main` at 48185b6, after the move to the new Supabase project
+(`yqhzmgikkawxjzvdjvsf`, West EU (Ireland)) and #34 (Apple-only sign-in). Every
+plan limit was checked against `public.plans` (`0034_three_plans.sql`,
+`20260911100000`, `20260915120000`, `20260916120000`) and the paywall's own list
+(`PaywallScreen.swift`).
+
+| Claim | Evidence and correction |
+| --- | --- |
+| Accounts from before sign-in are anonymous | **Removed.** The new project was created with anonymous sign-ins off and holds no anonymous accounts; a session from the old project is refused and the app shows the sign-in screen. The 30-day removal of unused anonymous accounts (still scheduled) can no longer apply, so the retention line went too. |
+| What an AI plan sends | **Completed.** `PlanService.Request` sends title, task type, deadline, estimated minutes, priority, daily capacity, course id, notes and rubric id; `_shared/prompt.ts` puts notes and the rubric's content in `<student_notes>`/`<student_rubric>`. The course id only checks ownership (`breakdown/index.ts`), so no subject name is named. When the AI can't be used or a limit is reached, the phone plans and nothing goes to Anthropic. |
+| Tasks are not in your account | **Corrected.** `create_assignment_with_plan` keeps the task, its notes and its steps on the server when the AI plans it, and `sync_my_assignments` counts it against the plan's limit; nothing downloads tasks to a new phone. The terms no longer say tasks are "not in your account". |
+| Plan limits | Confirmed: active tasks 5 / 10 / unlimited, AI plans 5 a week / unlimited / unlimited, marking none / 2 / 5 a week, rubrics 3 / 5 / unlimited, study tools core / expanded / all. |
+| "Unlimited" AI plans | **Qualified.** Plus allows 20 an hour and 60 a day, Pro 40 and 150, and a monthly fair-use cost ceiling (`20260916090000_tighten_fair_use_ceilings.sql`: Plus US$3, Pro US$6) sends plans to the phone. The terms and support page now say "subject to fair use". |
+| Free trial | The paywall offers a trial only when the App Store says the Apple ID can still take one, and its caption reads "<trial> free, then <billed price>. Renews automatically." The support page says so, without naming a length the App Store sets. |
+| Hosting region | Unchanged: the new project is in West EU (Ireland). |
