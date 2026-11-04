@@ -577,7 +577,7 @@ struct GraderScreen: View {
         ["Out of 100, with a letter grade",
          "IB 1–7, with the criterion bands",
          "Percentage, and how far off the next grade I am",
-         "No marks — just tell me what's weak"]
+         "Focus the feedback on what needs work"]
     }
 
     // MARK: - 4 · Marking
@@ -774,7 +774,7 @@ struct GraderScreen: View {
                 .font(Tokens.Typography.caption)
                 .foregroundStyle(Tokens.Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            PrimaryButton(title: notOnPlan ? "See the plans" : "Get more") {
+            PrimaryButton(title: notOnPlan ? "See the plans" : "Compare plans") {
                 showingPaywall = true
             }
         }

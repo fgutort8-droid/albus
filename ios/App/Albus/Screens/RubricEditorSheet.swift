@@ -179,13 +179,13 @@ struct RubricEditorSheet: View {
                 }
 
                 Section {
-                    SheetField(label: "Total marks") {
-                        TextField("Total marks", text: $draft.marksText)
+                    SheetField(label: "Reference total marks") {
+                        TextField("Reference total marks", text: $draft.marksText)
                             .keyboardType(.numberPad)
                     }
                     .sheetRow()
 
-                    Text("Leave blank to add up the criteria above.")
+                    Text("Leave blank to add up the criteria above. Grading uses your criteria and pasted rubric.")
                         .font(Tokens.Typography.micro)
                         .foregroundStyle(Tokens.Palette.inkMuted)
                         .sheetRow()
