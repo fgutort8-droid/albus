@@ -544,4 +544,31 @@ struct NotificationQueueRegressionTests {
         }
         #expect(named)
     }
+
+    /// The case the first test above cannot reach. A deadline on the three-day
+    /// reminder's own date gets a hand-in warning, which takes that morning's
+    /// slot, so there the reminder never arrives. The seven-day reminder lands
+    /// beyond the days that are planned in detail and has its slot to itself.
+    /// A rule of "the deadline is after the reminder" would pass the other two
+    /// tests and still say "Art in today" here.
+    @Test("a quiet-app reminder never names a deadline later the same day")
+    func dormancySkipsADeadlineLaterTheSameDay() {
+        for opened in 10...20 {
+            let result = planner.plan(context(
+                assignments: [assignment("Art", dueDay: opened + 7, dueHour: 17)],
+                lastOpened: at(opened, 8),
+                at: at(opened, 9)
+            ))
+            let final = result.filter { $0.kind == .dormantFinal }
+            // It must be there to be read, and Art must still be ahead of it:
+            // due that evening, hours after the reminder arrives.
+            #expect(final.count == 1)
+            #expect(final.allSatisfy { $0.fireDate < at(opened + 7, 17) })
+            for notification in final {
+                let text = notification.title + " " + notification.body
+                #expect(!text.contains("today"), "said: \(text)")
+                #expect(!text.contains("Art"), "said: \(text)")
+            }
+        }
+    }
 }
