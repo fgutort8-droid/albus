@@ -117,3 +117,20 @@ plan limit was checked against `public.plans` (`0034_three_plans.sql`,
 | "Unlimited" AI plans | **Qualified.** Plus allows 20 an hour and 60 a day, Pro 40 and 150, and a monthly fair-use cost ceiling (`20260916090000_tighten_fair_use_ceilings.sql`: Plus US$3, Pro US$6) sends plans to the phone. The terms and support page now say "subject to fair use". |
 | Free trial | `PurchaseService.freeTrial(for:)` offers one only when the product has a free-trial offer and Apple says the Apple ID is eligible; the caption then reads "<trial> free, then <billed price>. Renews automatically." The support page says "if the App Store offers you a free trial", never that every first-time student gets one. |
 | Hosting region | Unchanged: the new project is in West EU (Ireland). |
+
+## 14 November 2026: rubrics on the support page
+
+The app's wording was checked against the code in PR #48, which found that the
+plan's rubric number limits what syncs, not what can be saved. The support
+page's plans table still said "Saved rubrics … Unlimited", so it now uses the
+app's words.
+
+| Claim | Evidence and correction |
+| --- | --- |
+| Every rubric you save is kept on your phone | `RubricWriter.commit` saves to the phone first and has no plan check; the server sync runs afterwards and its failure leaves the local rubric in place. |
+| The plan's number is how many rubrics sync: 3 / 5 / no plan limit | **Corrected** from "Saved rubrics". `assert_rubric_limits` (latest definition in `20260830114547_close_direct_write_and_request_abuse.sql`) refuses a new server row past `plans.rubrics` with `RUBRIC_PLAN_LIMIT`; editing a rubric that is already there is always allowed. The paywall says "3 synced rubrics", "5 synced rubrics" and "Unlimited synced rubrics". |
+| AI plans and marking read a rubric from the account | `loadPersonalRubric` (`_shared/rubric.ts`) reads it by id through the caller's own client; neither `breakdown` nor `grade` accepts rubric text in the request. A rubric that never synced gets `RUBRIC_NOT_FOUND` from `breakdown`. |
+| Pro's "Unlimited" has safety limits | **Qualified.** The same trigger stops every account at 200 rubrics (`RUBRIC_CEILING`). `assert_active_task_limit`, in the same migration, stops every account at 2,000 tasks in total and a plan with no task limit at 500 open at once (`ASSIGNMENT_CEILING`). The paywall says "No plan limit; account safety limits apply." for both. |
+
+How the app should describe a rubric over the plan's number is an open owner
+decision; today it says "Couldn't sync this rubric. It's saved on your phone."
