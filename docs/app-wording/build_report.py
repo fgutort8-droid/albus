@@ -7,7 +7,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = Path(__file__).resolve().parent
-BASE = '48185b6'
+BASE = subprocess.check_output(['git', 'merge-base', 'origin/main', 'HEAD'], text=True).strip()  # main at the last merge
 APP = 'ios/App/Albus/'
 PREFIX = {'S': APP+'Screens/', 'V': APP+'Services/', 'M': APP+'Models/',
           'C': APP+'Components/', 'H': APP+'Shell/',

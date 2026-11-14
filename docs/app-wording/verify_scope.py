@@ -4,7 +4,7 @@ import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-BASE = '48185b6'
+BASE = subprocess.check_output(['git', 'merge-base', 'origin/main', 'HEAD'], text=True).strip()  # main at the last merge
 
 def git(*args):
     return subprocess.check_output(['git', *args], cwd=ROOT, text=True)
