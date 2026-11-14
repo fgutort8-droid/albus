@@ -87,3 +87,12 @@ Test run with 339 tests in 41 suites passed after 53.223 seconds. ** TEST SUCCEE
 ```
 
 The built test app's four service values in `Info.plist` were checked to be empty, without printing them. No UI test, sign-in or live call ran. `/tmp/albus-wording-dd` and `/tmp/albus-wording-core-dd` were removed afterwards.
+
+## Greptile's first review, 14 November 2026
+
+The branch was brought up to date with `main` (`1509386`) and published as PR #48. Greptile's one finding was correct and is fixed:
+
+- `AccountDeletionScreen.swift:27` said “If Apple cannot be reached, deletion can still go ahead.” That holds only for the server's revocation call. The phone first asks Apple to confirm (`AccountDeletionScreen.swift`, `removeAccount()`), and returns without sending any deletion request if that fails or is cancelled. The sentence now says both halves: “Deletion can't start without that confirmation. After it, deletion goes ahead even if Albus can't reach Apple to revoke access.”
+- Checked against `supabase/functions/delete-account/handler.ts` and `_shared/apple_auth.ts`: a timeout or network failure reaching Apple returns `revoked: false`, is logged as a warning, and the account is still deleted. A code Apple rejects (`APPLE_CODE_INVALID`) or a different Apple ID (`APPLE_ACCOUNT_MISMATCH`) is refused before anything is deleted, which is the confirmation not holding rather than Apple being unreachable.
+
+`build_report.py` and `verify_scope.py` were re-run after the change: 79 claim groups, 139 changed spans, 29 Swift files passed. The change is one string, so the unit tests were left to CI on the pushed commit.
