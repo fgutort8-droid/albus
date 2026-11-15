@@ -75,10 +75,15 @@ function readUsage(value: Anthropic.Usage): GenerationUsage | null {
  * a rubric, does not reason unless asked, so for those this is only headroom.
  *
  * Nothing here changes what the model writes, since it never sees this number:
- * a plan that fitted before is produced and billed exactly as before. 5,000 was
- * chosen to stay near what `private.ai_reservation_cost` sets aside for a plan:
- * 5,000 output tokens cost US$0.05 on Sonnet 5 and US$0.025 on Haiku 4.5,
- * against reservations of US$0.06 and US$0.03.
+ * a plan that fitted before is produced and billed exactly as before.
+ *
+ * What `private.ai_reservation_cost` sets aside for a plan is sized from this
+ * number, because a call is admitted against that figure before its real cost
+ * is known. 5,000 output tokens cost US$0.05 on Sonnet 5 and US$0.025 on Haiku
+ * 4.5. Migration 20261115120000 sets aside US$0.10 for a Sonnet plan, which
+ * also covers the largest rubric the app allows as input; US$0.03 still covers
+ * a Haiku plan, which has no rubric. Raise this and that migration's check
+ * fails until the reservation is raised with it (`plan_reservation_test.sql`).
  */
 export const BREAKDOWN_MAX_TOKENS = 5000;
 
