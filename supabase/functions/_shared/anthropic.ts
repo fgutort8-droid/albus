@@ -63,6 +63,25 @@ function readUsage(value: Anthropic.Usage): GenerationUsage | null {
   };
 }
 
+/**
+ * Room for a plan and for the reasoning the model does before writing it.
+ *
+ * Sonnet 5, which writes the plans that follow a rubric, reasons before it
+ * answers unless a request tells it not to, and this one does not. That
+ * reasoning is never returned, but it is billed as output and it is spent from
+ * `max_tokens`. The old 2,000 was sized for the visible plan alone, about 1,500
+ * tokens at twenty steps, so a rubric plan could run out partway through its
+ * JSON, or before writing any of it. Haiku 4.5, which writes the plans without
+ * a rubric, does not reason unless asked, so for those this is only headroom.
+ *
+ * Nothing here changes what the model writes, since it never sees this number:
+ * a plan that fitted before is produced and billed exactly as before. 5,000 was
+ * chosen to stay near what `private.ai_reservation_cost` sets aside for a plan:
+ * 5,000 output tokens cost US$0.05 on Sonnet 5 and US$0.025 on Haiku 4.5,
+ * against reservations of US$0.06 and US$0.03.
+ */
+export const BREAKDOWN_MAX_TOKENS = 5000;
+
 export async function generateBreakdown(
   model: string,
   systemPrompt: string,
@@ -72,7 +91,7 @@ export async function generateBreakdown(
   try {
     const response = await getClient().messages.create({
       model,
-      max_tokens: 2000,
+      max_tokens: BREAKDOWN_MAX_TOKENS,
       // cache_control on the system block: the rubric is identical for every
       // student taking this assessment. Below ~1024 tokens Anthropic will not
       // cache at all, so generic breakdowns simply miss — that is expected.
@@ -90,6 +109,16 @@ export async function generateBreakdown(
     usage = readUsage(response.usage);
     if (response.stop_reason === "refusal") {
       throw new HttpError(422, "REFUSED", "The assignment could not be planned.");
+    }
+
+    // Cut off, said out loud, as `gradeWork` does. Checked before the text is
+    // looked for: a plan cut off during the reasoning has no text block at all
+    // and used to be reported as an empty response, and one cut off partway
+    // through as invalid JSON. Either sent whoever read the ledger looking for
+    // a prompt or schema fault, when the call had simply run out of room.
+    if (response.stop_reason === "max_tokens") {
+      console.error("plan truncated at max_tokens — the output cap left no room");
+      throw new HttpError(502, "RESPONSE_TRUNCATED", "The plan ran long and was cut off.");
     }
 
     const block = response.content.find((b) => b.type === "text");
