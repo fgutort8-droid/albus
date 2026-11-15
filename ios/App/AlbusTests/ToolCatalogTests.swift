@@ -80,4 +80,46 @@ struct ToolCatalogTests {
         // every tool resolved, something is substituting a placeholder.
         #expect(ToolArtwork.bundledCount <= StudyTool.allCases.count)
     }
+
+    /// Four tiles were named after one brand and opened another site. Two of
+    /// the names were piracy sites, "Sci-Hub Alternatives" and "Library Genesis
+    /// Info", so a tile could read as sending students to pirated material.
+    @Test("no tool is named after a brand its tile does not open")
+    func namesMatchDestinations() {
+        let names = Set(StudyTool.allCases.map(\.name))
+        for old in ["Hemingway Grade", "Sci-Hub Alternatives", "Library Genesis Info", "IB Documents"] {
+            #expect(!names.contains(old), "\(old) is back")
+        }
+        #expect(StudyTool.hemingwayGrade.name == "Readability Formulas")
+        #expect(StudyTool.hemingwayGrade.url.host() == "readabilityformulas.com")
+        #expect(StudyTool.libraryGenesisInfo.name == "Open Library")
+        #expect(StudyTool.libraryGenesisInfo.url.host() == "openlibrary.org")
+        #expect(StudyTool.ibDocuments.name == "IB official site")
+        #expect(StudyTool.ibDocuments.url.host() == "ibo.org")
+    }
+
+    /// The renamed tools keep their case, because the bundled artwork is named
+    /// after it: `gen.py` pins the ID. Deriving it from the new name instead
+    /// would leave both tiles without the logo they shipped with.
+    @Test("a renamed tool still shows its logo")
+    @MainActor
+    func renamedToolsKeepTheirLogo() {
+        #expect(ToolArtwork.has(.hemingwayGrade))
+        #expect(ToolArtwork.has(.libraryGenesisInfo))
+    }
+
+    /// Checked by opening each one on 14 November 2026: Open Access Button and
+    /// Cram have shut down, typewritermode.com no longer exists, and
+    /// socratic.org lands on a Google Search page. usgs.gov and noisli.com do
+    /// not answer without `www.`, and a tile opens the host exactly as written.
+    @Test("no tile opens a site that has closed or an address that does not answer")
+    func destinationsAreStillThere() {
+        let hosts = Set(StudyTool.allCases.compactMap { $0.url.host() })
+        for gone in ["openaccessbutton.org", "typewritermode.com", "cram.com", "socratic.org",
+                     "usgs.gov", "noisli.com"] {
+            #expect(!hosts.contains(gone), "\(gone) is back")
+        }
+        #expect(hosts.contains("www.usgs.gov"))
+        #expect(hosts.contains("www.noisli.com"))
+    }
 }

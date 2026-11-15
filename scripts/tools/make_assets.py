@@ -22,14 +22,21 @@ LOGOS = HERE / "logos"
 CATALOGUE = HERE.parent.parent / "ios" / "App" / "Albus" / "Assets.xcassets"
 
 
+# Tools that keep an ID their name no longer derives: see `IDS` in gen.py.
+IDS: dict[str, str] = {}
+
+
 def load_tools():
     spec = importlib.util.spec_from_file_location("gen", HERE / "gen.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    IDS.update(module.IDS)
     return module.T
 
 
 def ident(name: str) -> str:
+    if name in IDS:
+        return IDS[name]
     s = re.sub(r"[^A-Za-z0-9]+", " ", name).title().replace(" ", "")
     s = s[0].lower() + s[1:]
     if s[0].isdigit():

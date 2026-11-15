@@ -21,7 +21,6 @@ T = [
  ("Merriam-Webster","merriam-webster.com","writing","character.book.closed","red","Definitions with real citations"),
  ("Oxford Learner's","oxfordlearnersdictionaries.com","writing","text.book.closed","blue","Definitions built for learners"),
  ("Purdue OWL","owl.purdue.edu","writing","graduationcap","slate","The citation rules, explained"),
- ("Hemingway Mode","typewritermode.com","writing","keyboard","neutral","No backspace. Just write"),
  ("Notion","notion.so","writing","square.stack.3d.up","neutral","Notes, docs and databases in one"),
  ("Obsidian","obsidian.md","writing","link","violet","Notes that link to each other"),
  ("Google Docs","docs.google.com","writing","doc.text","blue","Write and share in the browser"),
@@ -34,7 +33,7 @@ T = [
  ("Citation Machine","citationmachine.net","writing","quote.opening","orange","One citation, formatted fast"),
  ("ZoteroBib","zbib.org","writing","quote.bubble","red","A bibliography with no account"),
  ("Scribbr","scribbr.com","writing","checkmark.seal","green","Citation guides and a plagiarism check"),
- ("Hemingway Grade","readabilityformulas.com","writing","gauge.medium","amber","How hard your writing is to read"),
+ ("Readability Formulas","readabilityformulas.com","writing","gauge.medium","amber","How hard your writing is to read"),
  ("WordCounter","wordcounter.net","writing","number","neutral","Words, characters, reading time"),
  ("OneLook","onelook.com","writing","magnifyingglass","blue","Find the word from its meaning"),
 
@@ -48,7 +47,6 @@ T = [
  ("ResearchGate","researchgate.net","research","person.2","teal","Papers straight from the authors"),
  ("CORE","core.ac.uk","research","square.grid.3x3","slate","Open-access papers, all of them"),
  ("DOAJ","doaj.org","research","lock.open","green","Directory of open-access journals"),
- ("Sci-Hub Alternatives","openaccessbutton.org","research","key","amber","Legal routes to a paywalled paper"),
  ("Unpaywall","unpaywall.org","research","lock.open.rotation","green","Finds the free version of a paper"),
  ("Internet Archive","archive.org","research","clock.arrow.circlepath","slate","Books, pages and media, preserved"),
  ("Project Gutenberg","gutenberg.org","research","book","amber","Sixty thousand free books"),
@@ -61,7 +59,7 @@ T = [
  ("UN Data","data.un.org","research","globe.europe.africa","blue","Official international statistics"),
  ("Eurostat","ec.europa.eu","research","flag","blue","European statistics"),
  ("Google Dataset Search","datasetsearch.research.google.com","research","tablecells","blue","Finds datasets across the web"),
- ("Library Genesis Info","openlibrary.org","research","books.vertical.circle","amber","Open Library's lending catalogue"),
+ ("Open Library","openlibrary.org","research","books.vertical.circle","amber","A lending library of digitised books"),
  ("HathiTrust","hathitrust.org","research","text.book.closed.fill","slate","Digitised academic library"),
  ("JSTOR Daily","daily.jstor.org","research","newspaper","neutral","Scholarship explained readably"),
  ("Nature","nature.com","research","leaf","green","The journal, and its news"),
@@ -106,7 +104,7 @@ T = [
  ("Anatomy Atlas","innerbody.com","science","figure.stand","red","Human anatomy, layer by layer"),
  ("Genetics Home Ref","medlineplus.gov","science","allergens","teal","Genetics for non-specialists"),
  ("Climate Data","climate.gov","science","thermometer.medium","orange","Climate records and explainers"),
- ("USGS","usgs.gov","science","mountain.2","green","Geology, water and hazards"),
+ ("USGS","www.usgs.gov","science","mountain.2","green","Geology, water and hazards"),
  ("Encyclopedia of Life","eol.org","science","tortoise","green","Every known species"),
  ("Foldit","fold.it","science","hand.raised","violet","Protein folding as a puzzle"),
  ("Labster","labster.com","science","flask.fill","blue","Virtual lab work"),
@@ -158,7 +156,7 @@ T = [
  ("Toggl Track","toggl.com","focus","stopwatch","violet","Where the hours actually went"),
  ("Cold Turkey","getcoldturkey.com","focus","hand.raised.slash","slate","Blocks sites properly"),
  ("Freedom","freedom.to","focus","lock.shield","blue","Blocks across all your devices"),
- ("Noisli","noisli.com","focus","waveform","teal","Background noise that helps"),
+ ("Noisli","www.noisli.com","focus","waveform","teal","Background noise that helps"),
  ("Brain.fm","brain.fm","focus","headphones","violet","Music built for concentration"),
  ("Rainy Mood","rainymood.com","focus","cloud.rain","blue","Rain, and nothing else"),
  ("Lofi Girl","lofigirl.com","focus","music.note","orange","The one everybody uses"),
@@ -173,7 +171,6 @@ T = [
  ("Anki Web","ankiweb.net","memory","rectangle.stack.fill","blue","Your Anki deck in a browser"),
  ("RemNote","remnote.com","memory","note.text","violet","Notes that become flashcards"),
  ("Brainscape","brainscape.com","memory","square.stack","teal","Confidence-based repetition"),
- ("Cram","cram.com","memory","rectangle.split.3x1","orange","Flashcards without an account"),
  ("Knowt","knowt.com","memory","doc.text.fill","green","Turns your notes into a quiz"),
  ("GoodNotes","goodnotes.com","memory","hand.draw","green","Handwriting that stays searchable"),
  ("Notability","notability.com","memory","pencil.tip","amber","Notes with the lecture recorded"),
@@ -221,11 +218,10 @@ T = [
  ("CrashCourse","thecrashcourse.com","revision","play.tv","amber","A subject in ten-minute pieces"),
  ("Khan Academy SAT","khanacademy.org","revision","pencil.circle","green","Official SAT practice"),
  ("College Board","collegeboard.org","revision","building.columns.fill","blue","AP and SAT, from the source"),
- ("IB Documents","ibo.org","revision","doc.zipper","slate","The official IB subject guides"),
+ ("IB official site","ibo.org","revision","doc.zipper","slate","Programmes and news from the IB itself"),
  ("Quizizz","quizizz.com","revision","gamecontroller.fill","violet","Revision as a class game"),
  ("Kahoot","kahoot.com","revision","flag.checkered","violet","The one everyone shouts at"),
  ("Wooclap","wooclap.com","revision","hand.thumbsup","blue","Live questions in a lecture"),
- ("Socratic","socratic.org","revision","camera.metering.center.weighted","teal","Photograph the question"),
  ("Chegg Study","chegg.com","revision","book.circle","orange","Worked textbook solutions"),
  ("Course Hero","coursehero.com","revision","doc.on.clipboard","green","Course notes from other students"),
  ("Studocu","studocu.com","revision","doc.text.image","blue","Shared summaries and past papers"),
@@ -250,6 +246,17 @@ T = [
  ("Sleepyti.me","sleepyti.me","wellbeing","alarm","blue","When to go to bed, working back"),
  ("MyFitnessPal","myfitnesspal.com","wellbeing","fork.knife","orange","Eating like a person, not a student"),
 ]
+
+# A tool's Swift case, and so its `logo-<id>` asset, is normally derived from its
+# name. These three were renamed to the site they open (they were "Hemingway
+# Grade", "Library Genesis Info" and "IB Documents") and keep the ID they had,
+# so the case and the bundled logo did not move.
+IDS = {
+    "Readability Formulas": "hemingwayGrade",
+    "Open Library": "libraryGenesisInfo",
+    "IB official site": "ibDocuments",
+}
+assert set(IDS) <= {t[0] for t in T}, "IDS names a tool that is not in the catalogue: " + str(set(IDS) - {t[0] for t in T})
 
 CATS = [("ai","AI help"),("writing","Writing"),("research","Research"),("math","Maths"),("science","Science"),
         ("coding","Coding"),("languages","Languages"),("focus","Focus"),("memory","Notes & memory"),

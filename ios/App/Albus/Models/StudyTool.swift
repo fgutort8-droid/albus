@@ -36,7 +36,6 @@ enum StudyTool: String, CaseIterable, Identifiable, Sendable {
     case merriamWebster
     case oxfordLearnerS
     case purdueOwl
-    case hemingwayMode
     case notion
     case obsidian
     case googleDocs
@@ -61,7 +60,6 @@ enum StudyTool: String, CaseIterable, Identifiable, Sendable {
     case researchgate
     case core
     case doaj
-    case sciHubAlternatives
     case unpaywall
     case internetArchive
     case projectGutenberg
@@ -174,7 +172,6 @@ enum StudyTool: String, CaseIterable, Identifiable, Sendable {
     case ankiWeb
     case remnote
     case brainscape
-    case cram
     case knowt
     case goodnotes
     case notability
@@ -222,7 +219,6 @@ enum StudyTool: String, CaseIterable, Identifiable, Sendable {
     case quizizz
     case kahoot
     case wooclap
-    case socratic
     case cheggStudy
     case courseHero
     case studocu
@@ -406,7 +402,6 @@ enum StudyTool: String, CaseIterable, Identifiable, Sendable {
         case .merriamWebster: ("Merriam-Webster", "merriam-webster.com", .writing, "character.book.closed", "Definitions with real citations", [.vocabulary, .drafting], [], .light)
         case .oxfordLearnerS: ("Oxford Learner's", "oxfordlearnersdictionaries.com", .writing, "text.book.closed", "Definitions built for learners", [.vocabulary], [], .light)
         case .purdueOwl: ("Purdue OWL", "owl.purdue.edu", .writing, "graduationcap", "The citation rules, explained", [.citation], [], .light)
-        case .hemingwayMode: ("Hemingway Mode", "typewritermode.com", .writing, "keyboard", "No backspace. Just write", [.drafting], [], .light)
         case .notion: ("Notion", "notion.so", .writing, "square.stack.3d.up", "Notes, docs and databases in one", [.noteTaking, .planning, .outlining], [], .heavy)
         case .obsidian: ("Obsidian", "obsidian.md", .writing, "link", "Notes that link to each other", [.noteTaking, .outlining], [], .heavy)
         case .googleDocs: ("Google Docs", "docs.google.com", .writing, "doc.text", "Write and share in the browser", [.drafting], [], .light)
@@ -419,7 +414,7 @@ enum StudyTool: String, CaseIterable, Identifiable, Sendable {
         case .citationMachine: ("Citation Machine", "citationmachine.net", .writing, "quote.opening", "One citation, formatted fast", [.citation], [], .light)
         case .zoterobib: ("ZoteroBib", "zbib.org", .writing, "quote.bubble", "A bibliography with no account", [.citation], [], .light)
         case .scribbr: ("Scribbr", "scribbr.com", .writing, "checkmark.seal", "Citation guides and a plagiarism check", [.citation, .proofreading], [], .light)
-        case .hemingwayGrade: ("Hemingway Grade", "readabilityformulas.com", .writing, "gauge.medium", "How hard your writing is to read", [.editing], [], .light)
+        case .hemingwayGrade: ("Readability Formulas", "readabilityformulas.com", .writing, "gauge.medium", "How hard your writing is to read", [.editing], [], .light)
         case .wordcounter: ("WordCounter", "wordcounter.net", .writing, "number", "Words, characters, reading time", [.drafting], [], .light)
         case .onelook: ("OneLook", "onelook.com", .writing, "magnifyingglass", "Find the word from its meaning", [.drafting, .vocabulary], [], .light)
         case .googleScholar: ("Google Scholar", "scholar.google.com", .research, "graduationcap.circle", "Scholarly articles and citations", [.sourceResearch], [], .light)
@@ -431,7 +426,6 @@ enum StudyTool: String, CaseIterable, Identifiable, Sendable {
         case .researchgate: ("ResearchGate", "researchgate.net", .research, "person.2", "Papers straight from the authors", [.sourceResearch], [], .light)
         case .core: ("CORE", "core.ac.uk", .research, "square.grid.3x3", "Open-access papers, all of them", [.sourceResearch], [], .light)
         case .doaj: ("DOAJ", "doaj.org", .research, "lock.open", "Directory of open-access journals", [.sourceResearch], [], .light)
-        case .sciHubAlternatives: ("Sci-Hub Alternatives", "openaccessbutton.org", .research, "key", "Legal routes to a paywalled paper", [.sourceResearch], [], .light)
         case .unpaywall: ("Unpaywall", "unpaywall.org", .research, "lock.open.rotation", "Finds the free version of a paper", [.sourceResearch], [], .light)
         case .internetArchive: ("Internet Archive", "archive.org", .research, "clock.arrow.circlepath", "Books, pages and media, preserved", [.sourceResearch, .reading], [], .light)
         case .projectGutenberg: ("Project Gutenberg", "gutenberg.org", .research, "book", "Sixty thousand free books", [.reading], [.literature], .light)
@@ -444,7 +438,7 @@ enum StudyTool: String, CaseIterable, Identifiable, Sendable {
         case .unData: ("UN Data", "data.un.org", .research, "globe.europe.africa", "Official international statistics", [.dataAnalysis], [.socialScience], .light)
         case .eurostat: ("Eurostat", "ec.europa.eu", .research, "flag", "European statistics", [.dataAnalysis], [.socialScience], .light)
         case .googleDatasetSearch: ("Google Dataset Search", "datasetsearch.research.google.com", .research, "tablecells", "Finds datasets across the web", [.dataAnalysis], [], .light)
-        case .libraryGenesisInfo: ("Library Genesis Info", "openlibrary.org", .research, "books.vertical.circle", "Open Library's lending catalogue", [.sourceResearch, .reading], [], .light)
+        case .libraryGenesisInfo: ("Open Library", "openlibrary.org", .research, "books.vertical.circle", "A lending library of digitised books", [.sourceResearch, .reading], [], .light)
         case .hathitrust: ("HathiTrust", "hathitrust.org", .research, "text.book.closed.fill", "Digitised academic library", [.sourceResearch, .reading], [], .light)
         case .jstorDaily: ("JSTOR Daily", "daily.jstor.org", .research, "newspaper", "Scholarship explained readably", [.reading], [], .light)
         case .nature: ("Nature", "nature.com", .research, "leaf", "The journal, and its news", [.sourceResearch, .reading], [], .light)
@@ -485,7 +479,7 @@ enum StudyTool: String, CaseIterable, Identifiable, Sendable {
         case .anatomyAtlas: ("Anatomy Atlas", "innerbody.com", .science, "figure.stand", "Human anatomy, layer by layer", [.diagramming, .reading], [.biology], .light)
         case .geneticsHomeRef: ("Genetics Home Ref", "medlineplus.gov", .science, "allergens", "Genetics for non-specialists", [.reading], [.biology], .light)
         case .climateData: ("Climate Data", "climate.gov", .science, "thermometer.medium", "Climate records and explainers", [.dataAnalysis], [.earthScience], .light)
-        case .usgs: ("USGS", "usgs.gov", .science, "mountain.2", "Geology, water and hazards", [.dataAnalysis, .sourceResearch], [.earthScience], .light)
+        case .usgs: ("USGS", "www.usgs.gov", .science, "mountain.2", "Geology, water and hazards", [.dataAnalysis, .sourceResearch], [.earthScience], .light)
         case .encyclopediaOfLife: ("Encyclopedia of Life", "eol.org", .science, "tortoise", "Every known species", [.sourceResearch, .reading], [.biology], .light)
         case .foldit: ("Foldit", "fold.it", .science, "hand.raised", "Protein folding as a puzzle", [.simulation], [.biology], .light)
         case .labster: ("Labster", "labster.com", .science, "flask.fill", "Virtual lab work", [.simulation], [.biology, .chemistry, .physics], .heavy)
@@ -531,7 +525,7 @@ enum StudyTool: String, CaseIterable, Identifiable, Sendable {
         case .togglTrack: ("Toggl Track", "toggl.com", .focus, "stopwatch", "Where the hours actually went", [.focus, .planning], [], .light)
         case .coldTurkey: ("Cold Turkey", "getcoldturkey.com", .focus, "hand.raised.slash", "Blocks sites properly", [.focus], [], .heavy)
         case .freedom: ("Freedom", "freedom.to", .focus, "lock.shield", "Blocks across all your devices", [.focus], [], .heavy)
-        case .noisli: ("Noisli", "noisli.com", .focus, "waveform", "Background noise that helps", [.focus], [], .light)
+        case .noisli: ("Noisli", "www.noisli.com", .focus, "waveform", "Background noise that helps", [.focus], [], .light)
         case .brainFm: ("Brain.fm", "brain.fm", .focus, "headphones", "Music built for concentration", [.focus], [], .light)
         case .rainyMood: ("Rainy Mood", "rainymood.com", .focus, "cloud.rain", "Rain, and nothing else", [.focus], [], .light)
         case .lofiGirl: ("Lofi Girl", "lofigirl.com", .focus, "music.note", "The one everybody uses", [.focus], [], .light)
@@ -544,7 +538,6 @@ enum StudyTool: String, CaseIterable, Identifiable, Sendable {
         case .ankiWeb: ("Anki Web", "ankiweb.net", .memory, "rectangle.stack.fill", "Your Anki deck in a browser", [.memorisation, .spacedPractice], [], .heavy)
         case .remnote: ("RemNote", "remnote.com", .memory, "note.text", "Notes that become flashcards", [.noteTaking, .memorisation, .spacedPractice], [], .heavy)
         case .brainscape: ("Brainscape", "brainscape.com", .memory, "square.stack", "Confidence-based repetition", [.memorisation, .spacedPractice], [], .light)
-        case .cram: ("Cram", "cram.com", .memory, "rectangle.split.3x1", "Flashcards without an account", [.memorisation, .selfTesting], [], .light)
         case .knowt: ("Knowt", "knowt.com", .memory, "doc.text.fill", "Turns your notes into a quiz", [.noteTaking, .selfTesting, .memorisation], [], .light)
         case .goodnotes: ("GoodNotes", "goodnotes.com", .memory, "hand.draw", "Handwriting that stays searchable", [.noteTaking], [], .heavy)
         case .notability: ("Notability", "notability.com", .memory, "pencil.tip", "Notes with the lecture recorded", [.noteTaking], [], .heavy)
@@ -588,11 +581,10 @@ enum StudyTool: String, CaseIterable, Identifiable, Sendable {
         case .crashcourse: ("CrashCourse", "thecrashcourse.com", .revision, "play.tv", "A subject in ten-minute pieces", [.workedExamples, .reading], [], .light)
         case .khanAcademySat: ("Khan Academy SAT", "khanacademy.org", .revision, "pencil.circle", "Official SAT practice", [.problemPractice, .selfTesting], [], .light)
         case .collegeBoard: ("College Board", "collegeboard.org", .revision, "building.columns.fill", "AP and SAT, from the source", [.selfTesting, .sourceResearch], [], .light)
-        case .ibDocuments: ("IB Documents", "ibo.org", .revision, "doc.zipper", "The official IB subject guides", [.sourceResearch, .reading], [], .light)
+        case .ibDocuments: ("IB official site", "ibo.org", .revision, "doc.zipper", "Programmes and news from the IB itself", [.sourceResearch, .reading], [], .light)
         case .quizizz: ("Quizizz", "quizizz.com", .revision, "gamecontroller.fill", "Revision as a class game", [.selfTesting], [], .light)
         case .kahoot: ("Kahoot", "kahoot.com", .revision, "flag.checkered", "The one everyone shouts at", [.selfTesting], [], .light)
         case .wooclap: ("Wooclap", "wooclap.com", .revision, "hand.thumbsup", "Live questions in a lecture", [.selfTesting], [], .light)
-        case .socratic: ("Socratic", "socratic.org", .revision, "camera.metering.center.weighted", "Photograph the question", [.workedExamples, .errorAnalysis], [], .light)
         case .cheggStudy: ("Chegg Study", "chegg.com", .revision, "book.circle", "Worked textbook solutions", [.workedExamples], [], .light)
         case .courseHero: ("Course Hero", "coursehero.com", .revision, "doc.on.clipboard", "Course notes from other students", [.reading], [], .light)
         case .studocu: ("Studocu", "studocu.com", .revision, "doc.text.image", "Shared summaries and past papers", [.reading, .sourceResearch], [], .light)

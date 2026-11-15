@@ -3,7 +3,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import capabilities as cap
 spec = importlib.util.spec_from_file_location("gen", "gen.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-T, CATS = m.T, m.CATS
+T, CATS, IDS = m.T, m.CATS, m.IDS
 
 # Every tool must declare what it is for. A tool with no needs is invisible to
 # the selector, which is a silent failure — it simply never gets recommended.
@@ -23,7 +23,9 @@ def ident(name):
     if s[0].isdigit(): s = "t" + s
     return s
 
-ids = [ident(t[0]) for t in T]
+# A renamed tool keeps the ID `gen.IDS` gives it, so its case and its
+# `logo-<id>` asset stay where they were.
+ids = [IDS.get(t[0]) or ident(t[0]) for t in T]
 assert len(ids) == len(set(ids)), [i for i in ids if ids.count(i) > 1]
 
 out = ['''import Foundation
