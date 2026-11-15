@@ -141,7 +141,18 @@ public enum NotificationCopy {
                               facts: Facts) -> (title: String, body: String)? {
         guard let title = fill(template.title, facts),
               let body = fill(template.body, facts) else { return nil }
-        return (title, body)
+        return (plain(title), plain(body))
+    }
+
+    /// Without the bold markers the lines are written with.
+    ///
+    /// Thirty lines mark the thing to do next as `**{step}**`. A notification
+    /// shows its text exactly as given, so on a lock screen that read
+    /// "**Outline the method** is where you start", asterisks and all. Removed
+    /// here, where every line passes, so the text that is planned, compared
+    /// and scheduled is the text that is shown.
+    static func plain(_ text: String) -> String {
+        text.replacingOccurrences(of: "**", with: "")
     }
 
     private static func fill(_ text: String, _ facts: Facts) -> String? {

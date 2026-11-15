@@ -420,7 +420,11 @@ public struct NotificationPlanner: Sendable {
         var facts = Facts()
         let when = candidate.fireDate
         let open = context.assignments.filter { !$0.isComplete }
-        facts[.count] = String(open.count)
+        // Every line that uses `{count}` puts a plural after it: "{count}
+        // assignments are still open". So the fact is offered only for a
+        // number that reads as a plural, and one open assignment gets a line
+        // that does not count. It said "1 assignments are still open".
+        facts[.count] = Self.countable(open.count)
 
         if let assignment = candidate.assignment {
             facts[.assignment] = assignment.title
@@ -452,7 +456,8 @@ public struct NotificationPlanner: Sendable {
             facts[.assignment] = first.assignmentTitle
 
         case .planStoppedFitting:
-            facts[.count] = String(context.unplaceableCount)
+            // As above: "1 steps can't be scheduled" for a single step.
+            facts[.count] = Self.countable(context.unplaceableCount)
 
         case .momentum:
             facts[.weekMinutes] = durationPhrase(context.weeklyFocusedMinutes)
@@ -467,6 +472,12 @@ public struct NotificationPlanner: Sendable {
             break
         }
         return facts
+    }
+
+    /// A number for `{count}`, or nil for exactly one: the lines that use it
+    /// are written for several, and a line without it is picked instead.
+    static func countable(_ number: Int) -> String? {
+        number == 1 ? nil : String(number)
     }
 
     /// "1 step", "3 steps". A lock screen saying "1 days" looks like a bug
