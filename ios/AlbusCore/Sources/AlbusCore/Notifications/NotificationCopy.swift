@@ -139,9 +139,23 @@ public enum NotificationCopy {
     /// candidate filter should already have prevented.
     public static func render(_ template: CopyTemplate,
                               facts: Facts) -> (title: String, body: String)? {
-        guard let title = fill(template.title, facts),
-              let body = fill(template.body, facts) else { return nil }
+        guard let title = fill(plain(template.title), facts),
+              let body = fill(plain(template.body), facts) else { return nil }
         return (title, body)
+    }
+
+    /// A line without the bold markers it was written with.
+    ///
+    /// Thirty lines mark the thing to do next as `**{step}**`. A notification
+    /// shows its text exactly as given, so on a lock screen that read
+    /// "**Outline the method** is where you start", asterisks and all. Removed
+    /// where every line is rendered, so the text that is planned, compared and
+    /// scheduled is the text that is shown.
+    ///
+    /// From the line, before the facts go in, and never from the result: a
+    /// step a student named "Evaluate 2**3" must not arrive as "Evaluate 23".
+    static func plain(_ line: String) -> String {
+        line.replacingOccurrences(of: "**", with: "")
     }
 
     private static func fill(_ text: String, _ facts: Facts) -> String? {

@@ -58,21 +58,25 @@ struct CopyStructureTests {
     ///
     /// Deliberately excludes `.step`: a next step exists only when the
     /// assignment has an unfinished one, and `.lateBy` only for overdue work.
+    /// `.count` is in none of them: it is offered only for a number that reads
+    /// as a plural, so not when exactly one assignment is open. The quiet-app
+    /// kinds are promised nothing: an assignment is named only when it is due
+    /// a day or more after the reminder.
     /// A cell whose every line demanded an optional fact would go silent for a
     /// real student and pass a test that filled everything in.
     private static let guaranteed: [NotificationKind: Set<Fact>] = [
-        .morningBrief: [.count, .minutes, .steps, .step],
-        .windowNudge: [.count, .step, .minutes, .assignment],
-        .deadline72: [.count, .assignment, .steps, .minutes, .days, .hours],
-        .deadline24: [.count, .assignment, .steps, .minutes, .days, .hours],
-        .deadline03: [.count, .assignment, .steps, .minutes, .days, .hours],
-        .handInToday: [.count, .assignment, .steps, .minutes, .days, .hours],
-        .overdue: [.count, .assignment, .steps, .minutes, .days, .hours, .lateBy],
-        .planStoppedFitting: [.count, .assignment, .steps, .minutes, .days, .hours],
-        .momentum: [.count, .weekMinutes],
-        .dormantSoft: [.count, .assignment, .days],
-        .dormantFinal: [.count, .assignment, .days],
-        .backOff: [.count]
+        .morningBrief: [.minutes, .steps, .step],
+        .windowNudge: [.step, .minutes, .assignment],
+        .deadline72: [.assignment, .steps, .minutes, .days, .hours],
+        .deadline24: [.assignment, .steps, .minutes, .days, .hours],
+        .deadline03: [.assignment, .steps, .minutes, .days, .hours],
+        .handInToday: [.assignment, .steps, .minutes, .days, .hours],
+        .overdue: [.assignment, .steps, .minutes, .days, .hours, .lateBy],
+        .planStoppedFitting: [.assignment, .steps, .minutes, .days, .hours],
+        .momentum: [.weekMinutes],
+        .dormantSoft: [],
+        .dormantFinal: [],
+        .backOff: []
     ]
 
     /// The invariant that matters: given only what the planner promises, every

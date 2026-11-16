@@ -18,7 +18,7 @@ import Foundation
 ///   a moment with thin data can still speak.
 public enum Corpus {
     public static let all: [CopyTemplate] =
-        brief + nudge + deadline + handIn + overdue + unfit + engagement
+        brief + nudge + deadline + handIn + overdue + unfit + engagement + quiet
 }
 
 // MARK: - Morning brief
