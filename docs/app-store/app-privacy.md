@@ -1,102 +1,88 @@
 # App Privacy answers
 
-Audit date: 22 September 2026. Source baseline: `ac63956`; see `verification.md`
-for the built revision and dependency inventory. These are proposed App Store
-Connect answers, not a statement that production settings were inspected.
+Written 16 November 2026, checked against `main` at `1509386` with the open
+pull requests merged on top, and against the privacy policy dated 4 November
+(`website/privacy/index.html`). Production settings were not inspected.
 
-The app creates an anonymous account, but Apple still considers data associated
-with its account UUID or device identifier **linked to the user**. Hashing the
-IDFV or removing ownership after deletion does not make collection unlinked.
-No inspected path combines data with other companies' data for advertising or
-sends it to a data broker: **tracking is No throughout**.
+App Store Connect asks these in order. Each answer below says what to tick.
 
-The manifest covers the app's collection. App Store Connect must also include
-partners' collection. Sources: [Apple's privacy labels](https://developer.apple.com/app-store/app-privacy-details/),
-[manifest data types](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacycollecteddatatypes/nsprivacycollecteddatatype),
-and [RevenueCat's disclosure guidance](https://www.revenuecat.com/docs/platform-resources/apple-platform-resources/apple-app-privacy).
+## 1. Data collection
 
-## Answers for every Apple data type
+**Do you or your third-party partners collect data from this app?** Yes.
 
-For a No row, purpose and linkage are not applicable; tracking remains No.
-For every Yes row below, select **App Functionality**, **Linked: Yes**, **Tracking: No**.
-This includes authentication, delivering requested features, account limits,
-security and subscription access. Do not select advertising/marketing purposes.
+## 2. Data types to tick
 
-| Apple data type | Collected? | Evidence / scope |
+Tick exactly these eight. They are the eight in the app's privacy manifest
+(`ios/App/Albus/PrivacyInfo.xcprivacy`), which `scripts/verify-app-privacy.py`
+checks against the built app.
+
+| Section in App Store Connect | Tick | What it is in Albus |
 | --- | --- | --- |
-| Name | No | `OnboardingFlow.swift` stores the optional display name in `Preferences.swift` on the device. `ProfileService.swift` sends subject names, not the student's name. A `profiles.display_name` column alone is not evidence of collection by this client. |
-| Email Address | Yes | Since Oct 2026 students sign in with Apple only. Apple can share the address or a private relay address (`SignInScreen.swift` requests the `email` scope only, never the name). Stored by Supabase Auth with the account and used only to find the account when the student writes to support; Albus sends no email. External support email is addressed separately below. |
-| Phone Number | No | No phone field, telephony read or phone-auth flow in app sources. |
-| Physical Address | No | No address collection or shipping flow. |
-| Other User Contact Info | No | No social handle/contact field sent by the client. |
-| Health | No | No HealthKit/medical-data feature. Incidental text inside a student's assignment is handled as Other User Content, not structured health collection. |
-| Fitness | No | Study timers measure studying, not exercise; no motion/fitness collection. |
-| Payment Info | No | No card/bank fields. Apple handles payment credentials; subscription transaction identifiers are Purchase History. |
-| Credit Info | No | No credit scoring or credit fields. |
-| Other Financial Info | No | No student income, assets or debt. Developer AI costs and subscription receipts are not the student's financial profile. |
-| Precise Location | No | No CoreLocation or coordinates. |
-| Coarse Location | No in app code | `signals.ts` groups IP prefixes for abuse prevention; it does not geolocate. Verify provider settings before submission: if a partner derives/stores location, change this answer. |
-| Sensitive Info | No | No dedicated sensitive-attribute collection, biometric identification or inference. Free-form work is Other User Content. |
-| Contacts | No | No Contacts framework or contact-picker access. |
-| Emails or Text Messages | No | No access to inbox/SMS or messaging feature. Pasted assignment prose is Other User Content. |
-| Photos or Videos | No | `WorkExtractor.swift` converts selected images/PDFs locally; `GradingService.Request` transmits text, not image/video bytes. |
-| Audio Data | No | No recording or audio upload path. |
-| Gameplay Content | No | No game or gameplay uploads. |
-| Customer Support | No in-app collection | No in-app support form/upload. The policy's mailto opens an external mail client; support handling needs owner confirmation below. |
-| Other User Content | Yes | `PlanService.swift`, `ProfileService.swift`, `RubricService.swift`, `GradingService.swift`: assignment/subject names, deadlines, rubrics, submitted text, presentation instructions and work titles. `grade/index.ts` persists feedback and quotes; `grade_prompt.ts` caps each quote at 400 characters. Full text also reaches Anthropic, whose retention is not assumed to be zero. |
-| Browsing History | No | `ToolsScreen.swift` opens fixed tool URLs externally with `openURL`. It does not receive Safari browsing history. |
-| Search History | No | Tool filtering is local `@State query` in `ToolsScreen.swift`; no search endpoint or query logging. |
-| User ID | Yes | `SessionService.swift`, `_shared/auth.ts`, ownership columns and request JWTs, plus the identifier Sign in with Apple issues for Albus (`auth.identities`). Accounts made anonymously before 2 Oct 2026 keep their UUIDs. |
-| Device ID | Yes | `DeviceSignal.swift` sends IDFV; `_shared/signals.ts` stores a keyed hash associated with an account. No IDFA collection. |
-| Purchase History | Yes, backend path | `revenuecat-webhook/index.ts` and `0010_ratelimit_and_subscriptions.sql` accept/store product and transaction state linked to the account. In-app buying is blocked on payments/app; retaining this disclosure covers the existing backend and intended release. |
-| Product Interaction | Yes | `_shared/quota.ts` / `ai_usage` retain requested AI feature, attempt/completion state and usage counts to enforce allowances and control service cost. This is not an advertising event stream. |
-| Advertising Data | No | No ads or advertising SDK/event path. |
-| Other Usage Data | No additional category | The known off-device feature-use records are Product Interaction. `CompletionRecord` and `NotificationState` are local; no completion-upload consumer was found. Do not infer collection from an unused server table or a stale sync comment. |
-| Crash Data | No app collector | No crash-reporting SDK/uploader found. Apple's platform collection is separate from developer-added collection. Recheck when adding any diagnostics SDK. |
-| Performance Data | No app collector | No launch/freeze/energy or request-latency uploader in app code. Provider log configuration remains an explicit release check below. |
-| Other Diagnostic Data | Yes | `_shared/http.ts`, `_shared/signals.ts`, `_shared/quota.ts` record errors, refusal kinds and failed requests; some records carry account identifiers. |
-| Environment Scanning | No | No ARKit scene/depth collection. Document OCR is not environment reconstruction. |
-| Hands | No | No hand tracking. |
-| Head | No | No head tracking. |
-| Other Data | Yes | `_shared/signals.ts` retains keyed network-prefix observations for abuse prevention. Treat these as linked security data, not location or anonymous aggregate statistics. |
+| Contact Info | **Email Address** | The address Sign in with Apple shares, which can be a private relay address. Kept with the account, used only to find the account when the student writes to support. Albus sends no email. |
+| User Content | **Other User Content** | Task details, subjects, saved rubrics, notes, marking results with their quotes (up to 400 characters each), work titles, and the text sent to Anthropic for a plan or a marking. |
+| Identifiers | **User ID** | The account's random identifier, and the identifier Apple makes for Albus. RevenueCat is given the account identifier too. |
+| Identifiers | **Device ID** | The identifier Apple gives apps from one developer (IDFV), sent to stop repeated free accounts and stored only as a keyed one-way code. Not the advertising identifier. |
+| Purchases | **Purchase History** | Subscription product, dates, status and transaction identifiers, from RevenueCat. |
+| Usage Data | **Product Interaction** | A record of each AI request: its kind, model, size and cost, used to apply plan limits and to cap spending. No content. |
+| Diagnostics | **Other Diagnostic Data** | Short security and error records: which feature, an error code, a refusal kind. No content. |
+| Other Data | **Other Data Types** | The network part of the IP address, stored only as a keyed one-way code, for abuse prevention. |
 
-File references above are under `ios/App/Albus/{Services,Screens,Models}` or
-`supabase/{functions,migrations}` as named. The table deliberately uses code
-consumers, not table existence, as evidence.
+Leave every other type unticked. The ones a reviewer might expect, and why
+they are not ticked:
 
-## Policy reconciliation and release decisions
+| Type | Why not |
+| --- | --- |
+| Name | Sign in with Apple is asked for the email only, never the name (`SignInScreen.swift`). The optional name typed in onboarding stays on the phone, for the greeting (`Preferences.firstName`). |
+| Photos or Videos | A photo or PDF is turned into text on the phone (`WorkExtractor`). Only the text is sent. |
+| Coarse Location | The IP address is shortened and hashed, never turned into a place. |
+| Customer Support | There is no support form in the app. A support email goes through the student's own mail app. See the note at the end. |
+| Other Usage Data | Study-time records (`CompletionRecord`) and reminder history stay on the phone. |
+| Crash Data, Performance Data | No crash reporter or analytics SDK. Supabase's SDK includes OpenTelemetry's API only to pass a trace header from a span the app starts; Albus starts none and has no exporter. |
+| Browsing History, Search History | Study tools open in the browser outside Albus. Searching the tool list happens on the phone. |
+| Payment Info | Apple takes the payment. Albus never sees card details. |
 
-Starting point: `origin/codex/privacy-support:website/privacy-audit.md` and
-`website/privacy/index.html` at `31bee61` (PR #6). That branch is read-only for
-this task; none of its files were changed here.
+## 3. For each ticked type
 
-- Agreement: original files stay on-device, while extracted marking text goes
-  to Anthropic; saved feedback may contain excerpts. Other User Content is Yes.
-- Agreement: no required contact details, ads, cross-app tracking or remote push
-  service. Optional local name/preferences are not off-device collection.
-- Agreement: deletion does not erase all financial/security evidence. Linked
-  collection must still be disclosed even if ownership is nulled later.
-- Clarification: no third-party study-activity analytics SDK does **not** mean no
-  Product Interaction data. AI request accounting is described by the policy and
-  is disclosed here as functionality, not marketing analytics.
-- **Cloudflare:** none. The Turnstile CAPTCHA client was removed in Oct 2026,
-  when sign-in became Apple only (GoTrue never asks for a CAPTCHA on an Apple
-  ID-token sign-in), so no build loads Cloudflare's script.
-- **Partner verification needed:** Supabase's auth/hosting logs may contain raw
-  IP/request metadata beyond the app's hashed tables. The policy acknowledges
-  provider logs, but their production configuration/retention was not inspected.
-  Confirm whether provider performance or geolocation collection changes the No
-  rows above before submitting. No production access was used for this audit.
-- **Support decision:** external emails to fgutort8@gmail.com can contain a name,
-  email address and support content. There is no in-app support collection in
-  this build. The owner must confirm whether the operational support channel
-  qualifies for Apple's optional disclosure; if it does not, disclose Email
-  Address, Customer Support and Name when collected, linked, for functionality.
-- **Payments gap:** RevenueCat is absent from the audited target and the purchase
-  button is a stub. PR #6 describes working purchases/restore; that promise is
-  ahead of this build. After payments/app lands, inspect its bundled manifest,
-  actual configured integrations and user-ID linkage. RevenueCat's manifest
-  alone does not answer the developer's App Store Connect questionnaire.
+App Store Connect asks three questions per type. The answers are the same for
+all eight:
 
-These are release gates, not permission to invent reassuring answers. The owner
-must reconcile actual partner settings before using this document as final ASC input.
+| Question | Answer |
+| --- | --- |
+| Purposes | **App Functionality** only. Not Analytics, not Product Personalization, not Developer's Advertising or Marketing, not Third-Party Advertising. |
+| Is it linked to the user's identity? | **Yes.** Every one is stored with, or can be matched to, the account. Hashing the device identifier or the IP address does not make it unlinked, because the code is kept with the account. |
+| Is it used for tracking? | **No.** Nothing is combined with other companies' data for advertising, and nothing goes to a data broker. |
+
+Why App Functionality covers the security and cost records: Apple's
+definition includes preventing fraud, implementing security measures and
+minimising server costs.
+
+## 4. Partners
+
+The answers above already include them.
+
+- **RevenueCat**: its SDK's own manifest declares Purchase History only. In
+  Albus it is linked, because RevenueCat is given the account identifier
+  (`PurchaseService.identify`).
+- **Anthropic**: receives the plan or marking text from the server, not from
+  the app. Covered by Other User Content.
+- **Supabase**: hosts the database and functions. Its own operational logs may
+  keep IP addresses and request details; the privacy policy says so. Those
+  logs were not inspected (no production access).
+
+## 5. Support email
+
+The policy names a support address. A student who writes there chooses to, in
+their own mail app, and Albus collects nothing through the app. That is why
+Customer Support and Name are not ticked. If Albus ever adds a support form or
+a "contact us" screen that sends from inside the app, tick Customer Support
+(and Name, if it asks for one).
+
+## 6. After answering
+
+The App Store's privacy summary will read roughly: "Data Linked to You:
+Contact Info, User Content, Identifiers, Purchases, Usage Data, Diagnostics,
+Other Data" and "Data Used to Track You: none". That matches the policy's
+"No ads, no advertising identifier and no tracking across apps or websites".
+
+Re-check this page if any of these change: a new SDK, a support form, crash
+reporting, or anything that sends a photo or file instead of its text.
