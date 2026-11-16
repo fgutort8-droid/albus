@@ -14,6 +14,7 @@ Deno.test("provider response accounting survives unusable results without loggin
   const handlers: ((r: Request) => Promise<Response>)[] = [];
   const calls: { name: string; args: Record<string, unknown> }[] = [];
   const logs: string[] = [];
+  const providerRequests: Record<string, unknown>[] = [];
   let mode = "refusal";
   let providerCalls = 0;
   const usage = {
@@ -39,6 +40,7 @@ Deno.test("provider response accounting survives unusable results without loggin
       const url = new URL(request.url);
       if (url.hostname === "api.anthropic.com") {
         providerCalls++;
+        providerRequests.push(await request.clone().json());
         if (mode === "transport") throw new Error("SENTINEL_STUDENT_CONTENT");
         if (["rejected", "rate-limit", "server-error"].includes(mode)) {
           return reply({
@@ -51,13 +53,19 @@ Deno.test("provider response accounting survives unusable results without loggin
           type: "message",
           role: "assistant",
           model: "unit-model",
-          content: mode === "empty" ? [] : [{
-            type: "text",
-            text: mode === "malformed" ? "SENTINEL_STUDENT_CONTENT" : '{"ok":true}',
-          }],
+          // Cut off while still reasoning: the reasoning comes back as a block
+          // with no text in it, and there is no text block at all.
+          content: mode === "empty"
+            ? []
+            : mode === "truncated-reasoning"
+            ? [{ type: "thinking", thinking: "", signature: "unit" }]
+            : [{
+              type: "text",
+              text: mode === "malformed" ? "SENTINEL_STUDENT_CONTENT" : '{"ok":true}',
+            }],
           stop_reason: mode === "refusal"
             ? "refusal"
-            : mode === "truncated"
+            : mode.startsWith("truncated")
             ? "max_tokens"
             : "end_turn",
           usage: mode === "invalid-usage" ? { ...usage, input_tokens: -1 } : usage,
@@ -90,7 +98,8 @@ Deno.test("provider response accounting survives unusable results without loggin
           "refusal",
           "malformed",
           "empty",
-          ...(endpoint === 1 ? ["truncated"] : []),
+          "truncated",
+          "truncated-reasoning",
           "transport",
           "rejected",
           "rate-limit",
@@ -118,7 +127,8 @@ Deno.test("provider response accounting survives unusable results without loggin
             }),
           );
           assertEquals(response.status >= 400, true);
-          assertEquals((await response.text()).includes("SENTINEL_STUDENT_CONTENT"), false);
+          const answer = await response.text();
+          assertEquals(answer.includes("SENTINEL_STUDENT_CONTENT"), false);
           assertEquals(providerCalls, 1, "one reservation must permit only one provider request");
           const writes = calls.filter((c) => c.name === "finalize_ai_usage");
           assertEquals(writes.length, 1);
@@ -128,6 +138,14 @@ Deno.test("provider response accounting survives unusable results without loggin
           assertEquals(writes[0].args.p_output_tokens, known ? 20 : null);
           assertEquals(writes[0].args.p_cache_write_tokens, known ? 4000 : null);
           assertEquals(writes[0].args.p_cache_read_tokens, known ? 5000 : null);
+          // A call that ran out of room is named as that, to the phone and in
+          // the ledger, on both endpoints and wherever it was cut. Planning
+          // used to report it as an empty or a malformed answer.
+          if (failure.startsWith("truncated")) {
+            assertEquals(JSON.parse(answer).error, "RESPONSE_TRUNCATED");
+            assertEquals(writes[0].args.p_failure_code, "RESPONSE_TRUNCATED");
+            assertEquals(logs.some((line) => line.includes("truncated at max_tokens")), true);
+          }
           assertEquals(JSON.stringify(writes).includes("SENTINEL_STUDENT_CONTENT"), false);
           assertEquals(logs.join(" ").includes("SENTINEL_STUDENT_CONTENT"), false);
         });
@@ -152,6 +170,21 @@ Deno.test("provider response accounting survives unusable results without loggin
       assertEquals(write.args.p_input_tokens, null);
       assertEquals(write.args.p_output_tokens, null);
       assertEquals(write.args.p_failure_code, "INVALID_PROVIDER_USAGE");
+    });
+    await t.step("a plan request leaves room for the model's reasoning", async () => {
+      mode = "success";
+      providerRequests.length = 0;
+      const { BREAKDOWN_MAX_TOKENS, generateBreakdown } = await import("../_shared/anthropic.ts");
+      await generateBreakdown("unit-model", "Synthetic system", "Synthetic task");
+      assertEquals(providerRequests.length, 1);
+      assertEquals(providerRequests[0].max_tokens, BREAKDOWN_MAX_TOKENS);
+      // A twenty-step plan is about 1,500 tokens, and the reasoning before it
+      // is spent from the same allowance. 2,000 left it almost none.
+      assertEquals(BREAKDOWN_MAX_TOKENS >= 2 * 1500, true);
+      // Not sent, so the models keep their own defaults. Sending either would
+      // change what they write, which nothing here has measured.
+      assertEquals("thinking" in providerRequests[0], false);
+      assertEquals("effort" in ((providerRequests[0].output_config ?? {}) as object), false);
     });
     await t.step("valid structured output retains all token fields", async () => {
       mode = "success";

@@ -63,6 +63,44 @@ function readUsage(value: Anthropic.Usage): GenerationUsage | null {
   };
 }
 
+/**
+ * Room for a plan and for the reasoning the model does before writing it.
+ *
+ * Sonnet 5, which writes the plans that follow a rubric, reasons before it
+ * answers unless a request tells it not to, and this one does not. That
+ * reasoning is never returned, but it is billed as output and it is spent from
+ * `max_tokens`. The old 2,000 was sized for the visible plan alone, about 1,500
+ * tokens at twenty steps, so a rubric plan could run out partway through its
+ * JSON, or before writing any of it. Haiku 4.5, which writes the plans without
+ * a rubric, does not reason unless asked, so for those this is only headroom.
+ *
+ * Nothing here changes what the model writes, since it never sees this number:
+ * a plan that fitted before is produced and billed exactly as before.
+ *
+ * What `private.ai_reservation_cost` sets aside for a plan is sized from this
+ * number and the one below, because a call is admitted against that figure
+ * before its real cost is known. See migration 20261115120000.
+ */
+export const BREAKDOWN_MAX_TOKENS = 5000;
+
+/**
+ * The input a rubric plan's reservation covers, in tokens.
+ *
+ * The largest prompt the app can send is about 105,000 characters: forty
+ * criteria of 2,000 characters, an 8,000-character rubric body, the notes and
+ * the instructions. At three characters a token, which is denser than English
+ * prose (about four), that is 35,000 tokens, and the answer's schema adds a few
+ * hundred. `prompt_test.ts` builds that prompt and fails if it outgrows this
+ * number; `plan_reservation_test.sql` checks the reservation pays for this
+ * much input and `BREAKDOWN_MAX_TOKENS` of output.
+ *
+ * It is a ceiling for ordinary text, not a proof. Text that is mostly digits
+ * or symbols packs more tokens into a character, and only counting tokens
+ * before every call would bound that. The ledger records what such a call
+ * really cost, as it does for every call.
+ */
+export const BREAKDOWN_INPUT_TOKENS_COVERED = 36000;
+
 export async function generateBreakdown(
   model: string,
   systemPrompt: string,
@@ -72,7 +110,7 @@ export async function generateBreakdown(
   try {
     const response = await getClient().messages.create({
       model,
-      max_tokens: 2000,
+      max_tokens: BREAKDOWN_MAX_TOKENS,
       // cache_control on the system block: the rubric is identical for every
       // student taking this assessment. Below ~1024 tokens Anthropic will not
       // cache at all, so generic breakdowns simply miss — that is expected.
@@ -90,6 +128,16 @@ export async function generateBreakdown(
     usage = readUsage(response.usage);
     if (response.stop_reason === "refusal") {
       throw new HttpError(422, "REFUSED", "The assignment could not be planned.");
+    }
+
+    // Cut off, said out loud, as `gradeWork` does. Checked before the text is
+    // looked for: a plan cut off during the reasoning has no text block at all
+    // and used to be reported as an empty response, and one cut off partway
+    // through as invalid JSON. Either sent whoever read the ledger looking for
+    // a prompt or schema fault, when the call had simply run out of room.
+    if (response.stop_reason === "max_tokens") {
+      console.error("plan truncated at max_tokens — the output cap left no room");
+      throw new HttpError(502, "RESPONSE_TRUNCATED", "The plan ran long and was cut off.");
     }
 
     const block = response.content.find((b) => b.type === "text");
