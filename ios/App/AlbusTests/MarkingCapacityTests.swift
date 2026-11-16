@@ -12,7 +12,8 @@ import Testing
 /// again with the same work and settings." Trying again meets the same refusal
 /// until the day's spending has aged out, and nothing told a student who had
 /// done nothing wrong that it was not their work or their connection. Found in
-/// the pre-submission audit of November 2026.
+/// the pre-submission audit of November 2026, finding A3
+/// (`docs/audit/2026-11-pre-submission.md`).
 @Suite("Marking at capacity")
 struct MarkingCapacityTests {
 
