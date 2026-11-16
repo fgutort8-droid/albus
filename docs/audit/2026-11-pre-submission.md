@@ -46,12 +46,12 @@ database together, and looks for what would:
 | A7 | Deleting an account does not revoke Sign in with Apple until the Apple secrets are set | Confirmed by reading | 1, 3 | Owner step before submission |
 | A8 | A fourth rubric on Free is refused by the server, and the app says only "Couldn't sync this rubric" | Confirmed | 5, 2 | Owner decision on wording |
 | A9 | After a second account takes over a phone that held another's tasks, the app can show Free until the next refresh | Plausible | 3 | After launch |
-| A10 | The privacy policy's sentence about Apple being unreachable has the gap Greptile found in the app | Confirmed | 5 | Website fix, after #50 |
+| A10 | The privacy policy's sentence about Apple being unreachable has the gap Greptile found in the app | Confirmed | 5 | Fixed in #58 |
 | A11 | Four tool tiles opened sites that have closed, and two opened addresses that do not answer | Confirmed in a browser | 1, 5 | Fixed in #51 |
 | A12 | The first plan in onboarding waits for the AI answer with no upper limit short of the network timeout | Confirmed by reading | — | After launch |
 | A13 | The Grader's "Take a photo" row opens the photo library, not the camera | Confirmed by reading | 1, 5 | One-line app fix, after #48 |
-| A14 | The privacy policy says study-time records "contain no text"; each holds the subject's name | Confirmed by reading | 5 | Website fix, after #50 |
-| A15 | The website's home page says Albus "marks your work" without saying marking is paid | Confirmed | 5 | Website fix, after #50 |
+| A14 | The privacy policy says study-time records "contain no text"; each holds the subject's name | Confirmed by reading | 5 | Fixed in #58 |
+| A15 | The website's home page says Albus "marks your work" without saying marking is paid | Confirmed | 5 | Fixed in #58 |
 | A16 | A marking that finishes after the student signs out is used but not kept on the phone | Confirmed by reading | 2 | After launch; resubmitting is free |
 | A17 | The plan prompt still introduces Albus as a planner "for IB, AP and university students" | Confirmed | — | After launch, with a measured comparison |
 | A18 | Prompt caching can never engage for the plans Haiku 4.5 writes | Confirmed from the API reference | 4 | After launch |
@@ -100,7 +100,8 @@ capacity".
   can send (measured by `prompt_test.ts`) plus 5,000 output tokens, and
   `plan_reservation_test.sql` fails if the two drift apart. It needs the
   migration applied and `breakdown` and `grade` deployed (they share
-  `_shared/anthropic.ts`).
+  `_shared/anthropic.ts`), which `scripts/deploy-plan-cutoff-2026-11-16.sh`
+  does (#57), after #52 is merged.
 - **What it costs.** A plan that fitted before is produced and billed exactly
   as before; the model never sees `max_tokens`. Admission is stricter: a rubric
   plan now needs US$0.125 of room in the pool instead of US$0.06.
@@ -402,9 +403,16 @@ Listed so the next reader knows these were looked at, not skipped.
   cascade` or `set null`; the only references without a rule point at fixed
   tables (plans, curricula, webhook events), so nothing can block a deletion.
   `account_erasure_test.sql` finds every table in `public` and `private` by
-  itself, so a table added later cannot be missed, and checks each one holds
-  no trace of the deleted account apart from the disclosed payment records.
-  It passed on 15 November on a database rebuilt from every migration.
+  itself and checks each one holds no trace of the deleted account apart from
+  the disclosed payment records. It passed on 15 November on a database
+  rebuilt from every migration.
+- **What that test does not cover.** It puts the account's rows only into the
+  tables its fixture names. A table added later, with no fixture rows, passes
+  the check trivially, even if deletion would leave its rows behind. Today
+  that gap is closed by the foreign keys above, but only for a table whose
+  account column references `auth.users`. So every new table that holds a
+  student's data needs a foreign key with `on delete cascade` or `set null`,
+  and rows in the erasure test's fixture. (Found by Greptile on #56.)
 - **Task sync.** `sync_my_assignments` and `release_my_other_assignments`
   (`20261006120000`) act only on the caller's rows, take the same lock as the
   task-limit trigger, refuse more than 500 ids, and a reopen still meets the
