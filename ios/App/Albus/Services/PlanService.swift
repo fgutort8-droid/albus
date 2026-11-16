@@ -76,16 +76,16 @@ struct PlanService {
             case .aiPlansNotIncluded:
                 "AI plans aren't included in your plan."
             case .rateLimited:
-                "That's a lot of planning at once. Try again shortly."
+                "That's a lot of planning at once. Try again later."
             case .fairUseReached:
-                "This account has reached its monthly AI safety limit. "
+                "This account has reached its AI safety limit for the last 30 days. "
                 + "Existing tasks still work, and capacity returns gradually over 30 days."
             case .offline:
                 "No connection."
             case .unusableResponse:
                 ModelResponseFailure.retryableDescription
             case .unavailable:
-                "Albus can't plan right now. Your assignment is saved."
+                "Albus can't write an AI plan right now."
             case .rejected(let why):
                 why
             }
@@ -119,10 +119,10 @@ struct PlanService {
             switch self {
             case .aiPlansUsed:
                 "You've used this week's AI plans, so Albus split this into study "
-                + "sessions for you. Plus writes a step-by-step plan every time."
+                + "sessions for you. Plus includes unlimited AI plans within fair use."
             case .aiPlansNotIncluded:
                 "Albus split this into study sessions for you. "
-                + "Plus writes a step-by-step plan every time."
+                + "Plus includes unlimited AI plans within fair use."
             case .offline:
                 "No connection, so Albus split this into study sessions for you."
             default:

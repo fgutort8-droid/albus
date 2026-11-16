@@ -212,8 +212,8 @@ struct PricingTests {
     @Test("each plan's card names its own AI-plan allowance")
     func aiPlanAllowanceIsOnTheCard() {
         #expect(PaywallScreen.Plan.free.lines.first?.0 == "5 AI plans a week")
-        #expect(PaywallScreen.Plan.plus.lines.first?.0 == "Unlimited AI plans")
-        #expect(PaywallScreen.Plan.pro.lines.first?.0 == "Unlimited AI plans")
+        #expect(PaywallScreen.Plan.plus.lines.first?.0 == "Unlimited AI plans within fair use")
+        #expect(PaywallScreen.Plan.pro.lines.first?.0 == "Unlimited AI plans within fair use")
     }
 
     /// "Answers back" sold Ask Albus, which no longer exists. A pitch that

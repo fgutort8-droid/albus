@@ -119,7 +119,7 @@ struct NotificationSettingsScreen: View {
     @ViewBuilder private func timing(_ preferences: Bindable<Preferences>) -> some View {
         section("When") {
             stepper("Morning brief", value: preferences.briefHour, range: 5...11)
-            Toggle("Nudge me when a block starts", isOn: preferences.nudgeEnabled)
+            Toggle("Nudge me at the first block each day", isOn: preferences.nudgeEnabled)
             stepper("Quiet from", value: preferences.quietStartHour, range: 18...23)
             stepper("Quiet until", value: preferences.quietEndHour, range: 4...11)
 
@@ -134,8 +134,8 @@ struct NotificationSettingsScreen: View {
 
             // Said plainly, because the alternative is a student believing a
             // hand-in warning was suppressed to honour a slider.
-            Text("Anything overdue, due today, or no longer fitting always gets "
-                 + "through, whatever this is set to.")
+            Text("Warnings about overdue work, work due today, or work that no longer fits are exempt "
+                 + "from this daily cap. Quiet hours and iOS settings still apply.")
                 .font(Tokens.Typography.caption)
                 .foregroundStyle(Tokens.Palette.inkMuted)
         }

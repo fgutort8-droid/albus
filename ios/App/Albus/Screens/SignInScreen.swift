@@ -88,7 +88,7 @@ struct SignInScreen: View {
                 .foregroundStyle(Tokens.Palette.ink)
                 .fixedSize(horizontal: false, vertical: true)
             Text(savingAccount
-                 ? "Add Apple, so you can sign back in if you change phones."
+                 ? "Add Apple, so you can sign back in if you change phones. Your tasks stay on this phone."
                  : "Sign in to start planning.")
                 .font(Tokens.Typography.body)
                 .foregroundStyle(Tokens.Palette.inkSecondary)

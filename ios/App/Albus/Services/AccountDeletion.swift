@@ -115,7 +115,7 @@ final class AccountDeletion {
         } catch {
             // The account is already gone. A durable receipt prevents a restart
             // exposing its old cache or asking the student to delete it again.
-            errorMessage = "Your account was deleted, but Albus couldn't finish clearing this phone. Tap Try again to finish."
+            errorMessage = "Albus couldn't finish clearing this phone. Tap Try again to finish."
             return false
         }
     }

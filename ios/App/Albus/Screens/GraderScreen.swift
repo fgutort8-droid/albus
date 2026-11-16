@@ -255,8 +255,8 @@ struct GraderScreen: View {
                 Spacer()
                 meter
             }
-            Text("Reads every paragraph and marks it against your rubric, "
-                 + "quoting your own sentences back to you.")
+            Text("Estimates a mark against your rubric and gives feedback, "
+                 + "with examples from your writing. Your teacher's mark may differ.")
                 .font(Tokens.Typography.caption)
                 .foregroundStyle(Tokens.Palette.inkSecondary)
         }
@@ -338,14 +338,14 @@ struct GraderScreen: View {
         [("Give me the work", "Pick a task, upload a file, photograph it, or paste it."),
          ("Say what marks it", "A rubric you've saved, or one you hand me now."),
          ("Tell me how you're marked", "Out of 100, IB 1–7, letters — whatever your course uses."),
-         ("Get the marks back", "Where they went, quoted from your own writing.")]
+         ("Get the marks back", "Estimated marks and feedback, with examples from your writing.")]
     }
 
     // MARK: - 1 · The work
 
     @ViewBuilder private var workStage: some View {
         stageTitle("What am I marking?",
-                   "Anything on your list brings its rubric and deadline with it.")
+                   "Pick a task to use its title and saved rubric. Add the work below.")
 
         // Arriving from an assignment answers this question before the student
         // sees the screen. Saying so is the difference between "already sorted"
@@ -369,7 +369,7 @@ struct GraderScreen: View {
         VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
             SectionHeader(label: "Or bring it in") { EmptyView() }
             importRow("Upload a file", "PDF or plain text", "arrow.up.doc") { importing = true }
-            importRow("Take a photo", "Handwriting is fine", "camera") {
+            importRow("Take a photo", "Clear handwriting works best", "camera") {
                 workPhotoPicking = true
             }
         }
@@ -445,7 +445,7 @@ struct GraderScreen: View {
 
     @ViewBuilder private var rubricStage: some View {
         stageTitle("What should I mark it against?",
-                   "A rubric is the difference between a grade and an opinion.")
+                   "Your rubric gives Albus criteria for estimating a mark.")
 
         if !rubrics.isEmpty {
             VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
@@ -494,7 +494,7 @@ struct GraderScreen: View {
         VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
             HStack(spacing: Tokens.Spacing.s) {
                 AlbusCactus(size: 26, mood: .cooked)
-                Text("I don't have a rubric")
+                Text("No extra rubric")
                     .font(Tokens.Typography.cardTitle)
                     .foregroundStyle(Tokens.Palette.ink)
                 Spacer()
@@ -503,8 +503,8 @@ struct GraderScreen: View {
                         .foregroundStyle(Tokens.Palette.accent)
                 }
             }
-            Text("Albus will read it and say what looks strong or weak — but it "
-                 + "won't be a grade, and it won't award marks.")
+            Text("Albus uses your task's saved rubric if it has one. Otherwise, "
+                 + "you get feedback without a grade or marks.")
                 .font(Tokens.Typography.caption)
                 .foregroundStyle(Tokens.Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -525,7 +525,7 @@ struct GraderScreen: View {
     @ViewBuilder private var presentationStage: some View {
         stageTitle("How does your course mark this?",
                    "Albus can't know your scale. Tell it, and the result comes "
-                   + "back in the form you'll actually be graded in.")
+                   + "back as an estimate in that format.")
 
         TextEditor(text: $presentation)
             .font(Tokens.Typography.body)
@@ -577,31 +577,30 @@ struct GraderScreen: View {
         ["Out of 100, with a letter grade",
          "IB 1–7, with the criterion bands",
          "Percentage, and how far off the next grade I am",
-         "No marks — just tell me what's weak"]
+         "Focus the feedback on what needs work"]
     }
 
     // MARK: - 4 · Marking
 
     /// Thirty to forty seconds is a long time to look at a spinner.
     ///
-    /// The lines are what is actually happening, in order, rather than filler:
-    /// a student who reads them learns what marking involves, and one who does
-    /// not still gets a screen that is visibly alive. Nothing here is a
-    /// progress claim — the model does not report progress, so neither does
-    /// this.
+    /// The lines say what the feedback can hold and what happens next, never
+    /// what the model is doing at that moment: it does not report progress, so
+    /// neither does this. A student who does not read them still gets a screen
+    /// that is visibly alive.
     private var markingBeats: [String] {
         markingIsBlind
-            ? ["Reading it through.",
-               "Working out what it is trying to do.",
-               "Finding the parts that are carrying it.",
-               "Finding the parts that are not.",
-               "Writing it up."]
-            : ["Reading it through.",
-               "Lining it up against your criteria.",
-               "Marking each strand in turn.",
-               "Finding the sentences that cost you marks.",
-               "Working out what the next band needs.",
-               "Writing it up."]
+            ? ["Albus is preparing your feedback.",
+               "You can keep using Albus while you wait.",
+               "Your feedback can highlight strengths.",
+               "It can also suggest what to improve.",
+               "Your feedback will appear here when it is ready."]
+            : ["Albus is preparing your feedback.",
+               "Your rubric guides the feedback.",
+               "Any marks are estimates.",
+               "Your teacher's mark may differ.",
+               "You can keep using Albus while you wait.",
+               "Your feedback will appear here when it is ready."]
     }
 
     @ViewBuilder private var markingStage: some View {
@@ -623,7 +622,7 @@ struct GraderScreen: View {
                 .id(beat)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
 
-            Text("\(markingWordCount) words. About half a minute.")
+            Text("\(markingWordCount) words. This can take a moment.")
                 .font(Tokens.Typography.micro)
                 .foregroundStyle(Tokens.Palette.inkMuted)
 
@@ -747,7 +746,7 @@ struct GraderScreen: View {
             }
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: left)
         } else {
-            Text("Unlimited")
+            Text("No plan limit")
                 .font(Tokens.Typography.overline)
                 .foregroundStyle(Tokens.Palette.inkSecondary)
         }
@@ -774,7 +773,7 @@ struct GraderScreen: View {
                 .font(Tokens.Typography.caption)
                 .foregroundStyle(Tokens.Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            PrimaryButton(title: notOnPlan ? "See the plans" : "Get more") {
+            PrimaryButton(title: notOnPlan ? "See the plans" : "Compare plans") {
                 showingPaywall = true
             }
         }

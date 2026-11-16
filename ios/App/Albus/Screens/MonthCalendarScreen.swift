@@ -126,7 +126,7 @@ struct MonthCalendarScreen: View {
             calendar.isDate($0.startsAt, equalTo: month, toGranularity: .month)
         }
         guard !inMonth.isEmpty else {
-            return "Nothing scheduled this month yet. Add an assignment and I'll fill it in."
+            return "Nothing scheduled this month yet. Add an assignment to start planning."
         }
         let busiest = Dictionary(grouping: inMonth) { calendar.startOfDay(for: $0.startsAt) }
             .max { $0.value.count < $1.value.count }

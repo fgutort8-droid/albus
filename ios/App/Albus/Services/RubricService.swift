@@ -40,7 +40,7 @@ struct RubricService {
         var errorDescription: String? {
             switch self {
             case .offline:
-                "No connection — this rubric is saved on your phone and will sync later."
+                "No connection — this rubric is saved on your phone. Try saving it again when you're online."
             case .unavailable:
                 "Couldn't sync this rubric. It's saved on your phone."
             case .rejected(let why):

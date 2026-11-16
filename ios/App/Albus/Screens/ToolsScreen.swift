@@ -57,7 +57,7 @@ struct ToolsScreen: View {
 
                 if visible.isEmpty {
                     EmptyState(icon: "magnifyingglass", title: "Nothing matches",
-                               message: "Try a subject, or what you're trying to do — \"cite\", \"graph\", \"focus\".")
+                               message: "Try a tool name, category, or what you're trying to do — \"cite\", \"graph\", \"focus\".")
                 } else {
                     ForEach(grouped, id: \.0) { key, tools in
                         // A chosen category is already named by its chip, lit
@@ -100,7 +100,7 @@ struct ToolsScreen: View {
         AlbusSheetScaffold(
             eyebrow: "Leaving Albus",
             title: "Open \(tool.name)?",
-            primaryTitle: "Open in Safari",
+            primaryTitle: "Open link",
             primaryAction: {
                 openURL(tool.url)
                 confirming = nil
@@ -134,8 +134,8 @@ struct ToolsScreen: View {
             // never gave it.
             AlbusNote(tool.reason)
 
-            Text("This opens in Safari. Albus doesn't send it anything about you "
-                 + "or your work.")
+            Text("This opens \(tool.host). Albus doesn't include your account details "
+                 + "or work in the link.")
                 .font(Tokens.Typography.micro)
                 .foregroundStyle(Tokens.Palette.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -159,7 +159,7 @@ struct ToolsScreen: View {
                     Text("Albus Grader")
                         .font(Tokens.Typography.cardTitle)
                         .foregroundStyle(Tokens.Palette.ink)
-                    Text("Mark finished work against your own rubric, and see where every mark went.")
+                    Text("Get an estimated mark and feedback against your rubric with Plus or Pro.")
                         .font(Tokens.Typography.caption)
                         .foregroundStyle(Tokens.Palette.inkSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -263,7 +263,7 @@ struct ToolsScreen: View {
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(tool.name). \(tool.reason)")
-            .accessibilityHint("Opens \(tool.host) in Safari")
+            .accessibilityHint("Opens \(tool.host) via its link")
         }
     }
 }

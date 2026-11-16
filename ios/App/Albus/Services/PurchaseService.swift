@@ -209,7 +209,7 @@ final class PurchaseService {
         case .offline:
             "No connection. Try again when you're online."
         case .notAllowed:
-            "Purchases are turned off on this device. They can be allowed in Screen Time."
+            "Purchases aren't allowed on this device."
         case .notOnSale:
             "That plan isn't on sale right now."
         case .alreadyOwned:

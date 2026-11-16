@@ -1,0 +1,47 @@
+xcodegen exit: 0
+
+Initial full suite
+✔ Test run with 339 tests in 41 suites passed after 53.922 seconds.
+** TEST SUCCEEDED **
+exit code: 0
+
+Paywall snapshots
+✔ Test run with 6 tests in 1 suite passed after 7.887 seconds.
+** TEST SUCCEEDED **
+exit code: 0
+
+Second full suite
+✔ Test run with 339 tests in 41 suites passed after 55.042 seconds.
+** TEST SUCCEEDED **
+exit code: 0
+
+Full suite before imported reminder corrections
+✔ Test run with 339 tests in 41 suites passed after 52.666 seconds.
+** TEST SUCCEEDED **
+exit code: 0
+
+AlbusCore after imported reminder corrections
+✔ Test run with 120 tests in 25 suites passed after 0.882 seconds.
+exit code: 0
+
+Final full iOS suite after imported reminder corrections (source d98a338)
+✔ Test run with 339 tests in 41 suites passed after 54.046 seconds.
+** TEST SUCCEEDED **
+failures: 0
+exit code: 0
+xcodegen exit: 0
+
+Static scope check: 29 Swift files passed; protected paths unchanged.
+Audit generator: 79 claim groups, 137 changed spans, 115 notifications, 225 external claims; 75 files / 1977 quoted lines.
+git diff --check: exit 0
+
+Post-report whitespace check initially flagged the TSV writer’s CRLF line endings (exit 2). Generator changed to LF; final whole-branch diff check passed (exit 0). No application source changed.
+
+Claude Code re-verification after its fixes (4 Nov)
+AlbusCore: Test run with 120 tests in 25 suites passed after 0.630 seconds.
+xcodegen exit: 0
+iOS unit tests: Test run with 339 tests in 41 suites passed after 53.223 seconds.
+** TEST SUCCEEDED **
+failures: 0
+exit code: 0
+Built app Info.plist: SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, REVENUECAT_API_KEY, REVENUECAT_TEST_API_KEY empty.

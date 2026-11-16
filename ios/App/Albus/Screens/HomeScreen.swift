@@ -122,7 +122,7 @@ struct HomeScreen: View {
             Button("Keep it", role: .cancel) { confirmingDelete = nil }
         } message: {
             Text(confirmingDelete.map {
-                "\($0.title) — its plan, scheduled time and any marking go with it. This cannot be undone."
+                "\($0.title) — its plan, scheduled time and saved marking go with it. A marking in progress may still appear in your history. This cannot be undone."
             } ?? "")
         }
         .confirmationDialog(uncountedOnPhone == 1 ? "Stop counting that task?"
@@ -430,15 +430,15 @@ struct HomeScreen: View {
         case .all:
             EmptyState(icon: "tray", title: assignments.isEmpty ? "Nothing here yet" : "No open work",
                        message: assignments.isEmpty
-                         ? "Add an assignment and Albus will break it into steps and find time for them."
-                         : "Everything you have added is finished. Add the next thing when you're ready.",
+                         ? "Add an assignment and Albus will break it into steps and look for time for them."
+                         : "No active assignments. Add the next thing when you're ready.",
                        actionTitle: "Add an assignment") { addingTask = true }
         case .dueSoon:
             EmptyState(icon: "calendar", title: "Nothing due this week",
-                       message: "Your next deadline is further out. A good week to get ahead.")
+                       message: "No unfinished assignment is due in the next seven days.")
         case .overdue:
             EmptyState(icon: "checkmark.circle", title: "Nothing overdue",
-                       message: "You're on top of every deadline.")
+                       message: "Nothing on your list is overdue.")
         case .needsTime:
             EmptyState(icon: "calendar", title: "No work to review",
                        message: "Unplaced work due in the next seven days or already overdue appears here after your plan is rebuilt.")

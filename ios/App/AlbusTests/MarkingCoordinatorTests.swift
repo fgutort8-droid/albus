@@ -297,7 +297,7 @@ struct MarkingCoordinatorTests {
         #expect(try stored(context).isEmpty, "no half-kept grading for a later save to pick up")
         #expect(announcer.notified.isEmpty, "a notification would open onto nothing")
         #expect(coordinator.ready == nil)
-        #expect(GradingService.Failure.notSaved.errorDescription?.contains("won't be charged twice") == true)
+        #expect(GradingService.Failure.notSaved.errorDescription?.contains("same work and settings") == true)
     }
 
     /// The student can leave while the work is marked, and delete the

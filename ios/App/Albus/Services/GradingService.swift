@@ -121,7 +121,7 @@ struct GradingService {
                 Failure.unavailable.errorDescription
             case .notSaved:
                 "Albus marked this but couldn't save it on this phone. "
-                + "Mark it again to see it — you won't be charged twice."
+                + "Try again with the same work and settings to retrieve a saved result."
             case .notOnPlan:
                 "Marking is part of Albus Plus and Pro."
             case .allowanceUsed(let resetsAt):
@@ -131,13 +131,13 @@ struct GradingService {
                     "That's this week's markings used."
                 }
             case .tooFast:
-                "That's a lot of marking at once. Try again in a few minutes."
+                "That's a lot of marking at once. Try again later."
             case .needsVerification:
-                "Sign in to carry on marking. It takes a moment and it's a one-off."
+                "Sign in to carry on marking."
             case .paused:
                 "Albus has paused marking on this account. It comes back on its own."
             case .fairUseReached:
-                "This account has reached its monthly AI safety limit. "
+                "This account has reached its AI safety limit for the last 30 days. "
                 + "Capacity returns gradually over 30 days."
             case .tooLong(let max):
                 "That's longer than Albus can mark in one go (about \(max / 6) words)."
@@ -159,7 +159,7 @@ struct GradingService {
                 // lie a student could check. The server hands the slot back on
                 // failure and returns an identical result for free on a retry,
                 // which is what makes this true rather than reassuring.
-                "Albus couldn't finish marking that. Try again — you won't be charged twice."
+                "Albus couldn't finish marking that. Try again with the same work and settings."
             case .rejected(let why):
                 why
             }

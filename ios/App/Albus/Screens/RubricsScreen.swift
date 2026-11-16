@@ -31,8 +31,8 @@ struct RubricsScreen: View {
                         icon: "list.bullet.rectangle.portrait",
                         title: "No rubrics yet",
                         message: "Paste the marking criteria from an assignment sheet. "
-                               + "Albus will shape your plan around it and can mark your "
-                               + "work against it when you're done.",
+                               + "Albus can use it to shape your plan. Plus and Pro can estimate a mark for your "
+                               + "work against it.",
                         actionTitle: "Add a rubric"
                     ) { editing = .empty }
                 } else {
@@ -75,8 +75,8 @@ struct RubricsScreen: View {
         let used = rubric.assignments.count
         guard used > 0 else { return "This can't be undone." }
         return used == 1
-            ? "One assignment uses this rubric. The assignment is kept — it just stops being marked against anything."
-            : "\(used) assignments use this rubric. They're kept — they just stop being marked against anything."
+            ? "One assignment uses this rubric. The assignment is kept — it no longer has this rubric attached."
+            : "\(used) assignments use this rubric. They're kept — they no longer have this rubric attached."
     }
 
     /// The title and nothing above it, like every other tab. With no rubrics

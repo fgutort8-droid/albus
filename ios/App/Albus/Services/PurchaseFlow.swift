@@ -38,8 +38,8 @@ enum PurchaseFlow {
             }
             // The webhook retries for hours, so a slow one still lands. Saying
             // "failed" here would send a student who paid to buy again.
-            return .message("Payment done. \(name(option.tier)) can take a minute to switch on, "
-                            + "and it will by itself.")
+            return .message("Payment done. Albus hasn't confirmed \(name(option.tier)) yet. "
+                            + "Check your plan again shortly.")
         case .pending:
             return .message("Waiting for approval. \(name(option.tier)) switches on once it's approved.")
         case .cancelled:
@@ -61,7 +61,7 @@ enum PurchaseFlow {
             if await entitlements.waitForPaidPlan(attempts: attempts, interval: interval) {
                 return "Restored. You're on \(name(entitlements.tier))."
             }
-            return "Found your subscription. It can take a minute to switch on, and it will by itself."
+            return "Found your subscription. Albus hasn't confirmed your plan yet. Check again shortly."
         case .nothingToRestore:
             return "This Apple ID has no active Albus subscription to restore."
         case .failed(let message):
