@@ -95,6 +95,12 @@ struct GradingService {
         /// A server-owned rolling cost ceiling. This is deliberately not a
         /// paywall: buying the plan again would not remove an abuse safeguard.
         case fairUseReached
+        /// The app-wide AI budget for the hour or the day is spent, for
+        /// everyone. Refused before anything was reserved, so none of the
+        /// student's markings is used, and the same work goes through once
+        /// earlier spending has aged out. Not `unavailable`: "try again" sends
+        /// a student who did nothing wrong round the same refusal all day.
+        case atCapacity
         case tooLong(Int)
         /// Accepted, marked, and the answer ran past what the model could
         /// write in one go. Not the same as `tooLong`, which is refused before
@@ -148,6 +154,9 @@ struct GradingService {
                 "There isn't enough here to mark yet."
             case .noRubric:
                 "Pick a rubric to mark this against."
+            case .atCapacity:
+                "Albus is at capacity right now, so this wasn't marked "
+                + "and none of your markings was used. Try again later."
             case .offline:
                 "No connection — marking needs one."
             case .unusableResponse:
@@ -389,7 +398,7 @@ struct GradingService {
         case "WORK_TOO_LONG":           return .tooLong(maxWorkCharacters)
         case "WORK_TOO_SHORT":          return .tooShort
         case "RUBRIC_NOT_FOUND":        return .noRubric
-        case "GLOBAL_CAPACITY_REACHED": return .unavailable
+        case "GLOBAL_CAPACITY_REACHED": return .atCapacity
         case "EMPTY_RESPONSE", "MALFORMED_RESPONSE":
             return .unusableResponse
         // Marking ran past the output cap. Distinct from an ordinary failure
