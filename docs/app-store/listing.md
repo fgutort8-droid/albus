@@ -215,6 +215,11 @@ Before pasting, check three things against the submitted build:
 3. That a sandbox purchase reaches the server: `REVENUECAT_APP_IDS` is set
    (audit finding A6). Until then the plans screen says "Albus hasn't
    confirmed Plus yet", and it never does.
+4. That the reviewer can mark something. The AI budget shared by every paid
+   and trial account allows about five rubric markings a day at launch
+   (audit finding A2). If testers have used it that day, the reviewer sees
+   "Albus is at capacity right now". The audit recommends raising the daily
+   floor for the review window; decide that before submitting.
 
 ### If Apple asks for a demo account
 
