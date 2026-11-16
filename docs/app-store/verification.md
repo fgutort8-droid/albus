@@ -1,127 +1,106 @@
-# Submission verification
+# What was checked for submission, and how
 
-This work lives only on `codex/submission-readiness`, created from `origin/main`
-at `1a082b1`, then rebased onto `ac63956` after the owner's #2/#5 merges. Other agents' branches and checkouts are not modified.
+Written 16 November 2026. Checked against `main` at `1509386` with the six open
+pull requests (#48–#53) merged on top in a scratch worktree. No production
+system was read or written, no account was made, and no paid AI call was made.
 
-## Privacy API audit
+## Privacy manifest
 
-Read Apple's official [API category list and approved reasons](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype)
-on 22 September 2026, including its machine-readable documentation. The source
-scan covered `ios/App/Albus` and `ios/AlbusCore/Sources`, excluding tests and SDKs.
+`ios/App/Albus/PrivacyInfo.xcprivacy` declares tracking false, no tracking
+domains, eight collected data types (all linked, all App Functionality, none
+for tracking), and one required-reason API: user defaults, reason `CA92.1`
+(the app's own storage). The answers in `app-privacy.md` are the same eight.
 
-| Category | App-owned result | Manifest decision |
-| --- | --- | --- |
-| User defaults | `Preferences`, `SessionStorage`, `NotificationState`, `PendingDeletions` read/write app-owned keys. No MDM/shared-app-group/global-domain access found. Account-deletion preferences use the same scope. | `NSPrivacyAccessedAPICategoryUserDefaults`, `CA92.1` (app-private storage). |
-| File timestamps | No `creationDate`, `modificationDate`, `fileModificationDate`, content/creation-date resource keys, stat-family or getattrlist calls found. | Not declared. `WorkExtractor` reads `fileSizeKey` for a selected document; that accessor is not on Apple's required-reason API list. `fileExists`, copying/removing files and a Date-based quarantine filename do not read file timestamps. |
-| System boot time | No `systemUptime` or `mach_absolute_time` calls found. Timers use ordinary Date/Timer/task scheduling. | Not declared speculatively. |
-| Disk space | No volume-capacity keys, filesystem free-size/system-size, statfs/statvfs calls found. | Not declared. A selected file's size is not free disk capacity. |
-| Active keyboards | No `activeInputModes` calls found. | Not declared. Text input alone is not a reason to declare this API. |
-
-No tracking domains; tracking is false. Seven app-collected data categories are
-linked for functionality; the complete mapping and partner caveats are in
-`app-privacy.md`. The manifest does not claim to anonymise account/device IDs.
-
-## Export compliance
-
-`ITSAppUsesNonExemptEncryption = NO` is generated from `ios/project.yml` into
-Info.plist. [Apple's export guidance](https://developer.apple.com/documentation/security/complying-with-encryption-export-regulations)
-allows an exempt declaration for operating-system encryption.
-
-Inspected app networking: `Backend.swift` uses URLSession and system HTTPS;
-auth storage delegates to system Keychain via `SessionStorage.swift`. No custom cipher, VPN, bundled TLS library,
-end-to-end encryption or app-owned CryptoKit/CommonCrypto implementation found.
-
-Resolved Supabase Auth contains PKCE SHA-256 hashing and system
-`SecKeyVerifySignature` for token integrity, not custom content encryption.
-Its Swift Crypto dependency uses Apple's CryptoKit on iOS; its Package.swift
-restricts the BoringSSL-backed implementation to other platforms in the normal
-build. CryptoSwift/secp256k1 references in Supabase's package are test dependencies,
-not Albus app targets. Server-side HMAC hashing in Deno is not bundled iOS code.
-The declaration means **no non-exempt encryption**, not “no cryptography”.
-Re-audit if payment or other dependencies add an independent encryption engine.
-
-## Built bundle inspection
-
-Command:
-
-```sh
-python3 scripts/verify-app-privacy.py \
-  /tmp/albus-submission-derived/Build/Products/Debug-iphonesimulator/Albus.app
-```
-
-Observed after a successful simulator build:
+The bundle verifier was run against the latest simulator build (from
+`fix/marking-capacity-message`, which is `main` plus one Swift file):
 
 ```text
+$ python3 scripts/verify-app-privacy.py .../Debug-iphonesimulator/Albus.app
 PASS: built app manifest matches source; tracking=false; ITSAppUsesNonExemptEncryption=false.
 Manifest: PrivacyInfo.xcprivacy
+Manifest: RevenueCat_RevenueCat.bundle/PrivacyInfo.xcprivacy
 Manifest: swift-crypto_Crypto.bundle/PrivacyInfo.xcprivacy
 ```
 
-The manifest was automatically copied by xcodegen's existing `App/Albus` source
-entry. The verification step now runs against CI's built app as well.
+RevenueCat's own manifest is now in the app (in September it was not yet a
+dependency). It declares Purchase History, unlinked, for App Functionality.
+Albus answers it as linked, because RevenueCat is given the account's
+identifier.
 
-The assumption that both SDKs already ship manifests was **not confirmed**:
+Supabase's SDK ships no manifest of its own. It pulls in OpenTelemetry's API
+only, to pass a trace header from a span the app has started. Albus starts no
+spans and links no exporter, so it sends nothing.
 
-- Supabase resolved to **2.55.2**. A recursive source and built-bundle inventory
-  found no Supabase PrivacyInfo.xcprivacy. Do not relabel Swift Crypto's manifest
-  as Supabase's. No required-reason calls from Apple's five categories were found
-  in Supabase's own Sources during this audit. This is source inspection, not a
-  promise that Apple's upload analysis accepts every transitive SDK.
-- Swift Crypto's own manifest **is** bundled and parses successfully.
-- RevenueCat is **not a dependency of the current main-based app**. Its manifest
-  cannot be verified in this build. After PR #3 lands, rebuild and inspect the
-  actual app bundle before claiming it is present. Do not add a fake vendor
-  manifest or pull in unmerged payment changes for this check.
+Resolved SDK revisions (`ios/Package.resolved`): supabase-swift `40344fb3a700`,
+purchases-ios-spm `d654b8b85143`, swift-crypto 4.5.2, opentelemetry-swift-core
+2.5.0.
 
-Only a simulator build is checked here. Repeat the same script against the
-Release `.xcarchive/Products/Applications/Albus.app` before uploading. A signed
-archive and App Store validation were not run; no Apple Team ID was used.
+## Required-reason APIs
 
-## Negative checks actually run
+Searched `ios/App/Albus` and `ios/AlbusCore/Sources` on 16 November:
 
-Two temporary fake bundles exercised the new verifier:
+| Category | Found | Declared |
+| --- | --- | --- |
+| User defaults | Ten files read and write the app's own keys. No shared suite. | Yes, `CA92.1`. |
+| File timestamps | None. | No. |
+| System boot time | No `systemUptime` or `mach_absolute_time`. The focus timer measures elapsed time with Swift's `ContinuousClock` (`FocusSession.swift`). | No. See below. |
+| Disk space | None. | No. |
+| Active keyboards | None. | No. |
 
-```text
-Missing encryption declaration rejected: AssertionError: export-compliance property missing/incorrect
-Stale bundled manifest rejected: AssertionError: bundled privacy manifest differs from source
-Violating fixtures discarded.
-```
+`ContinuousClock` is not on Apple's list, so it is not declared. If the
+TestFlight upload brings an email from Apple naming "System boot time APIs"
+(ITMS-91053), the fix is one entry in the manifest:
+`NSPrivacyAccessedAPICategorySystemBootTime` with reason `35F9.1` (measuring
+time between events in the app). The verifier compares the built manifest
+with the source one, so it needs no change. Read that email when the first
+build is uploaded.
 
-`plutil -lint`: PrivacyInfo.xcprivacy: OK.
-Metadata length checks: subtitle 30/30; promotional text 136/170; keywords 88/100.
+## Export compliance
 
-## Release gates and limits
+`ITSAppUsesNonExemptEncryption` is `NO`, generated from `ios/project.yml`
+into the app's Info.plist and confirmed in the built app above. The app's
+networking is the system's HTTPS (`URLSession`), and the session is stored in
+the system Keychain (`SessionStorage.swift`). The only cryptography in the
+app's own code is a SHA-256 hash of the Sign in with Apple nonce
+(`SignIn.swift`), which is authentication, not encryption. So App Store
+Connect should not ask; if it does, answer that the app uses only exempt
+encryption.
 
-- The policy URLs must become publicly accessible before submission; no website
-  publication occurred in this task.
-- Payment purchase/restore controls are still stubs on the starting main revision.
-  Review notes explicitly mark their payment-client dependency.
-- Account deletion and payments backend are now merged on the audited base.
-  Backend migration deployment belongs to the owner; this branch does not deploy.
-- Resolve the policy/partner questions in `app-privacy.md`, particularly provider
-  logging and operational support emails.
-- Final AI-content age-rating answers need release-model assessment. No paid
-  model call, production account creation or production request was used here.
-- Local source findings are not presented as production configuration inspection.
+## Debug switches
 
-Screenshot stretch: no usable captures. XCTest stalled before the app ran and was
-terminated; direct launch then returned CoreSimulator error 405 (Shutting Down).
-The temporary capture code was removed. `screenshots.md` retains the plan and
-safe procedure. This is not reported as a successful UI test.
+Every `-albus.debug.*` launch argument (`assumeSignedIn`, `forcePlan`,
+`supabaseURL`, and the others) sits inside `#if DEBUG`, so none exists in the
+release build a student downloads.
 
-## Final local build observed
+## Listing text
 
-After rebasing onto `ac63956`, `xcodebuild build-for-testing` on the designated
-9BBC0A52 simulator destination ended with `** TEST BUILD SUCCEEDED **`. The log
-shows the app manifest being copied and the app plus both test targets compiling.
-The bundle verifier then passed again against that build, not the original tree.
+Counted from `listing.md` by script, not by eye:
 
-Resolved dependencies: Supabase 2.55.2 (`40344fb3a7007d772218c6ddf6bca9febd8cb226`),
-Swift Crypto 4.5.2 (`da9d28d69ebe3894b18376c8f2395c2f37b8448f`). The Swift Crypto
-manifest parses with tracking false and empty collected-data/API arrays.
-`otool -L` shows system CryptoKit and Security frameworks in the built app.
-No standalone app-owned cipher was found. These observations support the source
-export-compliance assessment; they are not an App Store upload validation.
+| Field | Characters | Apple's limit |
+| --- | --- | --- |
+| Name | 20 | 30 |
+| Subtitle | 30 | 30 |
+| Promotional text | 118 | 170 |
+| Keywords | 97 | 100 |
+| Description | 2,717 | 4,000 |
+| App Review notes | 2,856 | 4,000 |
+| Subscription descriptions | 37 and 42 | 45 |
 
-Local test execution is not claimed: the screenshot test could not launch.
-The PR's CI run is the app/core/backend test authority for this change.
+Every on-screen label the review notes quote was found in the app's code:
+"See the plans", "Restore purchases", "Manage subscription", "Delete
+account", "Permanently delete account", "No extra rubric", "Albus Grader",
+"Subscribe to", "Restore", and the purchase message "Albus hasn't confirmed
+Plus yet". "Continue with Apple" is Apple's own button
+(`SignInWithAppleButton(.continue)`). "Start 3 days free" is built from the
+trial Apple reports (`PaywallScreen.callToAction`), so it shows only once the
+trials exist in App Store Connect.
+
+## Not checked here
+
+- A Release archive. Run the same verifier against
+  `Albus.xcarchive/Products/Applications/Albus.app` before uploading.
+- App Store Connect's own validation of the upload.
+- Supabase's production logging and retention settings.
+- Real AI output for mature content (relevant to the age rating), since no
+  paid call was allowed.
+- Screenshots, which must come from the final build (`screenshots.md`).
