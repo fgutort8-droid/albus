@@ -36,16 +36,21 @@ delete from public.ai_usage;
 -- -------------------------------------------------------------------------
 -- The figures, against the prices the ledger itself charges.
 
--- The largest rubric the app allows is forty criteria of 2,000 characters and
--- an 8,000-character body: about 24,000 tokens, 25,000 with the rest of the
--- prompt.
+-- 36,000 is `BREAKDOWN_INPUT_TOKENS_COVERED` in `_shared/anthropic.ts`: the
+-- largest prompt the app can send, at three characters a token.
+-- `prompt_test.ts` builds that prompt and fails if it outgrows the number.
 select cmp_ok(private.ai_reservation_cost('breakdown', 'claude-sonnet-5')::bigint, '>=',
-              private.ai_metered_cost('claude-sonnet-5', 25000, 5000),
-              'a rubric plan with the largest rubric and a full answer costs no more than is set aside');
+              private.ai_metered_cost('claude-sonnet-5', 36000, 5000),
+              'a rubric plan with the largest prompt and a full answer costs no more than is set aside');
+-- The instructions are the cached part. Written to the cache they cost a
+-- quarter more, and the figure has to cover that too.
+select cmp_ok(private.ai_reservation_cost('breakdown', 'claude-sonnet-5')::bigint, '>=',
+              private.ai_metered_cost('claude-sonnet-5', 34500, 5000, 1500, 0),
+              'and no more when the instructions are written to the cache');
 
 -- No rubric reaches this model, so its prompt is the instructions and the task.
 select cmp_ok(private.ai_reservation_cost('breakdown', 'claude-haiku-4-5')::bigint, '>=',
-              private.ai_metered_cost('claude-haiku-4-5', 2000, 5000),
+              private.ai_metered_cost('claude-haiku-4-5', 2700, 5000),
               'a plan without a rubric and a full answer costs no more than is set aside');
 
 select is(private.ai_reservation_cost('grade', 'claude-opus-5'), 450000,
@@ -63,7 +68,7 @@ select 'b2000000-0000-4000-8000-000000000009', 'grade', 'claude-opus-5',
        'completed', 450000, 115000, 'paid', now() - interval '2 hours'
   from generate_series(1, 8);
 
--- A rubric plan could cost up to US$0.10, which would pass the cap.
+-- A rubric plan could cost up to US$0.125, which would pass the cap.
 select throws_ok(
   $$select public.check_and_record_ai_usage(
       'b2000000-0000-4000-8000-000000000001', 'breakdown', 'claude-sonnet-5')$$,

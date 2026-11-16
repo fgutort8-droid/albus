@@ -240,3 +240,46 @@ Deno.test("fencing protects a tag nobody has invented yet", () => {
   assert(!out.includes("</student_preferences>"));
 });
 
+// What is set aside for a rubric plan is sized from the largest prompt the app
+// can send (migration 20261115120000). These are the limits the database and
+// the endpoint enforce: forty criteria (`upsert_rubric`), their column lengths
+// (`0018_rubrics.sql`), 2,000 characters of notes and a 200-character title
+// (`breakdown/index.ts`). If a limit is raised, or the instructions grow, this
+// fails until the reservation is raised with it.
+Deno.test("the largest plan prompt fits the input its reservation covers", async () => {
+  const { BREAKDOWN_INPUT_TOKENS_COVERED } = await import("../_shared/anthropic.ts");
+  const { BREAKDOWN_JSON_SCHEMA } = await import("../_shared/breakdown_schema.ts");
+  const largest: RubricContext = {
+    name: "n".repeat(120),
+    body: "b".repeat(8000),
+    criteria: Array.from({ length: 40 }, (_, i) => ({
+      id: String(i),
+      code: "c".repeat(24),
+      name: "n".repeat(200),
+      marks: 9999,
+      guidance: "g".repeat(2000),
+    })),
+  };
+  const characters = buildSystemPrompt(largest).length +
+    buildUserPrompt({
+      title: "t".repeat(200),
+      taskType: "essay",
+      deadlineISO: "2027-01-01T00:00:00Z",
+      estimatedMinutes: 12_000,
+      nowISO: "2026-11-16T00:00:00Z",
+      dailyCapacityMinutes: 960,
+      rubric: largest,
+      notes: "x".repeat(2000),
+      priority: "high",
+    }).length +
+    JSON.stringify(BREAKDOWN_JSON_SCHEMA).length;
+  // Three characters a token: denser than English prose, which is about four.
+  const tokens = Math.ceil(characters / 3);
+  assert(
+    tokens <= BREAKDOWN_INPUT_TOKENS_COVERED,
+    `largest prompt is about ${tokens} tokens; the reservation covers ${BREAKDOWN_INPUT_TOKENS_COVERED}`,
+  );
+  // And not by a wide margin either, or the reservation refuses plans it has
+  // no need to.
+  assert(tokens >= BREAKDOWN_INPUT_TOKENS_COVERED * 0.9, `only ${tokens} tokens`);
+});

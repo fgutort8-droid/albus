@@ -78,14 +78,28 @@ function readUsage(value: Anthropic.Usage): GenerationUsage | null {
  * a plan that fitted before is produced and billed exactly as before.
  *
  * What `private.ai_reservation_cost` sets aside for a plan is sized from this
- * number, because a call is admitted against that figure before its real cost
- * is known. 5,000 output tokens cost US$0.05 on Sonnet 5 and US$0.025 on Haiku
- * 4.5. Migration 20261115120000 sets aside US$0.10 for a Sonnet plan, which
- * also covers the largest rubric the app allows as input; US$0.03 still covers
- * a Haiku plan, which has no rubric. Raise this and that migration's check
- * fails until the reservation is raised with it (`plan_reservation_test.sql`).
+ * number and the one below, because a call is admitted against that figure
+ * before its real cost is known. See migration 20261115120000.
  */
 export const BREAKDOWN_MAX_TOKENS = 5000;
+
+/**
+ * The input a rubric plan's reservation covers, in tokens.
+ *
+ * The largest prompt the app can send is about 105,000 characters: forty
+ * criteria of 2,000 characters, an 8,000-character rubric body, the notes and
+ * the instructions. At three characters a token, which is denser than English
+ * prose (about four), that is 35,000 tokens, and the answer's schema adds a few
+ * hundred. `prompt_test.ts` builds that prompt and fails if it outgrows this
+ * number; `plan_reservation_test.sql` checks the reservation pays for this
+ * much input and `BREAKDOWN_MAX_TOKENS` of output.
+ *
+ * It is a ceiling for ordinary text, not a proof. Text that is mostly digits
+ * or symbols packs more tokens into a character, and only counting tokens
+ * before every call would bound that. The ledger records what such a call
+ * really cost, as it does for every call.
+ */
+export const BREAKDOWN_INPUT_TOKENS_COVERED = 36000;
 
 export async function generateBreakdown(
   model: string,
