@@ -129,6 +129,25 @@ struct NotificationReadingTests {
             #expect(!(rendered.title + rendered.body).contains("*"), "\(template.id): \(rendered)")
         }
 
+        // The markers are the line's, not the student's. A step named with
+        // asterisks of its own keeps them: "Evaluate 2**3" is not "Evaluate 23".
+        // Found by Greptile on PR #53, where they were removed from the result.
+        facts[.step] = "Evaluate 2**3"
+        facts[.assignment] = "**Draft** essay"
+        let quoting = marked.filter { $0.requires.contains(.step) }
+        #expect(!quoting.isEmpty)
+        for template in quoting {
+            guard let rendered = NotificationCopy.render(template, facts: facts) else {
+                Issue.record("\(template.id) did not render"); continue
+            }
+            let shown = rendered.title + " " + rendered.body
+            #expect(shown.contains("Evaluate 2**3"), "\(template.id): \(shown)")
+            #expect(!shown.contains("**Evaluate"), "\(template.id): \(shown)")
+            if template.requires.contains(.assignment) {
+                #expect(shown.contains("**Draft** essay"), "\(template.id): \(shown)")
+            }
+        }
+
         // And through the planner, on a week with a step to point at.
         var planned = 0
         for opened in 8...20 {
