@@ -1,11 +1,27 @@
 # Tool catalogue
 
-`gen.py` holds the table of 225 tools. `emit.py` turns it into
+`gen.py` holds the table of 221 tools. `emit.py` turns it into
 `ios/App/Albus/Models/StudyTool.swift`. Nothing edits that Swift file by hand.
 
 ```bash
 python3 emit.py          # regenerate StudyTool.swift, then copy it into ios/
 ```
+
+## Names, IDs and destinations
+
+A tool's name is the site its tile opens. A tile opens `https://<host>` and
+nothing more specific, so the host has to be one that answers on its own:
+`usgs.gov` and `noisli.com` only answer with `www.`.
+
+A tool's Swift case, and so its `logo-<id>` asset, is derived from its name. To
+rename a tool without moving either, give it its old ID in `IDS` in `gen.py`;
+`emit.py`, `make_assets.py` and `fetch_logos.py` all read that table.
+
+When a site closes, delete its row from `gen.py`, its line in
+`capabilities.py` and its `logo-<id>.imageset`, then regenerate. Four went this
+way on 15 November 2026: Open Access Button (shut down 18 November 2025),
+typewritermode.com (the domain no longer exists), Cram (retired 9 November
+2026) and Socratic (now a Google Search page).
 
 ## Logos
 
@@ -31,7 +47,7 @@ fetches a logo at runtime: doing that would tell two hundred companies when a
 student opened the Tools tab, cost a request per tile, and break the screen
 offline.
 
-**172 of 225 are covered.** The other 53 ship with no mark, which is the correct
+**170 of 221 are covered.** The other 51 ship with no mark, which is the correct
 outcome, not a gap to be filled with something invented. To improve one by hand,
 drop a square PNG at `logos/<tool-id>.png` and re-run `make_assets.py`.
 
