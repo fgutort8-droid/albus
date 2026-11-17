@@ -102,7 +102,7 @@ Terms of use (EULA): https://www.apple.com/legal/internet-services/itunes/dev/st
 | Reminders scheduled on the phone, with quiet hours | `NotificationScheduler`, `NotificationPlanner.movedOutOfQuietHours`; no push service. |
 | An AI plan follows the rubric's criteria | `breakdown/index.ts` loads the attached rubric; `prompt.ts` `buildSystemPrompt`. Only for a rubric that has synced, and only for an AI plan. |
 | Text read on the phone; file or photo not sent | `WorkExtractor`; `GradingService.Request` carries text only. |
-| "Choose a photo" | The Grader opens the photo library (`photosPicker`), not the camera. Its row is labelled "Take a photo", which is audit finding A13. |
+| "Choose a photo" | The Grader opens the photo library (`photosPicker`), not the camera. Its two photo rows read "Choose a photo" and "Choose a photo of a rubric" (audit finding A13, fixed). `GraderPhotoRowTests` fails if a row promises a camera. |
 | Estimated mark, a comment per criterion, what to improve | `grade_prompt.ts`, `GradeResultView`. Without a rubric the server strips marks. |
 | More than 200 study tools | 221 after **(#51)**, 225 before; `ToolCatalogTests` requires at least 200. |
 | Plan limits | `public.plans` (`0034_three_plans.sql`, `20260915120000`) and the paywall's own list **(#48)**. |

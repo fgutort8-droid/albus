@@ -369,7 +369,7 @@ struct GraderScreen: View {
         VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
             SectionHeader(label: "Or bring it in") { EmptyView() }
             importRow("Upload a file", "PDF or plain text", "arrow.up.doc") { importing = true }
-            importRow("Take a photo", "Clear handwriting works best", "camera") {
+            importRow("Choose a photo", "Clear handwriting works best", "photo") {
                 workPhotoPicking = true
             }
         }
@@ -472,7 +472,7 @@ struct GraderScreen: View {
             importRow("Type or paste a rubric", "Saved for next time", "doc.text") {
                 editingRubric = .empty
             }
-            importRow("Photograph a rubric", "From a handout or the board", "camera.viewfinder") {
+            importRow("Choose a photo of a rubric", "From a handout or the board", "photo") {
                 rubricPhotoPicking = true
             }
         }
