@@ -54,6 +54,8 @@ struct EntitlementRefreshNotice: View {
         // "entitlementRefreshFailure", and Retry's own identifier was lost.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("entitlementRefreshFailure")
-        .transition(.opacity.combined(with: .move(edge: .top)))
+        // A short drop, not its whole height: it belongs to the plan it sits
+        // above, and should not seem to fall in from the section before.
+        .transition(.opacity.combined(with: .offset(y: -6)))
     }
 }

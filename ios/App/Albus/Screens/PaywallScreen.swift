@@ -179,6 +179,9 @@ struct PaywallScreen: View {
                     if offersYearly { periodPicker.padding(.top, 12) }
                     valueList.padding(.top, 22)
                 }
+                // The plan warning's own short move; nothing changes the flag
+                // inside an animation of its own.
+                .animation(Tokens.Motion.quick, value: entitlements.refreshFailed)
                 .padding(.bottom, 230)
             }
             .scrollDisabled(phase != .done)
