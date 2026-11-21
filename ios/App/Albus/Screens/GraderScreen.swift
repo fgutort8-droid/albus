@@ -80,6 +80,11 @@ struct GraderScreen: View {
     @State private var breathing = false
     @State private var glance: Glance = .still
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The marking breath, unless the student has asked for less motion.
+    /// Read where the cactus is drawn, so turning Reduce Motion on
+    /// mid-marking stops it.
+    private var breathes: Bool { breathing && !reduceMotion }
     /// This screen opened on a marking another one started, and the student
     /// came back to watch it finish.
     @State private var resumedJob = false
@@ -613,13 +618,16 @@ struct GraderScreen: View {
         VStack(spacing: Tokens.Spacing.l) {
             AlbusCactus(size: 74, mood: .busy)
                 // A slow breath, not a bounce. The cactus is concentrating.
-                .scaleEffect(breathing ? 1.04 : 0.97)
-                .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true),
-                           value: breathing)
+                // The repeat only while motion is allowed: turned off, a
+                // plain animation takes over from it, which is what ends it.
+                .scaleEffect(breathes ? 1.04 : 0.97)
+                .animation(breathes ? .easeInOut(duration: 1.6).repeatForever(autoreverses: true)
+                                    : .default,
+                           value: breathes)
                 // And a glance as each line changes, so half a minute of the
                 // same breath reads as reading rather than as a loop.
-                .rotationEffect(.degrees(glance.angle), anchor: .bottom)
-                .offset(y: glance.drop)
+                .rotationEffect(.degrees(reduceMotion ? 0 : glance.angle), anchor: .bottom)
+                .offset(y: reduceMotion ? 0 : glance.drop)
 
             Text(markingIsBlind ? "Reading your work." : "Marking against your rubric.")
                 .font(Tokens.Typography.cardTitle)
@@ -664,7 +672,7 @@ struct GraderScreen: View {
         .frame(maxWidth: .infinity)
         .padding(.top, Tokens.Spacing.xxl)
         .task {
-            breathing = !reduceMotion
+            breathing = true
             // Stops at the last line rather than looping. Coming back round to
             // "Reading it through" after forty seconds reads as stuck.
             var next = ContinuousClock.now
@@ -676,8 +684,10 @@ struct GraderScreen: View {
                 guard !Task.isCancelled else { return }
                 withAnimation(.easeInOut(duration: 0.35)) { beat += 1 }
                 // None on the last line: Albus has finished looking, and only
-                // breathes until the feedback arrives.
-                if !reduceMotion, beat < markingBeats.count - 1 {
+                // breathes until the feedback arrives. Reduce Motion is not
+                // checked here, where it could be stale this far into the
+                // wait; the cactus reads it where it is drawn.
+                if beat < markingBeats.count - 1 {
                     await look(beat.isMultiple(of: 2) ? .nod : .lean)
                 }
             }
