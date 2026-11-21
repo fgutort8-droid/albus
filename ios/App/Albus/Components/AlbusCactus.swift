@@ -62,6 +62,9 @@ struct AlbusCactus: View {
     var mood: Mood = .busy
     /// Eyes closed, for a running focus session.
     var isResting: Bool = false
+    /// How far the bud on his head has opened: 0 is the bud he always wears,
+    /// 1 is in flower. Only the moment a purchase goes through opens it.
+    var bloom: Double = 0
 
     /// The artwork is authored in a 120×152 box; everything below is in those
     /// units and scaled once at the end.
@@ -79,6 +82,7 @@ struct AlbusCactus: View {
         static let blush = Color(red: 0.914, green: 0.541, blue: 0.682)      // #E98AAE
         static let flower = Color(red: 0.957, green: 0.718, blue: 0.192)     // #F4B731
         static let flowerHi = Color(red: 1.0, green: 0.851, blue: 0.439)     // #FFD970
+        static let petalShade = Color(red: 0.937, green: 0.678, blue: 0.208) // #EFAD35
     }
 
     var body: some View {
@@ -185,10 +189,35 @@ struct AlbusCactus: View {
         stem.addLine(to: CGPoint(x: 60, y: 18))
         context.stroke(stem, with: .color(Palette.bodyShadow),
                        style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
+        if bloom > 0 { drawPetals(context) }
         context.fill(Path(ellipseIn: CGRect(x: 54.5, y: 5.5, width: 11, height: 15)),
                      with: .color(Palette.flower))
         context.fill(Path(ellipseIn: CGRect(x: 56.2, y: 8.4, width: 3.6, height: 5.2)),
                      with: .color(Palette.flowerHi))
+    }
+
+    /// Five petals opening out of the bud, turning a little as they grow.
+    /// Drawn before the bud so it stays the flower's middle; the two on the
+    /// right take the body's shadow side.
+    private func drawPetals(_ context: GraphicsContext) {
+        let open = min(max(bloom, 0), 1)
+        // The flower fades in as one shape: a layer takes the opacity of the
+        // context it is drawn into, so where petals overlap is not darker.
+        var faded = context
+        faded.opacity = open
+        faded.drawLayer { layer in
+            // About the bud's centre, the way the arms pivot about theirs.
+            layer.translateBy(x: 60, y: 13)
+            layer.rotate(by: .degrees(-12 * (1 - open)))
+            let grow = 0.18 + 0.82 * open
+            layer.scaleBy(x: grow, y: grow)
+            for (index, degrees) in [0.0, 72, 144, 216, 288].enumerated() {
+                var petal = layer
+                petal.rotate(by: .degrees(degrees))
+                petal.fill(Path(ellipseIn: CGRect(x: -4.7, y: -13.8, width: 9.4, height: 14)),
+                           with: .color(index == 1 || index == 2 ? Palette.petalShade : Palette.flowerHi))
+            }
+        }
     }
 
     private func drawFace(_ context: inout GraphicsContext) {
