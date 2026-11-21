@@ -27,6 +27,8 @@ struct OnboardingFlow: View {
 
     // Building step: drives the cactus's breathing pulse.
     @State private var pulsing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var pulses: Bool { pulsing && !reduceMotion }
 
     var body: some View {
         ZStack {
@@ -164,9 +166,14 @@ struct OnboardingFlow: View {
                 // pulse is the same breathing rhythm Focus Mode uses while it
                 // waits.
                 AlbusCactus(size: 72, mood: .calm)
-                    .scaleEffect(pulsing ? 1.06 : 0.96)
-                    .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true),
-                              value: pulsing)
+                    // Still for a student who asked the system for less
+                    // motion, including one who asks while this is open:
+                    // turned off, a plain animation takes over from the
+                    // repeat, which is what ends it.
+                    .scaleEffect(pulses ? 1.06 : 0.96)
+                    .animation(pulses ? .easeInOut(duration: 1.6).repeatForever(autoreverses: true)
+                                      : .default,
+                              value: pulses)
                     .onAppear { pulsing = true }
             }
             VStack(spacing: Tokens.Spacing.s) {

@@ -246,10 +246,16 @@ private struct FocusBackdrop: View {
     }
 }
 
-/// A slow pulse behind the cactus.
+/// A slow pulse behind the cactus, while the timer runs.
+///
+/// Paused, it settles and holds still at half strength. It used to keep
+/// breathing: the repeat started once, on appear, and nothing ended it, so
+/// the glow went on over "Paused. Time is not counting." And it never breathes
+/// for a student who asked the system for less motion.
 private struct BreathingHalo: View {
     let tint: Color
     let isActive: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = false
 
     var body: some View {
@@ -259,12 +265,23 @@ private struct BreathingHalo: View {
             .frame(width: 260, height: 260)
             .scaleEffect(expanded ? 1.08 : 0.94)
             .opacity(isActive ? 1 : 0.5)
-            .animation(isActive
-                       ? .easeInOut(duration: 4).repeatForever(autoreverses: true)
-                       : .default,
-                       value: expanded)
-            .onAppear { expanded = true }
+            .animation(Tokens.Motion.quick, value: isActive)
+            .onAppear(perform: breathe)
+            .onChange(of: isActive) { _, _ in breathe() }
+            .onChange(of: reduceMotion) { _, _ in breathe() }
             .accessibilityHidden(true)
+    }
+
+    private func breathe() {
+        if isActive && !reduceMotion {
+            withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) {
+                expanded = true
+            }
+        } else {
+            // A new animation on the same value takes over from the repeating
+            // one, which is what ends it.
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.6)) { expanded = false }
+        }
     }
 }
 
