@@ -901,6 +901,9 @@ struct MoonScene: View {
         // their own shape, which is the only clip the design has.
         .onAppear(perform: start)
         .onChange(of: runID) { _, _ in start() }
+        // The purchase confirmation turns `animated` off when Reduce Motion
+        // comes on while it is open; the loops have to hear about it.
+        .onChange(of: animated) { _, _ in start() }
         .accessibilityHidden(true)
     }
 
@@ -928,9 +931,12 @@ struct MoonScene: View {
                     .fill(Color(hex: 0xF3E8FF))
                     .frame(width: size, height: size)
                     .opacity(twinkle ? 0.8 : 0.3)
+                    // The repeat only while twinkling. Turned off, a plain
+                    // animation takes over from it, which is what ends it.
                     .animation(
-                        .easeInOut(duration: 2.6 + Double(index % 4) * 0.5)
-                            .repeatForever(autoreverses: true).delay(delay),
+                        twinkle ? .easeInOut(duration: 2.6 + Double(index % 4) * 0.5)
+                                      .repeatForever(autoreverses: true).delay(delay)
+                                : .default,
                         value: twinkle)
                     .offset(x: x + 110, y: y + 60)
             }
@@ -1023,7 +1029,8 @@ struct MoonScene: View {
         .shadow(color: Color(hex: 0x180A30).opacity(0.6), radius: 13, x: 0, y: 14)
         .rotationEffect(.degrees(rotation))
         .offset(y: bob ? -7 : 0)
-        .animation(.easeInOut(duration: lines ? 5 : 5.6).repeatForever(autoreverses: true), value: bob)
+        .animation(bob ? .easeInOut(duration: lines ? 5 : 5.6).repeatForever(autoreverses: true) : .default,
+                   value: bob)
         .scaleEffect(landed ? 1 : 0.35)
         .opacity(landed ? 1 : 0)
         .animation(animated ? .spring(response: 0.5, dampingFraction: 0.55).delay(delay) : nil,

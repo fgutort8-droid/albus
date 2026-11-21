@@ -55,19 +55,23 @@ struct PurchaseConfirmation: View {
         .task { await play() }
         .onChange(of: reduceMotion) { _, reduced in if reduced { finish() } }
         .onChange(of: settled) { _, isSettled in
-            guard isSettled, !reduceMotion, frozenAt == nil else { return }
-            // Its own transaction, a moment after the frame that put
-            // everything in place, so the endless repeat is the only
-            // animation it carries. Started in the same update as a skip, it
-            // would also carry the jump from mid-hop and replay it forever.
+            guard isSettled, frozenAt == nil else { return }
+            // A moment after the frame that put everything in place, so the
+            // endless repeat is the only change it carries. Started in the
+            // same update as a skip, it would also carry the jump from
+            // mid-hop and replay it forever. Reduce Motion is not checked
+            // here, where it could be stale by the time this runs:
+            // `breathes` reads it on every frame.
             Task {
                 try? await Task.sleep(for: .milliseconds(100))
-                withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
-                    breathing = true
-                }
+                breathing = true
             }
         }
     }
+
+    /// Breathing is wanted and the student has not asked for less motion.
+    /// Read where it is drawn, so turning Reduce Motion on mid-screen stops it.
+    private var breathes: Bool { breathing && !reduceMotion }
 
     /// Seconds into the entrance; past its end once nothing moves.
     private func moment(_ date: Date) -> Double {
@@ -212,7 +216,7 @@ struct PurchaseConfirmation: View {
         let dust = Entrance.dust(at: t)
         let badge = Entrance.badge(at: t)
         let ring = Entrance.ring(at: t)
-        let rest = breathing ? CGSize(width: 1.012, height: 1.025) : CGSize(width: 1, height: 1)
+        let rest = breathes ? CGSize(width: 1.012, height: 1.025) : CGSize(width: 1, height: 1)
 
         return ZStack(alignment: .topLeading) {
             Color.clear
@@ -243,6 +247,12 @@ struct PurchaseConfirmation: View {
                 AlbusCactus(size: 104, mood: .calm, bloom: Entrance.bloom(at: t))
                     .scaleEffect(x: albus.scaleX, y: albus.scaleY, anchor: .bottom)
                     .scaleEffect(rest, anchor: .bottom)
+                    // The repeat only while breathing is allowed. The moment
+                    // it is not, a plain animation takes over from it, which
+                    // is what ends it.
+                    .animation(breathes ? .easeInOut(duration: 2.4).repeatForever(autoreverses: true)
+                                        : .default,
+                               value: breathes)
                     .offset(y: albus.offsetY)
             }
             .frame(width: 104, height: 132, alignment: .bottom)
