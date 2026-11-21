@@ -92,8 +92,10 @@ struct StepEditorSheet: View {
                                        isSelected: draft.minutesText == String(value)) {
                                 // Snappy, because this is a chip a student taps
                                 // three or four times deciding — a slow spring
-                                // here reads as lag rather than polish.
-                                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+                                // here reads as lag rather than polish. The
+                                // quick curve, as Home's filter chips use: it
+                                // is done before the next tap lands.
+                                withAnimation(Tokens.Motion.quick) {
                                     draft.minutesText = String(value)
                                 }
                             }

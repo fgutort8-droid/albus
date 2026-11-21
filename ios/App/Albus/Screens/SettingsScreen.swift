@@ -153,6 +153,10 @@ struct SettingsScreen: View {
                 }
             }
         }
+        // The plan warning arrives and leaves with its own short move, and
+        // the card below makes room smoothly; nothing changes the flag inside
+        // an animation of its own.
+        .animation(Tokens.Motion.quick, value: entitlements.refreshFailed)
     }
 
     private func textButton(_ title: String, action: @escaping () -> Void) -> some View {

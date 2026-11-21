@@ -74,9 +74,17 @@ struct GraderScreen: View {
     @State private var result: Grading?
     @State private var showingPaywall = false
 
-    /// Which line the marking screen is on, and whether the cactus is breathing.
+    /// Which line the marking screen is on, whether the cactus is breathing,
+    /// and how it is reacting to the line that just changed.
     @State private var beat = 0
     @State private var breathing = false
+    @State private var glance: Glance = .still
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The marking breath, unless the student has asked for less motion.
+    /// Read where the cactus is drawn, so turning Reduce Motion on
+    /// mid-marking stops it.
+    private var breathes: Bool { breathing && !reduceMotion }
     /// This screen opened on a marking another one started, and the student
     /// came back to watch it finish.
     @State private var resumedJob = false
@@ -228,6 +236,9 @@ struct GraderScreen: View {
                 case .result:       resultStage
                 }
             }
+            // The plan warning arrives and leaves with its own short move;
+            // nothing changes the flag inside an animation of its own.
+            .animation(Tokens.Motion.quick, value: entitlements.refreshFailed)
             .padding(Tokens.Spacing.xl)
         }
     }
@@ -607,20 +618,36 @@ struct GraderScreen: View {
         VStack(spacing: Tokens.Spacing.l) {
             AlbusCactus(size: 74, mood: .busy)
                 // A slow breath, not a bounce. The cactus is concentrating.
-                .scaleEffect(breathing ? 1.04 : 0.97)
-                .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true),
-                           value: breathing)
+                // The repeat only while motion is allowed: turned off, a
+                // plain animation takes over from it, which is what ends it.
+                .scaleEffect(breathes ? 1.04 : 0.97)
+                .animation(breathes ? .easeInOut(duration: 1.6).repeatForever(autoreverses: true)
+                                    : .default,
+                           value: breathes)
+                // And a glance as each line changes, so half a minute of the
+                // same breath reads as reading rather than as a loop.
+                .rotationEffect(.degrees(reduceMotion ? 0 : glance.angle), anchor: .bottom)
+                .offset(y: reduceMotion ? 0 : glance.drop)
 
             Text(markingIsBlind ? "Reading your work." : "Marking against your rubric.")
                 .font(Tokens.Typography.cardTitle)
                 .foregroundStyle(Tokens.Palette.ink)
 
-            Text(markingBeats[min(beat, markingBeats.count - 1)])
-                .font(Tokens.Typography.caption)
-                .foregroundStyle(Tokens.Palette.inkSecondary)
-                .multilineTextAlignment(.center)
-                .id(beat)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            // The lines take turns in one place. Sliding in from below, the
+            // line arriving and the line leaving both ran across the word
+            // count under them at every change.
+            ZStack {
+                // Every line, unseen, so the place is as tall as the tallest.
+                ForEach(markingBeats, id: \.self) { line in
+                    Text(line).hidden().accessibilityHidden(true)
+                }
+                Text(markingBeats[min(beat, markingBeats.count - 1)])
+                    .foregroundStyle(Tokens.Palette.inkSecondary)
+                    .id(beat)
+                    .transition(.opacity)
+            }
+            .font(Tokens.Typography.caption)
+            .multilineTextAlignment(.center)
 
             Text("\(markingWordCount) words. This can take a moment.")
                 .font(Tokens.Typography.micro)
@@ -648,12 +675,48 @@ struct GraderScreen: View {
             breathing = true
             // Stops at the last line rather than looping. Coming back round to
             // "Reading it through" after forty seconds reads as stuck.
+            var next = ContinuousClock.now
             while beat < markingBeats.count - 1 {
-                try? await Task.sleep(for: .seconds(5))
+                // Five seconds a line, measured from the last change, so the
+                // glance in between never stretches the wait.
+                next += .seconds(5)
+                try? await Task.sleep(until: next, clock: .continuous)
                 guard !Task.isCancelled else { return }
                 withAnimation(.easeInOut(duration: 0.35)) { beat += 1 }
+                // None on the last line: Albus has finished looking, and only
+                // breathes until the feedback arrives. Reduce Motion is not
+                // checked here, where it could be stale this far into the
+                // wait; the cactus reads it where it is drawn.
+                if beat < markingBeats.count - 1 {
+                    await look(beat.isMultiple(of: 2) ? .nod : .lean)
+                }
             }
         }
+    }
+
+    /// What Albus does as a marking line changes: leans in, as if reading the
+    /// work, or gives a small nod. Out and back, under a second.
+    private enum Glance {
+        case still, lean, nod
+
+        var angle: Double {
+            switch self {
+            case .still: 0
+            case .lean: 3
+            case .nod: -2
+            }
+        }
+
+        var drop: CGFloat { self == .nod ? 2 : 0 }
+
+        /// Each way.
+        var duration: Double { self == .lean ? 0.42 : 0.32 }
+    }
+
+    private func look(_ kind: Glance) async {
+        withAnimation(.easeInOut(duration: kind.duration)) { glance = kind }
+        try? await Task.sleep(for: .seconds(kind.duration))
+        withAnimation(.easeInOut(duration: kind.duration)) { glance = .still }
     }
 
     // MARK: - 5 · Result
@@ -744,7 +807,9 @@ struct GraderScreen: View {
                     .font(Tokens.Typography.overline)
                     .foregroundStyle(Tokens.Palette.inkSecondary)
             }
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: left)
+            // A capsule changing colour has nothing to bounce: the app's quick
+            // fade rather than a spring.
+            .animation(Tokens.Motion.quick, value: left)
         } else {
             Text("No plan limit")
                 .font(Tokens.Typography.overline)
