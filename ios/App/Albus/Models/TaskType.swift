@@ -35,7 +35,7 @@ enum TaskType: String, CaseIterable, Identifiable, Sendable, Codable {
         case .problemSet:   "Problem set"
         case .labReport:    "Lab report"
         case .reading:      "Reading"
-        case .revision:     "Revision"
+        case .revision:     "Exam or test" // still sent and stored as "revision"
         case .project:      "Project"
         case .presentation: "Presentation"
         case .other:        "Other"

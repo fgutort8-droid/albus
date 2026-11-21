@@ -106,6 +106,16 @@ struct TaskTypeTests {
         }
     }
 
+    @Test("exams are offered, under the revision wire value")
+    func examsAreOffered() {
+        // Students study for exams more than for anything else, and no option
+        // said so. The label changed; the wire value did not, so no server or
+        // database change is needed and every saved revision task still opens.
+        #expect(TaskType.revision.title == "Exam or test")
+        #expect(TaskType.revision.rawValue == "revision")
+        #expect(TaskType.offered.contains(.revision))
+    }
+
     // MARK: - Estimates
 
     @Test("every type has a usable default duration")
