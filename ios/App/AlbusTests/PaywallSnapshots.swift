@@ -46,16 +46,19 @@ struct PaywallSnapshots {
 
     private func render(_ name: String, _ screen: PaywallScreen,
                         entitlements: EntitlementService, purchases: PurchaseService) async throws {
+        try await render(name, screen.environment(entitlements).environment(purchases))
+    }
+
+    private func render(_ name: String, _ view: some View,
+                        size: CGSize = CGSize(width: 393, height: 852)) async throws {
         let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["ALBUS_SNAPSHOT_DIR"]!)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let scene = try #require(UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
-        window.rootViewController = UIHostingController(rootView: screen
-            .environment(entitlements)
-            .environment(purchases))
+        window.frame = CGRect(origin: .zero, size: size)
+        window.rootViewController = UIHostingController(rootView: view)
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
 
@@ -95,5 +98,25 @@ struct PaywallSnapshots {
     @Test func plusSubscriberLooksAtFree() async throws {
         try await render("6-plus-to-free", PaywallScreen(autoplay: false, plan: .free),
                          entitlements: await entitlements(.plus), purchases: await store(trial: false))
+    }
+
+    // MARK: - After a purchase
+
+    /// The entrance held at the moments the motion study names: the hop at
+    /// its height, the bud opening, the check landing (the haptic), its ring.
+    @Test func boughtPlusEntrance() async throws {
+        for (frame, moment) in [("a-start", 0.0), ("b-hop", 0.36), ("c-bloom", 0.56),
+                                ("d-landing", 0.74), ("e-ring", 0.9)] {
+            try await render("7-bought-plus-\(frame)", PurchaseConfirmation(plan: .plus, frozenAt: moment) {})
+        }
+    }
+
+    @Test func boughtSettled() async throws {
+        try await render("8-bought-plus", PurchaseConfirmation(plan: .plus, frozenAt: .infinity) {})
+        try await render("9-bought-pro", PurchaseConfirmation(plan: .pro, frozenAt: .infinity) {})
+        // The smallest phone the app runs on: the scene gives way to the lines.
+        try await render("10-bought-plus-small-phone",
+                         PurchaseConfirmation(plan: .plus, frozenAt: .infinity) {},
+                         size: CGSize(width: 375, height: 667))
     }
 }
