@@ -36,6 +36,10 @@ struct PaywallScreen: View {
     /// Between tapping buy or restore and the server reporting the plan.
     @State private var isConfirming = false
     @State private var runID = 0
+    /// The plan a purchase just switched on. Set, the screen shows what it
+    /// gives instead of closing: closing in silence left a student who had
+    /// just paid unable to tell whether it had worked.
+    @State private var bought: Plan?
 
     /// `plan` and `period` are only where the screen starts; the student
     /// changes both. Snapshots use them to render each state.
@@ -188,12 +192,22 @@ struct PaywallScreen: View {
             if phase != .done { intro }
         }
         .background(Palette.page)
+        .accessibilityHidden(bought != nil)
+        .overlay {
+            if let bought {
+                PurchaseConfirmation(plan: bought) { dismiss() }
+                    .transition(.opacity)
+            }
+        }
         .task(id: runID) { await runIntro() }
         // Prices that failed to load at launch get another try when the
         // student comes to look at them.
         .task {
             if case .failed = purchases.availability { await purchases.load() }
         }
+        #if DEBUG
+        .task { await rehearsePurchase() }
+        #endif
         .onChange(of: plan) { _, _ in notice = nil }
         .onChange(of: period) { _, _ in notice = nil }
     }
@@ -628,12 +642,46 @@ struct PaywallScreen: View {
                 return
             }
             switch await PurchaseFlow.buy(offer, purchases: purchases, entitlements: entitlements) {
-            case .unlocked: dismiss()
+            case .unlocked: showBought()
             case .message(let text): notice = text
             case .nothing: break
             }
         }
     }
+
+    /// The plan the server now reports, which `PurchaseFlow` has already
+    /// checked is at least the one bought, so the heading names what the
+    /// student actually has.
+    private func showBought() {
+        guard let tier = Plan(rawValue: entitlements.tier.rawValue), tier != .free else {
+            dismiss()
+            return
+        }
+        reveal(tier)
+    }
+
+    /// Over the plans screen, quickly: the confirmation's own entrance starts
+    /// as it arrives, and a slow fade would hide its first moves.
+    private func reveal(_ tier: Plan) {
+        withAnimation(.easeOut(duration: 0.2)) { bought = tier }
+    }
+
+    #if DEBUG
+    /// `-albus.debug.purchaseConfirmation plus|pro`: once the plans screen's
+    /// intro is over, what a purchase leads to arrives over it the way a real
+    /// one does. A simulator has no other way to reach it: it cannot buy.
+    private func rehearsePurchase() async {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: "-albus.debug.purchaseConfirmation"),
+              arguments.index(after: flag) < arguments.endIndex,
+              let tier = Plan(rawValue: arguments[arguments.index(after: flag)]),
+              tier != .free
+        else { return }
+        try? await Task.sleep(for: .seconds(4))
+        guard !Task.isCancelled else { return }
+        reveal(tier)
+    }
+    #endif
 
     private func restore() {
         guard !isBusy else { return }
@@ -773,9 +821,15 @@ struct PaywallScreen: View {
 /// `animated` is the difference between the intro and the panel at rest. At
 /// rest everything is in its final position and only the ambient loops run, so
 /// the panel never looks like a paused video.
-private struct MoonScene: View {
+///
+/// `PurchaseConfirmation` draws the same night without the cast — no Albus,
+/// no papers, no badge — and puts its own Albus and badge where these stand.
+struct MoonScene: View {
     let animated: Bool
     let runID: Int
+    /// Albus, his badge, the papers and the trail. Off for a scene that brings
+    /// its own.
+    var showsCast = true
 
     @State private var landed = false
     @State private var twinkle = false
@@ -786,6 +840,28 @@ private struct MoonScene: View {
     /// 16pt insets, which on the design's device is exactly 370.
     static let width: CGFloat = 370
     static let height: CGFloat = 310
+
+    /// Where Albus stands on the moon and where his badge sits: the top-left
+    /// of each, in the scene's own points. Shared with the confirmation so the
+    /// two scenes line up.
+    static let cactusOrigin = CGPoint(x: width / 2 - 52, y: height - 140 - 132)
+    static let badgeOrigin = CGPoint(x: 196, y: 28)
+
+    /// The violet check Albus plants. Its entrance is the caller's.
+    static var badge: some View {
+        Image(systemName: "checkmark")
+            .font(.system(size: 22, weight: .heavy))
+            .foregroundStyle(.white)
+            .frame(width: 48, height: 48)
+            .background(PaywallScreen.Palette.violet, in: Circle())
+            .shadow(color: PaywallScreen.Palette.violet.opacity(0.9), radius: 12, x: 0, y: 12)
+    }
+
+    /// The shadow under the pot, which stays on the ground when Albus leaves it.
+    static var groundShadow: some View {
+        Ellipse().fill(Color(hex: 0x3C146E).opacity(0.34))
+            .frame(width: 92, height: 16).blur(radius: 4).offset(y: 2)
+    }
 
     /// x, y, size, delay — authored wider than the panel so the field still
     /// fills the frame while the scene is scaled up during the flight.
@@ -809,11 +885,13 @@ private struct MoonScene: View {
             starField.offset(x: -110, y: -60)
             horizonGlow.offset(x: w / 2 - 230, y: h - 96 - 190)
             moon.offset(x: w / 2 - 310, y: h + 122 - 268)
-            trail
-            floatingCard(rotation: -9, lines: true, delay: 2.42).offset(x: 38, y: 106)
-            floatingCard(rotation: 10, lines: false, delay: 2.56).offset(x: w - 34 - 62, y: 116)
-            checkBadge.offset(x: 196, y: 28)
-            cactus.offset(x: w / 2 - 52, y: h - 140 - 132)
+            if showsCast {
+                trail
+                floatingCard(rotation: -9, lines: true, delay: 2.42).offset(x: 38, y: 106)
+                floatingCard(rotation: 10, lines: false, delay: 2.56).offset(x: w - 34 - 62, y: 116)
+                checkBadge.offset(x: Self.badgeOrigin.x, y: Self.badgeOrigin.y)
+                cactus.offset(x: Self.cactusOrigin.x, y: Self.cactusOrigin.y)
+            }
         }
         .frame(width: w, height: h, alignment: .topLeading)
         // Deliberately not clipped here. The moon is 620pt wide and most of it
@@ -953,12 +1031,7 @@ private struct MoonScene: View {
     }
 
     private var checkBadge: some View {
-        Image(systemName: "checkmark")
-            .font(.system(size: 22, weight: .heavy))
-            .foregroundStyle(.white)
-            .frame(width: 48, height: 48)
-            .background(PaywallScreen.Palette.violet, in: Circle())
-            .shadow(color: PaywallScreen.Palette.violet.opacity(0.9), radius: 12, x: 0, y: 12)
+        Self.badge
             .scaleEffect(landed ? 1 : 0)
             .animation(animated ? .spring(response: 0.55, dampingFraction: 0.5).delay(1.8) : nil,
                        value: landed)
@@ -967,8 +1040,7 @@ private struct MoonScene: View {
     /// Albus, flying in from the lower right and landing on the moon's horizon.
     private var cactus: some View {
         ZStack(alignment: .bottom) {
-            Ellipse().fill(Color(hex: 0x3C146E).opacity(0.34))
-                .frame(width: 92, height: 16).blur(radius: 4).offset(y: 2)
+            Self.groundShadow
             AlbusCactus(size: 104, mood: .calm)
         }
         .frame(width: 104, height: 132, alignment: .bottom)
@@ -982,7 +1054,7 @@ private struct MoonScene: View {
 // MARK: - Support
 
 /// The hero panel's shape: a tall arch on top, a gentle radius at the base.
-private struct RoundedCornersShape: Shape {
+struct RoundedCornersShape: Shape {
     var top: CGFloat
     var bottom: CGFloat
 
