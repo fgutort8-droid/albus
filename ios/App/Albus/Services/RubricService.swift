@@ -35,6 +35,9 @@ struct RubricService {
     enum Failure: LocalizedError, Equatable {
         case offline
         case unavailable
+        /// The plan's rubrics are used up. Saving again will not help until
+        /// one is deleted, so this must not read like a sync that failed.
+        case planLimit
         case rejected(String)
 
         var errorDescription: String? {
@@ -43,6 +46,11 @@ struct RubricService {
                 "No connection — this rubric is saved on your phone. Try saving it again when you're online."
             case .unavailable:
                 "Couldn't sync this rubric. It's saved on your phone."
+            case .planLimit:
+                // No number, for the reason `PlanService` gives for tasks:
+                // Free keeps 3 and Plus 5, and a literal would be wrong for one.
+                "That's as many synced rubrics as your plan keeps. This one is saved on your phone "
+                + "only: delete one and save it again, or move up a plan."
             case .rejected(let why):
                 why
             }
@@ -84,12 +92,21 @@ struct RubricService {
             throw error.code == .notConnectedToInternet || error.code == .networkConnectionLost
                 ? Failure.offline
                 : Failure.unavailable
+        } catch let error as PostgrestError where Self.isPlanLimit(error) {
+            throw Failure.planLimit
         } catch {
             // Record the operation only: backend error details may include
             // student content. Preserve the existing user-facing failure.
             log("[Albus] rubric sync failed")
             throw Failure.unavailable
         }
+    }
+
+    /// `RUBRIC_PLAN_LIMIT`, raised as Q0011 by `assert_rubric_limits` when a
+    /// new rubric would pass the plan's limit. Read by its code, never by its
+    /// message text.
+    static func isPlanLimit(_ error: PostgrestError) -> Bool {
+        error.code == "Q0011"
     }
 
     /// Deleting is a plain DELETE: RLS scopes it to the owner, and the cascade

@@ -66,6 +66,8 @@ struct GraderScreen: View {
     @State private var rubricPhotoPicking = false
     @State private var rubricPhoto: PhotosPickerItem?
     @State private var syncFailure: String?
+    /// Set when a new rubric was asked for with the plan's rubrics used up.
+    @State private var rubricLimitReached: Int?
 
     // How the student wants it back.
     @State private var presentation = ""
@@ -177,6 +179,9 @@ struct GraderScreen: View {
         }
         .animation(.spring(response: 0.38, dampingFraction: 0.86), value: stage)
         .sheet(isPresented: $showingPaywall) { PaywallScreen() }
+        .rubricLimitDialog($rubricLimitReached, planName: entitlements.plan.displayName) {
+            showingPaywall = true
+        }
         .sheet(item: $editingRubric) { draft in
             RubricEditorSheet(draft: draft) { saved in
                 RubricWriter.commit(saved, context: context) { syncFailure = $0 }
@@ -458,6 +463,13 @@ struct GraderScreen: View {
         stageTitle("What should I mark it against?",
                    "Your rubric gives Albus criteria for estimating a mark.")
 
+        // A rubric written here that the server turned away, or a photo Albus
+        // could not read. Both were set and never shown: a rubric past the
+        // plan's limit looked saved, and a failed photo did nothing at all.
+        if let syncFailure {
+            StatusBanner(tone: .warning, message: syncFailure)
+        }
+
         if !rubrics.isEmpty {
             VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
                 SectionHeader(label: "Saved rubrics") { EmptyView() }
@@ -481,10 +493,10 @@ struct GraderScreen: View {
             // rubric added here is a real saved rubric rather than a one-off
             // that vanishes after marking.
             importRow("Type or paste a rubric", "Saved for next time", "doc.text") {
-                editingRubric = .empty
+                whenRoomForRubric { editingRubric = .empty }
             }
             importRow("Choose a photo of a rubric", "From a handout or the board", "photo") {
-                rubricPhotoPicking = true
+                whenRoomForRubric { rubricPhotoPicking = true }
             }
         }
 
@@ -498,6 +510,18 @@ struct GraderScreen: View {
                       isEnabled: chosenRubric != nil || acceptedBlind
                                  || chosenAssignment?.rubric != nil) {
             stage = .presentation
+        }
+    }
+
+    /// Runs `start` when the plan has room for one more rubric. When it has
+    /// not, the plan says so now: the server would turn the rubric away once
+    /// written, so nothing could be marked against it.
+    private func whenRoomForRubric(_ start: () -> Void) {
+        if let limit = entitlements.rubricLimit(reachedBy: rubrics.count) {
+            rubricLimitReached = limit
+        } else {
+            syncFailure = nil
+            start()
         }
     }
 

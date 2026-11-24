@@ -21,11 +21,13 @@ struct GraderPhotoRowTests {
             .appendingPathComponent("Albus")
     }
 
-    /// The title and icon of every Grader row that opens a photo picker.
+    /// The title and icon of every Grader row that opens a photo picker. The
+    /// rubric row opens it only while the plan has room for another rubric,
+    /// so its picker can sit inside `whenRoomForRubric { … }`.
     private static func photoRows() throws -> [(title: String, icon: String)] {
         let url = appSources.appendingPathComponent("Screens/GraderScreen.swift")
         let source = try String(contentsOf: url, encoding: .utf8)
-        let pattern = #"importRow\("([^"]+)",\s*"[^"]*",\s*"([^"]+)"\)\s*\{\s*(?:workPhotoPicking|rubricPhotoPicking) = true"#
+        let pattern = #"importRow\("([^"]+)",\s*"[^"]*",\s*"([^"]+)"\)\s*\{\s*(?:whenRoomForRubric\s*\{\s*)?(?:workPhotoPicking|rubricPhotoPicking) = true"#
         let regex = try NSRegularExpression(pattern: pattern)
         let all = NSRange(source.startIndex..., in: source)
         return regex.matches(in: source, range: all).map { match in

@@ -13,6 +13,7 @@ struct AddTaskSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(Preferences.self) private var preferences
+    @Environment(EntitlementService.self) private var entitlements
 
     @Query(sort: \Course.displayName) private var courses: [Course]
     @Query(sort: \Rubric.updatedAt, order: .reverse) private var rubrics: [Rubric]
@@ -29,6 +30,9 @@ struct AddTaskSheet: View {
     @State private var hours = 2.0
     @State private var creatingRubric: RubricDraft?
     @State private var addingCourse = false
+    /// Set when a new rubric was asked for with the plan's rubrics used up.
+    @State private var rubricLimitReached: Int?
+    @State private var showingPaywall = false
 
     /// The vocabulary the server's check constraint accepts. Kept here rather
     /// than as free text so a typo is a compile error, not a 422.
@@ -91,7 +95,7 @@ struct AddTaskSheet: View {
                         + rubrics.map { (value: UUID?.some($0.id), title: $0.name) },
                     selection: $rubricID
                 )
-                Button("New rubric\u{2026}") { creatingRubric = .empty }
+                Button("New rubric\u{2026}") { newRubric() }
                     .font(Tokens.Typography.caption)
                     .foregroundStyle(Tokens.Palette.accent)
                 Text(selectedRubric == nil
@@ -163,6 +167,21 @@ struct AddTaskSheet: View {
                     rubricID = created
                 }
             }
+        }
+        .rubricLimitDialog($rubricLimitReached, planName: entitlements.plan.displayName) {
+            showingPaywall = true
+        }
+        .sheet(isPresented: $showingPaywall) { PaywallScreen() }
+    }
+
+    /// The rubric editor, when the plan has room for one more. When it has
+    /// not, the plan says so now: the server would turn the rubric away once
+    /// written, and a task planned against it would be planned without it.
+    private func newRubric() {
+        if let limit = entitlements.rubricLimit(reachedBy: rubrics.count) {
+            rubricLimitReached = limit
+        } else {
+            creatingRubric = .empty
         }
     }
 
