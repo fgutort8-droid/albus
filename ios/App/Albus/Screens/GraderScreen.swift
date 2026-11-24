@@ -159,12 +159,24 @@ struct GraderScreen: View {
             }
             // Arriving from an assignment answers "what am I marking?" already,
             // so the flow starts at the next real question rather than showing
-            // a chooser with one obvious answer pre-ticked.
+            // a chooser with one obvious answer pre-ticked — but only while the
+            // plan has a marking to spend. The first screen is the one that
+            // says marking needs Plus or Pro, or that this week's are used up;
+            // skipping it let a student fill in the whole flow and be turned
+            // away only when they pressed mark.
+            var arrivedLocked = false
             if let assignment, chosenAssignment == nil {
                 choose(assignment)
-                if stage == .start { stage = .work }
+                if stage == .start {
+                    if grader.hasAny { stage = .work } else { arrivedLocked = true }
+                }
             }
             await entitlements.refresh()
+            // The plan on the phone can be behind the server's: a student who
+            // has just bought Plus can arrive here still showing Free. Once the
+            // server has answered, they go on to the work as if it had been
+            // right all along.
+            if arrivedLocked, stage == .start, grader.hasAny { stage = .work }
         }
         .onAppear { marking.isWatched = true }
         .onDisappear { marking.isWatched = false }
