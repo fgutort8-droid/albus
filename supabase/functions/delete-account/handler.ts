@@ -1,8 +1,11 @@
-import { appleConfig, revokeApple } from "../_shared/apple_auth.ts";
+import { appleConfig, revokeApple, revokeAppleToken } from "../_shared/apple_auth.ts";
 import { readJsonBody } from "../_shared/body.ts";
 import { errorResponse, HttpError, jsonResponse } from "../_shared/http.ts";
 
-type Rpc = (name: string, args?: Record<string, unknown>) => PromiseLike<{ error: unknown }>;
+type Rpc = (
+  name: string,
+  args?: Record<string, unknown>,
+) => PromiseLike<{ data?: unknown; error: unknown }>;
 interface Dependencies {
   requireUser: (req: Request) => Promise<{ id: string; db: { rpc: Rpc } }>;
   adminClient: () => {
@@ -45,6 +48,15 @@ async function authorizationCode(req: Request): Promise<string | undefined> {
   }
 }
 
+async function storedRefreshToken(admin: { rpc: Rpc }, userId: string): Promise<string | null> {
+  try {
+    const { data, error } = await admin.rpc("take_apple_refresh_token", { p_user_id: userId });
+    return !error && typeof data === "string" && data ? data : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createDeleteAccountHandler(deps: Dependencies) {
   return async (req: Request): Promise<Response> => {
     try {
@@ -62,10 +74,21 @@ export function createDeleteAccountHandler(deps: Dependencies) {
         if (!config) {
           failure = { kind: "apple_revoke_unconfigured", code: "invalid_client" };
         } else {
-          if (!code) throw new HttpError(428, "APPLE_REAUTH_REQUIRED");
-          const sub = identity.identity_data?.sub;
-          const subject = typeof sub === "string" && sub ? sub : identity.id;
-          const result = await revokeApple(config, code, subject, deps.fetch, deps.now());
+          let result;
+          if (code) {
+            const sub = identity.identity_data?.sub;
+            const subject = typeof sub === "string" && sub ? sub : identity.id;
+            result = await revokeApple(config, code, subject, deps.fetch, deps.now());
+          } else {
+            // The refresh token kept at sign-in (`apple-token`), so the
+            // student is not sent through Apple's sheet to delete. Taken, so
+            // it is gone whatever happens next. None kept (an account that
+            // signed in before tokens were kept, or a failed read): the app
+            // asks Apple for a fresh code instead, as it always did.
+            const stored = await storedRefreshToken(admin, caller.id);
+            if (!stored) throw new HttpError(428, "APPLE_REAUTH_REQUIRED");
+            result = await revokeAppleToken(config, stored, "refresh_token", deps.fetch, deps.now());
+          }
           appleRevoked = result.revoked;
           if (!result.revoked) failure = { kind: "apple_revoke_failed", code: result.code };
         }
@@ -89,7 +112,8 @@ export function createDeleteAccountHandler(deps: Dependencies) {
       }
       // No API rate gate: its SQL allowlist covers only breakdown/chat/grade.
       // Each request makes at most one exchange and revoke; success deletes the
-      // authenticated caller, and the code comes from their Apple sign-in sheet.
+      // authenticated caller. The token revoked is the one kept at sign-in, or
+      // one exchanged from a code off their Apple sign-in sheet.
       const result = await caller.db.rpc("delete_my_account");
       if (result.error) throw new HttpError(500, "INTERNAL_ERROR");
       return jsonResponse({ deleted: true, apple_revoked: appleRevoked });

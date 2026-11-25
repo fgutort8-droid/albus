@@ -41,7 +41,9 @@
   <p>You sign in before you start, with Sign in with Apple. Your account is kept by our database provider,
      Supabase, with a random identifier and no password. Apple gives us an identifier it made for you and
      Albus, and the email address you choose to share, which can be a private relay address that forwards to
-     you. We never see your Apple ID or its password, and we don't ask Apple for your name.</p>
+     you. We never see your Apple ID or its password, and we don't ask Apple for your name.
+     When you sign in, we also keep, encrypted, a token Apple issues for your account, used only to stop
+     your Sign in with Apple for Albus when you delete your account. It is deleted with your account.</p>
   <p>We use your email address only to find your account if you write to us. We don't send you email,
      newsletters or marketing.
      <em>Why: to provide the app you asked for, and to let you sign back in.</em></p>
@@ -149,9 +151,9 @@
   <h2>6. Your choices and rights</h2>
   <ul>
     <li><strong>Delete your account</strong> in the app: Settings → Delete account. This removes your
-        account, its email address, student content on our server and the local cache on this phone. If you
-        signed in with Apple, Apple first asks you to confirm it's you, and deletion can't start without that.
-        Albus then asks Apple to stop your Sign in with Apple for Albus. If Albus can't reach Apple at that
+        account, its email address, student content on our server and the local cache on this phone. Albus
+        then asks Apple to stop your Sign in with Apple for Albus, using the token kept when you signed in; if
+        there isn't one, Apple first asks you to confirm it's you. If Albus can't reach Apple at that
         point, your account is still deleted, and you can stop it yourself in your iPhone's Settings, under
         your name, in Sign in with Apple. The payment and security records
         described above are kept under their retention rules. They hold no name, email address or study

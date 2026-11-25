@@ -12,44 +12,79 @@ struct AccountDeletionScreen: View {
     @Environment(FocusSession.self) private var focus
     @Environment(NotificationCoordinator.self) private var notifications
     @Environment(LocalAccount.self) private var localAccount
-    @State private var confirmation = ""
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Tokens.Spacing.l) {
-                Text(recovering ? "Finish deleting your account" : "Delete account")
-                    .font(Tokens.Typography.cardTitle)
+                Text(recovering ? "Finish deleting your account" : "Delete your account")
+                    .font(Tokens.Typography.title)
+                    .foregroundStyle(Tokens.Palette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 if recovering {
                     Text("Albus needs to finish clearing this phone before you can start again.")
+                        .font(Tokens.Typography.body)
+                        .foregroundStyle(Tokens.Palette.inkSecondary)
                 } else {
-                    Text("Your account, assignments, saved rubrics and marks will be deleted. This can't be undone. After successful deletion, signing in again starts a new, empty account. If Albus can no longer access your account, only this phone is cleared. Payment and security records may be retained; see the privacy policy.")
-                    if needsApple {
-                        Text("Apple will ask you to confirm it's you, so Albus can ask Apple to revoke access. Deletion can't start without that confirmation. After it, deletion goes ahead even if Albus can't reach Apple to revoke access.")
+                    Text("Your assignments, plans, saved rubrics and marks are deleted for good. "
+                         + "Signing in again starts a new, empty account.")
+                        .font(Tokens.Typography.body)
+                        .foregroundStyle(Tokens.Palette.inkSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    // The one thing deleting does not do, said where it cannot
+                    // be missed: Apple bills a subscription, not Albus.
+                    GlassCard {
+                        VStack(alignment: .leading, spacing: Tokens.Spacing.xs) {
+                            Text("It doesn't cancel a subscription")
+                                .font(Tokens.Typography.cardTitle)
+                                .foregroundStyle(Tokens.Palette.ink)
+                            Text("Apple keeps billing until you cancel in Settings → your name → Subscriptions.")
+                                .font(Tokens.Typography.caption)
+                                .foregroundStyle(Tokens.Palette.inkSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    Text("Deleting your account does NOT cancel an Apple subscription. Apple will keep billing you until you cancel in iPhone Settings → your name → Subscriptions.")
-                        .fontWeight(.semibold)
-                    TextField("Type DELETE to confirm", text: $confirmation)
-                        .textFieldStyle(.roundedBorder)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("accountDeletionConfirmation")
+
+                    Text("If Albus can't reach your account, only this phone is cleared. "
+                         + "Payment and security records may be kept.")
+                        .font(Tokens.Typography.caption)
+                        .foregroundStyle(Tokens.Palette.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Privacy policy") { openURL(AppLinks.privacy) }
+                        .font(Tokens.Typography.caption)
+                        .foregroundStyle(Tokens.Palette.accent)
                 }
+
                 if let message = deletion.errorMessage {
-                    Text(message).foregroundStyle(Tokens.Palette.danger)
-                }
-                if deletion.isBusy { ProgressView("Deleting account…") }
-                Button(recovering ? "Try again" : "Permanently delete account", role: .destructive) {
-                    Task { await removeAccount() }
-                }
-                .disabled(deletion.isBusy || (!recovering && confirmation != "DELETE"))
-                .accessibilityIdentifier("confirmAccountDeletion")
-                if !recovering {
-                    Button("Cancel", role: .cancel) { dismiss() }
-                        .disabled(deletion.isBusy)
+                    StatusBanner(tone: .error, message: message)
                 }
             }
             .padding(Tokens.Spacing.xl)
-            .foregroundStyle(Tokens.Palette.ink)
+        }
+        .scrollContentBackground(.hidden)
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: Tokens.Spacing.s) {
+                if deletion.isBusy {
+                    ProgressView("Deleting your account…")
+                        .frame(height: 50)
+                } else if recovering {
+                    PrimaryButton(title: "Try again") { Task { await removeAccount() } }
+                } else {
+                    HoldToConfirmButton(title: "Hold to delete") { Task { await removeAccount() } }
+                        .accessibilityIdentifier("confirmAccountDeletion")
+                }
+                if !recovering {
+                    Button("Cancel") { dismiss() }
+                        .font(Tokens.Typography.label)
+                        .foregroundStyle(Tokens.Palette.inkSecondary)
+                        .frame(height: 44)
+                        .disabled(deletion.isBusy)
+                }
+            }
+            .padding(.horizontal, Tokens.Spacing.xl)
+            .padding(.bottom, Tokens.Spacing.l)
         }
         .interactiveDismissDisabled(deletion.isBusy)
         .task {
@@ -57,26 +92,21 @@ struct AccountDeletionScreen: View {
         }
     }
 
-    /// An account that uses Sign in with Apple, or one the server said does.
-    /// Apple has to confirm before the server will delete it: see
-    /// `AppleConfirmation`.
-    private var needsApple: Bool {
-        session.signInMethod == .apple || deletion.refused != nil
+    /// Without Apple's sheet unless the server needs it
+    /// (`AccountDeletion.deleteAskingAppleOnlyIfNeeded`). Recovering a
+    /// deletion the server already made asks nothing of Apple.
+    private func removeAccount() async {
+        if recovering {
+            _ = await attempt(appleCode: nil)
+            return
+        }
+        _ = await deletion.deleteAskingAppleOnlyIfNeeded(
+            attempt: { await attempt(appleCode: $0) },
+            appleCode: { try await AppleConfirmation().authorizationCode() })
     }
 
-    private func removeAccount() async {
-        var appleCode: String?
-        if !recovering, !deletion.requiresCleanup, needsApple {
-            do {
-                appleCode = try await AppleConfirmation().authorizationCode()
-            } catch {
-                deletion.errorMessage = SignInError.from(error) == .cancelled
-                    ? DeletionRefusal.needsApple.message
-                    : DeletionRefusal.appleCodeInvalid.message
-                return
-            }
-        }
-        _ = await deletion.perform(
+    private func attempt(appleCode: String?) async -> Bool {
+        await deletion.perform(
             reachServer: { try await session.reachServer() },
             deleteRemote: { try await session.deleteRemoteAccount(appleAuthorizationCode: appleCode) },
             clearLocal: {

@@ -27,6 +27,7 @@ struct SignInScreen: View {
     private struct Conflict: Equatable {
         let token: String
         let nonce: String
+        let code: String?
     }
 
     var body: some View {
@@ -111,7 +112,8 @@ struct SignInScreen: View {
                         message = SignInError.other.message
                         return
                     }
-                    signInWithApple(token: token, nonce: nonce)
+                    signInWithApple(token: token, nonce: nonce,
+                                    code: AppleSignIn.authorizationCode(from: authorization))
                 case .failure(let error):
                     message = SignInError.from(error).message
                 }
@@ -128,18 +130,18 @@ struct SignInScreen: View {
 
     // MARK: - Apple
 
-    private func signInWithApple(token: String, nonce: String) {
+    private func signInWithApple(token: String, nonce: String, code: String?) {
         message = nil
         isWorking = true
         Task {
             defer { isWorking = false }
             do {
-                try await session.signInWithApple(idToken: token, nonce: nonce)
+                try await session.signInWithApple(idToken: token, nonce: nonce, authorizationCode: code)
                 if savingAccount { dismiss() }
             } catch {
                 let failure = SignInError.from(error)
                 if savingAccount, failure == .appleIDInUse {
-                    conflict = Conflict(token: token, nonce: nonce)
+                    conflict = Conflict(token: token, nonce: nonce, code: code)
                 } else {
                     message = failure.message
                 }
@@ -160,7 +162,8 @@ struct SignInScreen: View {
         Task {
             defer { isWorking = false }
             do {
-                try await session.switchToApple(idToken: chosen.token, nonce: chosen.nonce)
+                try await session.switchToApple(idToken: chosen.token, nonce: chosen.nonce,
+                                                authorizationCode: chosen.code)
                 dismiss()
             } catch {
                 message = SignInError.from(error).message

@@ -1,3 +1,4 @@
+import AuthenticationServices
 import Foundation
 import SwiftData
 import Testing
@@ -295,5 +296,97 @@ struct AccountDeletionTests {
         #expect(try context.fetchCount(FetchDescriptor<RubricItem>()) == 0)
         #expect(try context.fetchCount(FetchDescriptor<Grading>()) == 0)
         #expect(!preferences.hasOnboarded && preferences.name.isEmpty)
+    }
+
+    // MARK: Deleting without signing in again
+
+    @Test("a token kept at sign-in deletes without Apple's sheet")
+    func noSheetWhenTheServerHasAToken() async {
+        let deletion = AccountDeletion(defaults: UserDefaults(suiteName: "albus.tests.\(UUID())")!)
+        var codes: [String?] = []
+        var asked = false
+        let deleted = await deletion.deleteAskingAppleOnlyIfNeeded(
+            attempt: { code in codes.append(code); return true },
+            appleCode: { asked = true; return "code" })
+        #expect(deleted)
+        #expect(codes == [nil])
+        #expect(!asked, "Apple's sheet was shown though the server needed nothing from it")
+    }
+
+    @Test("with no token kept, Apple confirms once and the deletion is tried again with its code")
+    func sheetOnlyWhenNeeded() async {
+        let deletion = AccountDeletion(defaults: UserDefaults(suiteName: "albus.tests.\(UUID())")!)
+        var codes: [String?] = []
+        let deleted = await deletion.deleteAskingAppleOnlyIfNeeded(
+            attempt: { code in
+                codes.append(code)
+                if code == nil {
+                    return await deletion.perform(reachServer: {},
+                                                  deleteRemote: { throw DeletionRefusal.needsApple },
+                                                  clearLocal: {}, signOut: {})
+                }
+                return true
+            },
+            appleCode: { "fresh-code" })
+        #expect(deleted)
+        #expect(codes == [nil, "fresh-code"])
+        #expect(deletion.errorMessage == nil)
+    }
+
+    @Test("cancelling Apple's sheet deletes nothing and says why")
+    func cancelledSheet() async {
+        let deletion = AccountDeletion(defaults: UserDefaults(suiteName: "albus.tests.\(UUID())")!)
+        var attempts = 0
+        let deleted = await deletion.deleteAskingAppleOnlyIfNeeded(
+            attempt: { _ in
+                attempts += 1
+                return await deletion.perform(reachServer: {},
+                                              deleteRemote: { throw DeletionRefusal.needsApple },
+                                              clearLocal: {}, signOut: {})
+            },
+            appleCode: { throw ASAuthorizationError(.canceled) })
+        #expect(!deleted)
+        #expect(attempts == 1)
+        #expect(deletion.errorMessage == DeletionRefusal.needsApple.message)
+    }
+
+    @Test("any other failure never shows Apple's sheet")
+    func otherFailuresAskNothing() async {
+        let deletion = AccountDeletion(defaults: UserDefaults(suiteName: "albus.tests.\(UUID())")!)
+        var asked = false
+        let deleted = await deletion.deleteAskingAppleOnlyIfNeeded(
+            attempt: { _ in
+                await deletion.perform(reachServer: {},
+                                       deleteRemote: { throw URLError(.notConnectedToInternet) },
+                                       clearLocal: {}, signOut: {})
+            },
+            appleCode: { asked = true; return "code" })
+        #expect(!deleted)
+        #expect(!asked)
+    }
+
+    /// The views and the sign-in service cannot be driven from a unit test
+    /// without a real Apple sign-in, so this reads the source, as
+    /// `PlanDoorWiringTests` does: every Apple sign-in hands its code to the
+    /// server, and the deletion screen asks Apple only through the flow above.
+    @Test("sign-in keeps the token, and deletion asks Apple only when needed")
+    func wiring() throws {
+        func source(_ path: String) throws -> String {
+            let url = URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Albus/\(path)")
+            return try String(contentsOf: url, encoding: .utf8)
+        }
+        let session = try source("Services/SessionService.swift")
+        let signIn = try source("Screens/SignInScreen.swift")
+        let screen = try source("Screens/AccountDeletionScreen.swift")
+        #expect(session.components(separatedBy: "keepAppleToken(authorizationCode)").count - 1 == 2,
+                "both Apple sign-ins hand their code to the server")
+        #expect(session.contains("\"apple-token\""))
+        #expect(signIn.contains("code: AppleSignIn.authorizationCode(from: authorization)"))
+        #expect(screen.contains("deletion.deleteAskingAppleOnlyIfNeeded("))
+        #expect(screen.components(separatedBy: "AppleConfirmation()").count - 1 == 1,
+                "Apple's sheet is reached only through the flow")
+        #expect(!screen.contains("TextField"), "nothing to type to delete")
     }
 }
