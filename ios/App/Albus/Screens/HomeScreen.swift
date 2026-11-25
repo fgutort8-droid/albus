@@ -99,7 +99,8 @@ struct HomeScreen: View {
                 Task {
                     await coordinator.addAssignment(draft, context: context,
                                                     availability: preferences.availability,
-                                                    taskLimit: entitlements.plan.tasks.limit)
+                                                    taskLimit: entitlements.plan.tasks.limit,
+                                                    useAI: preferences.mayUseAI)
                     // Refused, perhaps by a plan full of another phone's
                     // tasks: read the plan again, so Home can say so.
                     if case .failed = coordinator.status { await entitlements.refresh() }

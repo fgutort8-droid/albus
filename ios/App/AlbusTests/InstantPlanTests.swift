@@ -476,6 +476,20 @@ struct InstantPlanTests {
                 "and the scheduler is never handed them")
     }
 
+    @Test("with the AI not allowed, the phone's plan stands and nothing is sent")
+    func noAIMeansNothingSent() async throws {
+        let context = try store()
+        let coordinator = coordinator()
+        HeldPlanTransport.state.release()
+        await coordinator.addAssignment(essay(), context: context, availability: availability,
+                                        useAI: false, now: now)
+        let added = try #require(try assignment(in: context))
+        #expect(!added.subtasks.isEmpty, "the phone planned it")
+        #expect(added.remoteID == nil)
+        #expect(HeldPlanTransport.state.breakdownRequests == 0, "nothing went to the AI")
+        #expect(coordinator.status == .plannedLocally(note: PlanCoordinator.aiOffNote, suggestsUpgrade: false))
+    }
+
     @Test("an archived assignment does not count against the open-task cap")
     func archivedIsNotCounted() async throws {
         let context = try store()
@@ -566,11 +580,15 @@ private final class HeldPlanTransport: URLProtocol, @unchecked Sendable {
         private var released = false
         private var deleted: [String] = []
         private var refusal: (status: Int, body: Data)?
+        private var asked = 0
 
         func reset() {
             lock.lock(); defer { lock.unlock() }
-            held = []; released = false; deleted = []; refusal = nil
+            held = []; released = false; deleted = []; refusal = nil; asked = 0
         }
+        /// How many times the AI was asked for a plan.
+        var breakdownRequests: Int { lock.lock(); defer { lock.unlock() }; return asked }
+        func countBreakdown() { lock.lock(); defer { lock.unlock() }; asked += 1 }
         /// Answer `breakdown` with this refusal instead of a plan.
         func refuse(status: Int, error: String, message: String) {
             lock.lock(); defer { lock.unlock() }
@@ -618,6 +636,7 @@ private final class HeldPlanTransport: URLProtocol, @unchecked Sendable {
             Self.state.recordDeletion(url.query ?? "")
             respond(status: 204, body: Data())
         } else if url.path.hasSuffix("/functions/v1/breakdown") {
+            Self.state.countBreakdown()
             if !Self.state.hold(self) { answer() }
         } else {
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))

@@ -64,7 +64,10 @@ The answers above already include them.
   Albus it is linked, because RevenueCat is given the account identifier
   (`PurchaseService.identify`).
 - **Anthropic**: receives the plan or marking text from the server, not from
-  the app. Covered by Other User Content.
+  the app. Covered by Other User Content. The app asks first (guideline
+  5.1.2(i)): `AIPermissionView`, in onboarding before the first plan and once
+  for anyone who joined earlier. Without a yes nothing is sent; plans are made
+  on the phone and marking stays off. Settings → AI changes the answer.
 - **Supabase**: hosts the database and functions. Its own operational logs may
   keep IP addresses and request details; the privacy policy says so. Those
   logs were not inspected (no production access).

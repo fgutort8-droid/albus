@@ -25,6 +25,10 @@ final class PlanCoordinator {
 
     private(set) var status: Status = .idle
 
+    /// What Home says when the student has not allowed the AI.
+    static let aiOffNote = "AI is off, so Albus split this into study sessions for you. "
+        + "You can turn it on in Settings."
+
     /// Steps the scheduler could not fit before their deadline.
     ///
     /// The scheduler has always reported these and nothing ever read them, so a
@@ -157,10 +161,15 @@ final class PlanCoordinator {
     /// still leaves them a working plan and everything they typed. The AI's
     /// steps then replace the phone's, unless the student has already started
     /// on them: a plan they have begun is theirs.
+    ///
+    /// - Parameter useAI: false while the student has not allowed the AI
+    ///   (`Preferences.mayUseAI`). The phone's plan is then the plan, and
+    ///   nothing about the task is sent anywhere.
     func addAssignment(_ draft: NewAssignment,
                        context: ModelContext,
                        availability: Availability = .default,
                        taskLimit: Int? = nil,
+                       useAI: Bool = true,
                        now: Date = .now) async {
         guard !accountWasDeleted else { return }
         // The open-task cap, checked on the device first. The server trigger is
@@ -189,6 +198,10 @@ final class PlanCoordinator {
         // titles show as skeletons until the AI's arrive, for at most
         // `refiningDisplayLimit`.
         planLocally(assignment, context: context, availability: availability, now: now)
+        guard useAI else {
+            status = .plannedLocally(note: Self.aiOffNote, suggestsUpgrade: false)
+            return
+        }
         let localPlan = snapshot(of: assignment)
         let id = assignment.id
         pending.insert(id)

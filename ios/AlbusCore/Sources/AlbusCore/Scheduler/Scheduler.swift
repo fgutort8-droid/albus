@@ -201,12 +201,7 @@ public struct Scheduler: Sendable {
         let weekday = calendar.component(.weekday, from: day)
         guard !availability.excludedWeekdays.contains(weekday) else { return false }
 
-        guard let windowStart = calendar.date(bySettingHour: availability.windowStartHour,
-                                              minute: 0, second: 0, of: day),
-              let windowEnd = calendar.date(
-                bySettingHour: availability.windowEndHour == 24 ? 23 : availability.windowEndHour,
-                minute: availability.windowEndHour == 24 ? 59 : 0,
-                second: 0, of: day)
+        guard let (windowStart, windowEnd) = window(on: day, weekday: weekday, availability)
         else { return false }
         guard session.start >= windowStart, session.end <= windowEnd else { return false }
 
@@ -215,6 +210,19 @@ public struct Scheduler: Sendable {
         guard remaining >= session.duration else { return false }
 
         return !occupied.contains { Self.overlaps($0, session.start, session.end) }
+    }
+
+    /// When work may sit on `day`: the school-day window Monday to Friday, the
+    /// weekend one on Saturday and Sunday. An end of 24 is the last minute of
+    /// the day.
+    private func window(on day: Date, weekday: Int,
+                        _ availability: Availability) -> (Date, Date)? {
+        let hours = availability.window(onWeekday: weekday)
+        guard let start = calendar.date(bySettingHour: hours.startHour, minute: 0, second: 0, of: day),
+              let end = calendar.date(bySettingHour: hours.endHour == 24 ? 23 : hours.endHour,
+                                      minute: hours.endHour == 24 ? 59 : 0, second: 0, of: day)
+        else { return nil }
+        return (start, end)
     }
 
     /// Half-open overlap: blocks that merely touch are not in conflict, so
@@ -275,11 +283,7 @@ public struct Scheduler: Sendable {
                 - (usedPerDay[day] ?? 0)
             if remaining < item.duration { continue }
 
-            guard let windowStart = calendar.date(bySettingHour: availability.windowStartHour,
-                                                  minute: 0, second: 0, of: day),
-                  let windowEnd = calendar.date(bySettingHour: availability.windowEndHour == 24 ? 23 : availability.windowEndHour,
-                                                minute: availability.windowEndHour == 24 ? 59 : 0,
-                                                second: 0, of: day)
+            guard let (windowStart, windowEnd) = window(on: day, weekday: weekday, availability)
             else { continue }
 
             // Never schedule into the past, and never past the deadline.

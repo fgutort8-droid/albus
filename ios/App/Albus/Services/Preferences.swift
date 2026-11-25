@@ -58,6 +58,9 @@ final class Preferences {
         static let onboarded = "albus.profile.onboarded"
         static let windowStart = "albus.profile.windowStart"
         static let windowEnd = "albus.profile.windowEnd"
+        static let weekendStart = "albus.profile.weekendStart"
+        static let weekendEnd = "albus.profile.weekendEnd"
+        static let aiAllowed = "albus.ai.allowed"
         static let daysOff = "albus.profile.daysOff"
         static let notify = "albus.notify.enabled"
         static let serious = "albus.notify.serious"
@@ -95,6 +98,9 @@ final class Preferences {
         windowEndHour = defaults.object(forKey: Key.windowEnd) as? Int
             ?? Availability.default.windowEndHour
         daysOff = Set(defaults.array(forKey: Key.daysOff) as? [Int] ?? [])
+        weekendStartHour = defaults.object(forKey: Key.weekendStart) as? Int
+        weekendEndHour = defaults.object(forKey: Key.weekendEnd) as? Int
+        aiAllowed = defaults.object(forKey: Key.aiAllowed) as? Bool
 
         let fallback = NotificationSettings.default
         // `bool(forKey:)` on an unset key is false, which would ship every new
@@ -136,7 +142,10 @@ final class Preferences {
         load = .standard
         windowStartHour = Availability.default.windowStartHour
         windowEndHour = Availability.default.windowEndHour
+        weekendStartHour = nil
+        weekendEndHour = nil
         daysOff = []
+        aiAllowed = nil
         hasOnboarded = false
         defaults.removeObject(forKey: Key.onboarded)
     }
@@ -153,6 +162,30 @@ final class Preferences {
     var windowEndHour: Int {
         didSet { defaults.set(windowEndHour, forKey: Key.windowEnd) }
     }
+    /// Saturday and Sunday. Nil until the student sets them, and weekends then
+    /// use the school-day window above, which is how every student who joined
+    /// before onboarding asked was planned: nobody's weekend moves by itself.
+    var weekendStartHour: Int? {
+        didSet { store(weekendStartHour, Key.weekendStart) }
+    }
+    var weekendEndHour: Int? {
+        didSet { store(weekendEndHour, Key.weekendEnd) }
+    }
+
+    /// Whether the student allowed Albus to send what a plan or a marking
+    /// needs to Anthropic, which runs the AI (App Review guideline 5.1.2(i)).
+    /// Nil until they answer: nothing goes to the AI before they say yes.
+    var aiAllowed: Bool? {
+        didSet { store(aiAllowed, Key.aiAllowed) }
+    }
+
+    /// Whether an AI plan or marking may be asked for now.
+    var mayUseAI: Bool { aiAllowed == true }
+
+    private func store(_ value: Any?, _ key: String) {
+        if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+    }
+
     /// Weekday numbers entirely off, 1 = Sunday per `Calendar`.
     var daysOff: Set<Int> {
         didSet { defaults.set(Array(daysOff).sorted(), forKey: Key.daysOff) }
@@ -173,6 +206,8 @@ final class Preferences {
         Availability(
             windowStartHour: windowStartHour,
             windowEndHour: windowEndHour,
+            weekendWindowStartHour: weekendStartHour,
+            weekendWindowEndHour: weekendEndHour,
             dailyCapacityMinutes: load.dailyCapacityMinutes,
             excludedWeekdays: Self.sanitisedDaysOff(daysOff)
         )
