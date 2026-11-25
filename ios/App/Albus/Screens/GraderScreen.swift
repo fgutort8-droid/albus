@@ -1009,6 +1009,13 @@ struct GraderScreen: View {
         }
     }
 
+    /// The id the marking asks the server for. A rubric is saved there under
+    /// its own `id` (`RubricService.save`); `remoteID` is never set for one,
+    /// and sending it meant the picked rubric never reached the marking.
+    static func rubricIDToMark(_ rubric: Rubric?) -> UUID? {
+        rubric?.id
+    }
+
     private func submit() async {
         // The account this marking is for. A result that comes back after the
         // phone deleted that account, signed it out or handed over to another
@@ -1018,12 +1025,22 @@ struct GraderScreen: View {
         stage = .marking
         failure = nil
 
+        // Marking reads the rubric from the server by its id, so the server
+        // must hold it first. One written a moment ago may still be on its
+        // way, and one written offline or past the plan's limit never landed.
+        // Saving again is harmless, and nothing has been spent yet.
+        if let rubric = chosenRubric, let why = await RubricWriter.ensureOnServer(rubric) {
+            failure = .rejected(why)
+            stage = .result
+            return
+        }
+
         // The coordinator marks, stores and announces. It carries on if the
         // student leaves this screen, and finds the result if the answer is
         // lost on the way back.
         let outcome = await marking.mark(
             work: work,
-            rubricID: chosenRubric?.remoteID,
+            rubricID: Self.rubricIDToMark(chosenRubric),
             assignment: chosenAssignment,
             presentation: presentation,
             title: workTitle,
