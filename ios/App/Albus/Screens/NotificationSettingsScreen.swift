@@ -32,8 +32,10 @@ struct NotificationSettingsScreen: View {
                     voice($preferences)
                     timing($preferences)
                     warnings($preferences)
-                    studyWindow($preferences)
                 }
+                // Not a notification setting: it is when work is planned, so a
+                // student who turned notifications off can still change it.
+                studyWindow($preferences)
             }
             .padding(Tokens.Spacing.xl)
         }
@@ -43,6 +45,8 @@ struct NotificationSettingsScreen: View {
         .task { status = await NotificationScheduler().authorizationStatus() }
         // One rebuild when the student leaves, rather than one per toggle.
         .onDisappear {
+            // New study hours move the week now, not at the next launch.
+            coordinator.reschedule(context: context, availability: preferences.availability)
             notifications.scheduleRebuild(context: context, preferences: preferences,
                                           coordinator: coordinator)
         }
@@ -154,8 +158,15 @@ struct NotificationSettingsScreen: View {
             Text("When Albus is allowed to place work.")
                 .font(Tokens.Typography.caption)
                 .foregroundStyle(Tokens.Palette.inkMuted)
-            stepper("From", value: preferences.windowStartHour, range: 6...20)
-            stepper("Until", value: preferences.windowEndHour, range: 8...23)
+            Text("School days")
+                .font(Tokens.Typography.caption)
+                .foregroundStyle(Tokens.Palette.inkSecondary)
+            HourRangePicker(from: preferences.windowStartHour, until: preferences.windowEndHour)
+            Text("Weekends")
+                .font(Tokens.Typography.caption)
+                .foregroundStyle(Tokens.Palette.inkSecondary)
+            HourRangePicker(from: weekendHour(\.weekendStartHour, fallback: \.windowStartHour),
+                            until: weekendHour(\.weekendEndHour, fallback: \.windowEndHour))
 
             Text("Days off")
                 .font(Tokens.Typography.caption)
@@ -166,6 +177,19 @@ struct NotificationSettingsScreen: View {
                 }
             }
         }
+    }
+
+    /// A weekend hour that shows the school-day one until it is set. Setting
+    /// either end sets both, so the weekend then stops following school days.
+    private func weekendHour(_ key: ReferenceWritableKeyPath<Preferences, Int?>,
+                             fallback: KeyPath<Preferences, Int>) -> Binding<Int> {
+        Binding(
+            get: { preferences[keyPath: key] ?? preferences[keyPath: fallback] },
+            set: { newValue in
+                if preferences.weekendStartHour == nil { preferences.weekendStartHour = preferences.windowStartHour }
+                if preferences.weekendEndHour == nil { preferences.weekendEndHour = preferences.windowEndHour }
+                preferences[keyPath: key] = newValue
+            })
     }
 
     private func dayToggle(number: Int, label: String,

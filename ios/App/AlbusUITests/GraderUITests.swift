@@ -1,29 +1,17 @@
 import XCTest
 
-/// Drives Albus Grader against the real backend, from a fresh account.
+/// Drives Albus Grader from a fresh install.
 ///
-/// **A fresh account is a Free account, and Free does not include marking.**
-/// That reframes what this file is for. It used to prove the meter named the
-/// right window; now it proves the more basic thing underneath — that the plan
-/// call still returns a shape the client can decode, and that a student who
-/// cannot mark is shown a price rather than a broken screen.
+/// It proves two things: a student on Free, who cannot mark, is shown a price
+/// rather than a broken screen; and on Plus, marking from an assignment opens
+/// the same Grader with that assignment carried in.
 ///
-/// It is still the only test that exercises the real RPC. A unit test on
-/// `Allowance` proves the arithmetic; only this proves `my_plan()` still
-/// returns what that arithmetic is built on, which is where the last three bugs
-/// in this feature lived.
-///
-/// Nothing here spends a grading. Marking is an Opus call and it is now a paid
-/// feature, so a free account is refused before any model runs.
-///
-/// **This file costs money to run, and CI skips it by name.** "A fresh
-/// account" means a real row in the production `auth.users` table, and
-/// reaching the app means a real Claude call to build the first plan. Some of
-/// the accounts on the live project are leftovers from earlier runs. Run it
-/// deliberately, against a backend you meant to touch — never to reproduce a
-/// UI failure. Anything that does not genuinely need the server belongs in
-/// `PaywallUITests`, which launches signed-in with the plan forced and costs
-/// nothing.
+/// No server is contacted. The plan is forced (`-albus.debug.forcePlan`),
+/// onboarding's first plan is the one the phone makes (the AI question is
+/// answered no, `OnboardingPath`), and nothing is marked. It used to read the real `my_plan()` from a fresh production
+/// account and spend a real AI call on the first plan; whether `my_plan()`
+/// still decodes belongs in `EntitlementServiceTests` and the database tests,
+/// which need no account.
 @MainActor
 final class GraderUITests: XCTestCase {
 
@@ -35,11 +23,11 @@ final class GraderUITests: XCTestCase {
 
     /// The whole free-tier contract on one screen.
     ///
-    /// The failure this guards against is the plan call returning a shape the
-    /// client cannot decode. From here that looks like a screen with no meter
-    /// and no offer — which, before three tiers, is exactly how a changed RPC
-    /// shape presented twice.
+    /// From a student's side, a Grader that cannot mark must still say why and
+    /// offer the plans: a screen with no meter and no offer is how a broken
+    /// plan read looked twice before.
     func testFreeIsOfferedThePlansRatherThanABrokenGrader() throws {
+        app.launchArguments += ["-albus.debug.forcePlan", "free"]
         OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
 
@@ -108,6 +96,10 @@ final class GraderUITests: XCTestCase {
     /// pushes it rather than silently doing nothing: `navigationDestination`
     /// has failed quietly in this app before.
     func testMarkingFromAnAssignmentOpensTheSameGrader() throws {
+        // Plus: a task opens the Grader at its work step only while the plan
+        // has a marking to spend (#63). Nothing is marked, and with the AI
+        // question answered no, nothing could be.
+        app.launchArguments += ["-albus.debug.forcePlan", "plus"]
         OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
 

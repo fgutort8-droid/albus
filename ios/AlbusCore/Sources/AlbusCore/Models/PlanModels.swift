@@ -92,18 +92,38 @@ public struct ScheduleResult: Sendable, Equatable {
 
 /// When the student is willing to work, and how much they will take on.
 public struct Availability: Sendable, Equatable {
+    /// The school-day window, Monday to Friday.
     public let windowStartHour: Int
     public let windowEndHour: Int
+    /// The Saturday and Sunday window. The school-day hours when not given,
+    /// which is how every student was planned before weekends had their own.
+    public let weekendWindowStartHour: Int
+    public let weekendWindowEndHour: Int
     public let dailyCapacityMinutes: Int
     /// Weekday numbers (1 = Sunday, per Calendar) that are entirely off.
     public let excludedWeekdays: Set<Int>
 
     public init(windowStartHour: Int = 16, windowEndHour: Int = 22,
+                weekendWindowStartHour: Int? = nil, weekendWindowEndHour: Int? = nil,
                 dailyCapacityMinutes: Int = 150, excludedWeekdays: Set<Int> = []) {
-        self.windowStartHour = max(0, min(23, windowStartHour))
-        self.windowEndHour = max(self.windowStartHour + 1, min(24, windowEndHour))
+        (self.windowStartHour, self.windowEndHour) = Self.clamped(windowStartHour, windowEndHour)
+        (self.weekendWindowStartHour, self.weekendWindowEndHour) = Self.clamped(
+            weekendWindowStartHour ?? windowStartHour, weekendWindowEndHour ?? windowEndHour)
         self.dailyCapacityMinutes = max(0, min(24 * 60, dailyCapacityMinutes))
         self.excludedWeekdays = excludedWeekdays
+    }
+
+    /// Hours inside a day, and an end at least an hour after the start.
+    private static func clamped(_ start: Int, _ end: Int) -> (Int, Int) {
+        let start = max(0, min(23, start))
+        return (start, max(start + 1, min(24, end)))
+    }
+
+    /// The window on a weekday (1 = Sunday, 7 = Saturday, per Calendar).
+    public func window(onWeekday weekday: Int) -> (startHour: Int, endHour: Int) {
+        weekday == 1 || weekday == 7
+            ? (weekendWindowStartHour, weekendWindowEndHour)
+            : (windowStartHour, windowEndHour)
     }
 
     public static let `default` = Availability()

@@ -37,6 +37,7 @@ struct SettingsScreen: View {
                 planSection
                 profileSection($preferences)
                 if !courses.isEmpty { subjectsSection }
+                aiSection
                 notificationsSection
                 accountSection
                 aboutSection
@@ -284,7 +285,7 @@ struct SettingsScreen: View {
                             Text("When Albus speaks")
                                 .font(Tokens.Typography.body)
                                 .foregroundStyle(Tokens.Palette.ink)
-                            Text("Quiet hours, deadline warnings, the morning brief")
+                            Text("Study hours, quiet hours, deadline warnings, the morning brief")
                                 .font(Tokens.Typography.caption)
                                 .foregroundStyle(Tokens.Palette.inkMuted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -297,6 +298,32 @@ struct SettingsScreen: View {
                 }
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - AI
+
+    /// The answer to the question asked before the first plan
+    /// (`AIPermissionView`), which the student can change here either way.
+    private var aiSection: some View {
+        VStack(alignment: .leading, spacing: Tokens.Spacing.m) {
+            SectionHeader(label: "AI") { EmptyView() }
+            GlassCard {
+                Toggle(isOn: Binding(get: { preferences.mayUseAI },
+                                     set: { preferences.aiAllowed = $0 })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Plans and marking with AI")
+                            .font(Tokens.Typography.body)
+                            .foregroundStyle(Tokens.Palette.ink)
+                        Text("Sends what each one needs to Anthropic, which runs the AI. "
+                             + "Off, your phone still plans your study sessions; marking needs it.")
+                            .font(Tokens.Typography.caption)
+                            .foregroundStyle(Tokens.Palette.inkMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(Tokens.Palette.accent)
+            }
         }
     }
 

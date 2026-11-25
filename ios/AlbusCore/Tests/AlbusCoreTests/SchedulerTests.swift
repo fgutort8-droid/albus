@@ -497,3 +497,51 @@ struct PriorityTests {
         #expect(first.sessions.map(\.start) == second.sessions.map(\.start))
     }
 }
+
+/// School days and weekends are planned in their own hours. A student in
+/// lessons until the afternoon is free from the morning on Saturday.
+@Suite("Weekend hours")
+struct WeekendHoursTests {
+
+    private let schoolAndWeekend = Availability(windowStartHour: 16, windowEndHour: 22,
+                                                weekendWindowStartHour: 9, weekendWindowEndHour: 12)
+
+    @Test("Saturday work sits in the weekend hours")
+    func saturdayUsesWeekendHours() {
+        let saturday = at(23, 7)
+        let r = sched.schedule(items: [item(60, dueDay: 23)], availability: schoolAndWeekend, now: saturday)
+        #expect(r.sessions.count == 1)
+        let s = r.sessions[0]
+        #expect(cal.component(.hour, from: s.start) >= 9)
+        #expect(s.end <= at(23, 12))
+    }
+
+    @Test("Sunday is a weekend day too")
+    func sundayUsesWeekendHours() {
+        let sunday = at(24, 7)
+        let r = sched.schedule(items: [item(60, dueDay: 24)], availability: schoolAndWeekend, now: sunday)
+        #expect(r.sessions.first.map { cal.component(.hour, from: $0.start) } == 9)
+    }
+
+    @Test("a school day keeps the school-day hours")
+    func weekdayUnchanged() {
+        let r = sched.schedule(items: [item(60, dueDay: 20)], availability: schoolAndWeekend, now: now)
+        #expect(r.sessions.first.map { cal.component(.hour, from: $0.start) } == 16)
+    }
+
+    @Test("with no weekend hours, weekends use the school-day ones, as before")
+    func noWeekendHoursIsTheOldBehaviour() {
+        let old = Availability(windowStartHour: 16, windowEndHour: 22)
+        #expect(old.window(onWeekday: 7) == (16, 22))
+        #expect(old.window(onWeekday: 1) == (16, 22))
+        let r = sched.schedule(items: [item(60, dueDay: 23)], availability: old, now: at(23, 7))
+        #expect(r.sessions.first.map { cal.component(.hour, from: $0.start) } == 16)
+    }
+
+    @Test("weekend hours are clamped like the school-day ones")
+    func weekendClamped() {
+        let odd = Availability(weekendWindowStartHour: 30, weekendWindowEndHour: 2)
+        #expect(odd.window(onWeekday: 7) == (23, 24))
+        #expect(odd.window(onWeekday: 2) == (16, 22))
+    }
+}

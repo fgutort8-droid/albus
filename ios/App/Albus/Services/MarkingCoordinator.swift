@@ -88,6 +88,7 @@ final class MarkingCoordinator {
               presentation: String?, title: String?, isBlind: Bool,
               context: ModelContext,
               mayStore: @escaping @MainActor () -> Bool,
+              mayUseAI: @escaping @MainActor () -> Bool = { true },
               ensureRubric: @MainActor (Rubric) async -> String? = {
                   await RubricWriter.ensureOnServer($0)
               }) async -> Outcome {
@@ -118,6 +119,13 @@ final class MarkingCoordinator {
         // already `current`, so a Grader reopened meanwhile watches this
         // marking instead of starting another.
         let rubricID = rubric?.id
+        // Asked at the send itself, and again before any retry below: the
+        // student can turn the AI off in Settings while a marking waits.
+        guard mayUseAI() else {
+            let outcome = Outcome.failed(Self.aiOff)
+            lastOutcome = outcome
+            return outcome
+        }
         if let rubric, let why = await ensureRubric(rubric) {
             let outcome = Outcome.failed(.rejected(why))
             lastOutcome = outcome
@@ -143,7 +151,8 @@ final class MarkingCoordinator {
                                     assignmentID: assignmentID, assignmentRemoteID: assignmentRemoteID,
                                     context: context, mayStore: mayStore,
                                     askAgain: { [service] in
-                                        try await service.grade(work: work, rubricID: rubricID,
+                                        guard mayUseAI() else { throw Self.aiOff }
+                                        return try await service.grade(work: work, rubricID: rubricID,
                                                                 assignmentID: assignmentRemoteID,
                                                                 presentation: presentation, title: title,
                                                  criteria: criteria)
@@ -160,6 +169,10 @@ final class MarkingCoordinator {
         }
         return outcome
     }
+
+    /// Why a marking was not sent: the student has not allowed the AI.
+    static let aiOff = GradingService.Failure.rejected(
+        "AI is off, so Albus can't mark this. You can turn it on in Settings.")
 
     /// The banner has been acted on, or the result opened another way.
     func markSeen() {
