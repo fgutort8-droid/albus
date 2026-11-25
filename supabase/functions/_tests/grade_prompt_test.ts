@@ -8,6 +8,7 @@ import {
   normaliseGrade,
   normaliseWork,
   parseCriteriaPositions,
+  rubricCacheKey,
   selectCriteria,
   sha256,
 } from "../_shared/grade_prompt.ts";
@@ -776,4 +777,30 @@ Deno.test("the total is the chosen criteria's, not the whole rubric's", () => {
     improvements: [{ change: "Explain the error bars.", why: "Precision." }],
   }, narrowed);
   assertEquals(grade.totalMarks, 12);
+});
+
+Deno.test("a whole rubric keeps the cache key it always had", () => {
+  const before = [
+    THREE.name,
+    THREE.criteria.map((c) => `${c.code}:${c.name}:${c.marks}`).join("|"),
+  ].join("\u0000");
+  assertEquals(rubricCacheKey(THREE), before);
+  assertEquals(rubricCacheKey(selectCriteria(THREE, [0, 1, 2])), before);
+  assertEquals(rubricCacheKey(null), "\u0000");
+});
+
+Deno.test("choosing criteria that differ only in guidance is not the same marking", () => {
+  const twins: RubricContext = {
+    name: "Essay",
+    criteria: [
+      { id: "1", code: "A", name: "Argument", marks: 5, guidance: "A clear thesis." },
+      { id: "2", code: "A", name: "Argument", marks: 5, guidance: "Counter-arguments answered." },
+      { id: "3", code: "B", name: "Style", marks: 5, guidance: null },
+    ],
+    body: null,
+  };
+  const first = rubricCacheKey(selectCriteria(twins, [0]));
+  const second = rubricCacheKey(selectCriteria(twins, [1]));
+  assert(first !== second, "the second choice would get the first one's feedback back");
+  assert(first !== rubricCacheKey(twins), "a narrowed marking is not the whole rubric's");
 });

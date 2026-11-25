@@ -28,7 +28,7 @@ URL="https://$REF.supabase.co"
 # Every migration file's name and contents on main, as reviewed.
 MIGRATIONS_DIGEST=7d43e91b579ee7f0a38e4d018f67b35e9cafd1a6845a9005e82c1615451678f8
 # config.toml and every function source file on main, as reviewed.
-SOURCE_DIGEST=589103d5dad19a985b174d5ac6f2ac7188f966f149c821c7ba351ee5879e344d
+SOURCE_DIGEST=8092f57f20b17067c21a6c20ad75c06fc2d0c1362e7b4e46bf829cf0b29c2d4e
 DRY_RUN=${DRY_RUN:-1}
 case "$DRY_RUN" in 0|1) ;; *) echo 'DRY_RUN must be 0 or 1'; exit 1;; esac
 stop() { echo "STOPPED: $*; no later step ran." >&2; exit 1; }

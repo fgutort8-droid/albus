@@ -324,6 +324,26 @@ export function selectCriteria(
   return { ...rubric, criteria, onlyListed: true };
 }
 
+/**
+ * What the grading's cache key records about the rubric. For a whole rubric it
+ * is what it always was, so gradings saved before this still match. A narrowed
+ * rubric adds each chosen criterion in full, guidance included, and a marker:
+ * two criteria can share a code, name and marks and differ only in guidance,
+ * and marking one or the other is a different question.
+ */
+export function rubricCacheKey(rubric: RubricContext | null): string {
+  const parts = [
+    rubric?.name ?? "",
+    (rubric?.criteria ?? []).map((c) => `${c.code}:${c.name}:${c.marks}`).join("|"),
+  ];
+  if (rubric?.onlyListed) {
+    parts.push(
+      "only:" + JSON.stringify(rubric.criteria.map((c) => [c.code, c.name, c.marks, c.guidance])),
+    );
+  }
+  return parts.join("\u0000");
+}
+
 export function buildGradeUserPrompt(input: GradeInput): string {
   const { rubric } = input;
 

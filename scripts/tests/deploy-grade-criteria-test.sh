@@ -91,10 +91,48 @@ esac
 STUB
 chmod +x "$TEST_DIR/bin/git" "$TEST_DIR/bin/supabase" "$TEST_DIR/bin/curl"
 
+# The script pins the digests of what was reviewed, so it refuses any other
+# source. The safeguards are tested against a fixture instead: a copy of this
+# checkout's supabase folder, and a copy of the script pinned to that copy's
+# own digests. Nothing is skipped when the source moves on; the real script's
+# own check is left exactly as it is.
+digests() { # folder holding supabase/
+  (cd "$1" && python3 - <<'PY'
+from pathlib import Path
+import hashlib
+root=Path('supabase')
+h=hashlib.sha256()
+for p in sorted((root/'migrations').glob('*.sql')): h.update(p.name.encode()+b'\0'+p.read_bytes()+b'\0')
+print(h.hexdigest())
+h=hashlib.sha256()
+paths=sorted([root/'config.toml', *[p for p in (root/'functions').rglob('*')
+    if p.is_file() and '_tests' not in p.parts and p.suffix in ('.ts','.json','.lock')]])
+for p in paths: h.update(str(p.relative_to(root)).encode()+b'\0'+p.read_bytes()+b'\0')
+print(h.hexdigest())
+PY
+)
+}
+FIXTURE="$TEST_DIR/fixture"
+mkdir -p "$FIXTURE"
+cp -R "$ROOT/supabase" "$FIXTURE/supabase"
+rm -rf "${FIXTURE:?}/supabase/.temp"
+export ALBUS_TEST_SOURCE="$FIXTURE"
+FIXTURE_DIGESTS=$(digests "$FIXTURE")
+grep -Eq '^MIGRATIONS_DIGEST=[0-9a-f]{64}$' "$ROOT/scripts/$SCRIPT" \
+  && grep -Eq '^SOURCE_DIGEST=[0-9a-f]{64}$' "$ROOT/scripts/$SCRIPT" \
+  || { echo 'FAIL: the script must pin both digests as 64 hex characters' >&2; exit 1; }
+UNDER_TEST="$TEST_DIR/$SCRIPT"
+sed -e "s/^MIGRATIONS_DIGEST=.*/MIGRATIONS_DIGEST=$(sed -n 1p <<<"$FIXTURE_DIGESTS")/" \
+    -e "s/^SOURCE_DIGEST=.*/SOURCE_DIGEST=$(sed -n 2p <<<"$FIXTURE_DIGESTS")/" \
+    "$ROOT/scripts/$SCRIPT" > "$UNDER_TEST"
+cmp -s <(grep -Ev '^(MIGRATIONS|SOURCE)_DIGEST=' "$ROOT/scripts/$SCRIPT") \
+       <(grep -Ev '^(MIGRATIONS|SOURCE)_DIGEST=' "$UNDER_TEST") \
+  || { echo 'FAIL: the copy under test differs from the script by more than its two digests' >&2; exit 1; }
+
 run() { # DRY_RUN value
   find "${ALBUS_TEST_STATE:?}" -mindepth 1 -delete; : > "$ALBUS_TEST_LOG"
   set +e
-  PATH="$TEST_DIR/bin:$PATH" DRY_RUN=$1 bash "$ROOT/scripts/$SCRIPT" > "$TEST_DIR/output" 2>&1
+  PATH="$TEST_DIR/bin:$PATH" DRY_RUN=$1 bash "$UNDER_TEST" > "$TEST_DIR/output" 2>&1
   STATUS=$?
   set -e
   if grep -q "$TOKEN" "$TEST_DIR/output" "$ALBUS_TEST_LOG"; then echo 'FAIL: the access token reached the output or a command line' >&2; exit 1; fi
@@ -112,13 +150,7 @@ expect_stop() {
 no_deploy() { ! called 'functions deploy' || fail "$1: a function was deployed"; }
 export SUPABASE_ACCESS_TOKEN=$TOKEN
 
-# A dated script pins what it was reviewed with. Once main moves on, it rightly
-# refuses to run, and there is nothing to test.
 run 1
-if [ "$STATUS" -ne 0 ] && grep -q 'differs* from what was reviewed' "$TEST_DIR/output"; then
-  echo "SKIP $SCRIPT: main does not hold exactly what this one-time deploy was reviewed with"
-  exit 0
-fi
 expect_pass 'the preview' 'DRY RUN FINISHED'
 grep -q 'The project database matches main.' "$TEST_DIR/output" || fail 'the database check was not shown'
 grep -q 'grade: live at version 12; this redeploys it' "$TEST_DIR/output" || fail 'the live function was not shown'
@@ -168,13 +200,13 @@ no_deploy 'a link to another project'
 echo 'PASS: an old CLI, a bad or missing token, or a refused or wrong link stops it; stray settings are dropped'
 
 mkdir -p "$TEST_DIR/changed"
-cp -R "$ROOT/supabase" "$TEST_DIR/changed/supabase"
+cp -R "$FIXTURE/supabase" "$TEST_DIR/changed/supabase"
 first=$(ls "$TEST_DIR/changed/supabase/migrations/"*.sql | head -1)
 printf '\n-- drift\n' >> "$first"
 ALBUS_TEST_SOURCE_OVERRIDE="$TEST_DIR/changed" run 0
 expect_stop 'a changed migration on main' 'database changes on main differ from what was reviewed'
 ! called 'supabase ' || fail 'changed database changes reached the CLI'
-rm -rf "${TEST_DIR:?}/changed/supabase"; cp -R "$ROOT/supabase" "$TEST_DIR/changed/supabase"
+rm -rf "${TEST_DIR:?}/changed/supabase"; cp -R "$FIXTURE/supabase" "$TEST_DIR/changed/supabase"
 printf '\n// drift\n' >> "$TEST_DIR/changed/supabase/functions/grade/index.ts"
 ALBUS_TEST_SOURCE_OVERRIDE="$TEST_DIR/changed" run 0
 expect_stop 'changed function source on main' 'function source on main differs from what was reviewed'
@@ -182,7 +214,7 @@ expect_stop 'changed function source on main' 'function source on main differs f
 grep -q 'has the criteria PR been merged' "$TEST_DIR/output" || fail 'the refusal did not say what to check first'
 echo 'PASS: a changed migration or function source on main stops it before anything is touched'
 
-last=$(ls "$ROOT/supabase/migrations/"*.sql | tail -1); last=$(basename "$last"); last=${last%%_*}
+last=$(ls "$FIXTURE/supabase/migrations/"*.sql | tail -1); last=$(basename "$last"); last=${last%%_*}
 ALBUS_TEST_PENDING=$last run 0
 expect_stop 'a database change missing on the project' 'does not match main'
 no_deploy 'a missing database change'

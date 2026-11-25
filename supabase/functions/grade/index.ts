@@ -40,6 +40,7 @@ import {
   normaliseGrade,
   normaliseWork,
   parseCriteriaPositions,
+  rubricCacheKey,
   selectCriteria,
   sha256,
 } from "../_shared/grade_prompt.ts";
@@ -218,8 +219,7 @@ Deno.serve(async (req) => {
       // and must not share one answer.
       title,
       taskType,
-      rubric?.name ?? "",
-      (rubric?.criteria ?? []).map((c) => `${c.code}:${c.name}:${c.marks}`).join("|"),
+      rubricCacheKey(rubric),
       input.presentation ?? "",
     ].join("\u0000"));
 

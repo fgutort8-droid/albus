@@ -19,7 +19,7 @@ checks against the built app.
 | Section in App Store Connect | Tick | What it is in Albus |
 | --- | --- | --- |
 | Contact Info | **Email Address** | The address Sign in with Apple shares, which can be a private relay address. Kept with the account, used only to find the account when the student writes to support. Albus sends no email. |
-| User Content | **Other User Content** | Task details, subjects, saved rubrics, notes, marking results with their quotes (up to 400 characters each), work titles, and the text sent to Anthropic for a plan or a marking. |
+| User Content | **Other User Content** | Task details, subjects, saved rubrics, notes, marking results with their quotes (up to 400 characters each), work titles, the text sent to Anthropic for a plan or a marking, and which of a rubric's criteria the student chose to be marked on. |
 | Identifiers | **User ID** | The account's random identifier, and the identifier Apple makes for Albus. RevenueCat is given the account identifier too. |
 | Identifiers | **Device ID** | The identifier Apple gives apps from one developer (IDFV), sent to stop repeated free accounts and stored only as a keyed one-way code. Not the advertising identifier. |
 | Purchases | **Purchase History** | Subscription product, dates, status and transaction identifiers, from RevenueCat. |
