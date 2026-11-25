@@ -38,8 +38,40 @@ struct GraderScreen: View {
     @Query(sort: \Grading.createdAt, order: .reverse) private var gradings: [Grading]
 
     /// Where the student is in the flow. One value, so back always means back.
-    private enum Stage: Equatable {
+    enum Stage: Equatable {
         case start, work, rubric, presentation, marking, result
+    }
+
+    /// Where a Grader opened from an assignment stands, given whether the
+    /// plan has a marking to spend.
+    ///
+    /// The assignment answers "what am I marking?" already, so the flow can
+    /// start at the work rather than at a chooser with one obvious answer
+    /// pre-ticked. But only with a marking to spend: the first screen is the
+    /// one that says marking needs Plus or Pro, or that this week's are used
+    /// up, and skipping it let a student fill in the whole flow and be turned
+    /// away only when they pressed mark.
+    ///
+    /// Asked as the screen opens, from the plan on the phone, and again once
+    /// the server has answered, because the phone's plan can be behind either
+    /// way. A student who has just bought Plus can arrive still showing Free,
+    /// and one whose last marking went on another phone can arrive still
+    /// showing one left. The second answer moves them on or back, but never
+    /// off work they have started.
+    static func taskEntryStage(_ stage: Stage, hasMarking: Bool, workStarted: Bool) -> Stage {
+        switch stage {
+        case .start where hasMarking: .work
+        case .work where !hasMarking && !workStarted: .start
+        default: stage
+        }
+    }
+
+    /// Whether the student has begun giving the work: typed or pasted it, or
+    /// is choosing or reading a file or photo of it. A chosen photo counts
+    /// from the moment it is picked (`photo`), not only once it is being read:
+    /// loading it comes first, and a refresh landing then must not hide it.
+    private var workStarted: Bool {
+        !work.isEmpty || extracting || importing || workPhotoPicking || photo != nil
     }
 
     @State private var stage: Stage = .start
@@ -157,14 +189,20 @@ struct GraderScreen: View {
                 stage = .marking
                 return
             }
-            // Arriving from an assignment answers "what am I marking?" already,
-            // so the flow starts at the next real question rather than showing
-            // a chooser with one obvious answer pre-ticked.
+            // Asked twice (`taskEntryStage`): from the plan on the phone as the
+            // screen opens, and again once the server has answered.
+            var arrivedFromTask = false
             if let assignment, chosenAssignment == nil {
                 choose(assignment)
-                if stage == .start { stage = .work }
+                arrivedFromTask = true
+                stage = Self.taskEntryStage(stage, hasMarking: grader.hasAny,
+                                            workStarted: workStarted)
             }
             await entitlements.refresh()
+            if arrivedFromTask {
+                stage = Self.taskEntryStage(stage, hasMarking: grader.hasAny,
+                                            workStarted: workStarted)
+            }
         }
         .onAppear { marking.isWatched = true }
         .onDisappear { marking.isWatched = false }
