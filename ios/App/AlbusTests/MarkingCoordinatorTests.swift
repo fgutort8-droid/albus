@@ -117,6 +117,30 @@ struct MarkingCoordinatorTests {
         #expect(marking.lastOutcome != nil)
     }
 
+    @Test("a slow rubric save does not shorten the wait before asking again")
+    func slowSaveKeepsTheWholeWindow() async throws {
+        // The answer is lost and nothing turns up: the coordinator looks for
+        // the server's result for the whole window, then asks again. The
+        // window starts when the work is sent, so a save slower than the
+        // window still leaves several looks, not the single one at the end.
+        MarkingServer.state.reset(grade: .loseAnswer, then: .answer)
+        let context = try store()
+        let rubric = Rubric(name: "Essay rubric", body: "A: Knowledge.")
+        context.insert(rubric)
+
+        _ = await coordinator(RecordingAnnouncer(), recoveryWindow: 0.4).mark(
+            work: work, rubric: rubric, assignment: nil, presentation: nil, title: "History essay",
+            isBlind: false, context: context, mayStore: { true },
+            ensureRubric: { _ in
+                try? await Task.sleep(for: .milliseconds(600))
+                return nil
+            })
+
+        #expect(MarkingServer.state.lookups > 2,
+                "the window ran out during the rubric save, so it asked again at once")
+        #expect(MarkingServer.state.gradeRequests == 2)
+    }
+
     @Test("with no rubric, nothing is saved first and none is sent")
     func noRubricSendsNone() async throws {
         MarkingServer.state.reset(grade: .answer)

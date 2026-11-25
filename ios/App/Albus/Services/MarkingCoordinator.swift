@@ -121,6 +121,11 @@ final class MarkingCoordinator {
             lastOutcome = outcome
             return outcome
         }
+        // The server starts marking when the work is sent, not when the job
+        // began: a slow rubric save above must not eat into the window
+        // `recover` waits before it may ask again, or the second request
+        // could start a second paid marking while the first still runs.
+        let sentAt = Date.now
 
         let outcome: Outcome
         do {
@@ -130,7 +135,7 @@ final class MarkingCoordinator {
             outcome = store(marked, inputChars: work.count, fallbackTitle: title,
                             assignmentID: assignmentID, context: context, mayStore: mayStore)
         } catch GradingService.Failure.answerLost {
-            outcome = await recover(job, inputChars: work.count,
+            outcome = await recover(job, sentAt: sentAt, inputChars: work.count,
                                     workLength: GradingService.serverLength(of: work),
                                     assignmentID: assignmentID, assignmentRemoteID: assignmentRemoteID,
                                     context: context, mayStore: mayStore,
@@ -204,15 +209,18 @@ final class MarkingCoordinator {
     /// Looks for the grading the server saved for a job whose answer was lost,
     /// until the server can no longer be working on it.
     ///
-    /// - Parameter askAgain: the same request, sent again. Only once the
-    ///   window has passed, and only if nothing new was found in it.
-    private func recover(_ job: Job, inputChars: Int, workLength: Int,
+    /// - Parameters:
+    ///   - sentAt: when the work went to the server, which the window is
+    ///     counted from.
+    ///   - askAgain: the same request, sent again. Only once the window has
+    ///     passed, and only if nothing new was found in it.
+    private func recover(_ job: Job, sentAt: Date, inputChars: Int, workLength: Int,
                          assignmentID: UUID?, assignmentRemoteID: UUID?,
                          context: ModelContext,
                          mayStore: @MainActor () -> Bool,
                          askAgain: () async throws -> GradingService.Result) async -> Outcome {
-        let giveUpAt = job.startedAt.addingTimeInterval(recoveryWindow)
-        let since = job.startedAt.addingTimeInterval(-clockSkew)
+        let giveUpAt = sentAt.addingTimeInterval(recoveryWindow)
+        let since = sentAt.addingTimeInterval(-clockSkew)
         var offline = false
         // Always at least one look: a student back from minutes in another
         // app arrives after the window, and their marking is most likely saved.
