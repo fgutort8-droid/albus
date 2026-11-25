@@ -74,12 +74,21 @@ final class MarkingCoordinator {
 
     /// Marks the work, stores the result, and says so if nobody is watching.
     ///
-    /// - Parameter mayStore: false once the account that asked has gone, so a
-    ///   late answer is not written into the store of whoever comes next.
-    func mark(work: String, rubricID: UUID?, assignment: Assignment?,
+    /// - Parameters:
+    ///   - rubric: what to mark against. Sent by its `id`, the one it is saved
+    ///     under on the server. Its `remoteID` is never set; sending that meant
+    ///     the picked rubric never reached the marking.
+    ///   - mayStore: false once the account that asked has gone, so a late
+    ///     answer is not written into the store of whoever comes next.
+    ///   - ensureRubric: makes sure the server holds the rubric, or says why
+    ///     not (`RubricWriter.ensureOnServer`).
+    func mark(work: String, rubric: Rubric?, assignment: Assignment?,
               presentation: String?, title: String?, isBlind: Bool,
               context: ModelContext,
-              mayStore: @escaping @MainActor () -> Bool) async -> Outcome {
+              mayStore: @escaping @MainActor () -> Bool,
+              ensureRubric: @MainActor (Rubric) async -> String? = {
+                  await RubricWriter.ensureOnServer($0)
+              }) async -> Outcome {
         let job = Job(title: title,
                       wordCount: work.split(whereSeparator: \.isWhitespace).count,
                       isBlind: isBlind, startedAt: .now)
@@ -98,6 +107,19 @@ final class MarkingCoordinator {
         defer {
             background.end()
             current = nil
+        }
+
+        // Marking reads the rubric from the server by its id, so the server
+        // must hold it first. One written a moment ago may still be on its
+        // way, and one written offline or past the plan's limit never landed.
+        // Saving again is harmless, nothing has been spent yet, and the job is
+        // already `current`, so a Grader reopened meanwhile watches this
+        // marking instead of starting another.
+        let rubricID = rubric?.id
+        if let rubric, let why = await ensureRubric(rubric) {
+            let outcome = Outcome.failed(.rejected(why))
+            lastOutcome = outcome
+            return outcome
         }
 
         let outcome: Outcome

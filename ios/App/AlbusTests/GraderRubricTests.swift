@@ -3,14 +3,11 @@ import SwiftData
 import Testing
 @testable import Albus
 
-/// The rubric a student picks in the Grader is the one Albus marks against.
-///
-/// Found in November 2026: the Grader sent `chosenRubric?.remoteID`, which is
-/// never set for a rubric, so the marking never received the picked rubric
-/// and marked against the task's own rubric or none. That had been true since
-/// the Grader was built on 26 August.
+/// `RubricWriter.ensureOnServer`, which the marking runs before it sends a
+/// rubric's id: the server reads the rubric by that id, so it must hold it.
+/// The marking side is in `MarkingCoordinatorTests`.
 @MainActor
-@Suite("Grader marks against the picked rubric", .serialized)
+@Suite("A rubric is on the server before it is marked against", .serialized)
 struct GraderRubricTests {
 
     private struct SaveFailed: Error {}
@@ -23,15 +20,6 @@ struct GraderRubricTests {
         context.insert(rubric)
         try context.save()
         return (rubric, context)
-    }
-
-    @Test("the marking asks for the id the rubric is saved under")
-    func sendsTheSavedID() throws {
-        let (rubric, _) = try savedRubric()
-        #expect(rubric.remoteID == nil, "a rubric never gets a remoteID; that was the bug")
-        // `RubricService.save` stores the rubric under `snapshot.id`.
-        #expect(GraderScreen.rubricIDToMark(rubric) == rubric.snapshot.id)
-        #expect(GraderScreen.rubricIDToMark(nil) == nil)
     }
 
     @Test("a rubric the server holds lets the marking go ahead")

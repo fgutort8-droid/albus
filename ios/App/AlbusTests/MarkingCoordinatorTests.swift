@@ -51,7 +51,7 @@ struct MarkingCoordinatorTests {
     private func mark(_ coordinator: MarkingCoordinator, context: ModelContext,
                       assignment: Assignment? = nil,
                       mayStore: Bool = true) async -> MarkingCoordinator.Outcome {
-        await coordinator.mark(work: work, rubricID: nil, assignment: assignment, presentation: nil,
+        await coordinator.mark(work: work, rubric: nil, assignment: assignment, presentation: nil,
                                title: "History essay", isBlind: false, context: context,
                                mayStore: { mayStore })
     }
@@ -63,6 +63,71 @@ struct MarkingCoordinatorTests {
 
     private func stored(_ context: ModelContext) throws -> [Grading] {
         try context.fetch(FetchDescriptor<Grading>())
+    }
+
+    // MARK: The picked rubric
+    //
+    // Found in November 2026: the Grader sent `chosenRubric?.remoteID`, which
+    // is never set for a rubric, so the picked rubric never reached the
+    // marking. True since the Grader was built on 26 August.
+
+    @Test("the marking sends the picked rubric, by the id it is saved under")
+    func sendsThePickedRubric() async throws {
+        MarkingServer.state.reset(grade: .answer)
+        let context = try store()
+        let rubric = Rubric(name: "Essay rubric", body: "A: Knowledge. B: Analysis.")
+        context.insert(rubric)
+        #expect(rubric.remoteID == nil, "a rubric never gets a remoteID; sending it was the bug")
+
+        let outcome = await coordinator(RecordingAnnouncer()).mark(
+            work: work, rubric: rubric, assignment: nil, presentation: nil, title: "History essay",
+            isBlind: false, context: context, mayStore: { true }, ensureRubric: { _ in nil })
+
+        guard case .marked = outcome else { Issue.record("expected a marking, got \(outcome)"); return }
+        // `RubricService.save` stores a rubric under `snapshot.id`.
+        #expect(MarkingServer.state.gradeRubricIDs == [rubric.snapshot.id.uuidString])
+    }
+
+    @Test("a rubric the server cannot take stops the marking before it is sent")
+    func unsavedRubricIsNeverSent() async throws {
+        MarkingServer.state.reset(grade: .answer)
+        let context = try store()
+        let rubric = Rubric(name: "Essay rubric", body: "A: Knowledge.")
+        context.insert(rubric)
+        let marking = coordinator(RecordingAnnouncer())
+        var watchedWhileSaving = false
+
+        let outcome = await marking.mark(
+            work: work, rubric: rubric, assignment: nil, presentation: nil, title: "History essay",
+            isBlind: false, context: context, mayStore: { true },
+            ensureRubric: { _ in
+                // Registered before the save, so a Grader reopened now
+                // watches this marking rather than starting a second.
+                watchedWhileSaving = marking.current != nil
+                return RubricService.Failure.offline.errorDescription
+            })
+
+        guard case .failed(.rejected(let why)) = outcome else {
+            Issue.record("expected the rubric's reason, got \(outcome)"); return
+        }
+        #expect(why == RubricService.Failure.offline.errorDescription)
+        #expect(MarkingServer.state.gradeRequests == 0, "nothing may be marked, or spent")
+        #expect(watchedWhileSaving)
+        #expect(marking.current == nil)
+        #expect(marking.lastOutcome != nil)
+    }
+
+    @Test("with no rubric, nothing is saved first and none is sent")
+    func noRubricSendsNone() async throws {
+        MarkingServer.state.reset(grade: .answer)
+        let context = try store()
+        var asked = false
+        _ = await coordinator(RecordingAnnouncer()).mark(
+            work: work, rubric: nil, assignment: nil, presentation: nil, title: "History essay",
+            isBlind: true, context: context, mayStore: { true },
+            ensureRubric: { _ in asked = true; return nil })
+        #expect(!asked)
+        #expect(MarkingServer.state.gradeRubricIDs == [nil])
     }
 
     @Test("a marking nobody is watching raises the ready banner, and is stored")
@@ -402,6 +467,10 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
         private var held: [MarkingServer] = []
         private var others: [Other] = []
         private var filters: [[String: String]] = []
+        private var rubricIDs: [String?] = []
+        /// The `rubric_id` each marking request carried, in order.
+        var gradeRubricIDs: [String?] { lock.lock(); defer { lock.unlock() }; return rubricIDs }
+        func recordGrade(rubricID: String?) { lock.lock(); defer { lock.unlock() }; rubricIDs.append(rubricID) }
 
         /// `saved` are this work's gradings, appearing read by read; `others`
         /// are newer gradings of other work, there from the start.
@@ -409,7 +478,7 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
         func reset(grade: Grade, then: Grade? = nil, saved: [[UUID]] = [[]], others: [Other] = []) {
             lock.lock(); defer { lock.unlock() }
             self.grade = grade; self.later = then; self.saved = saved; grades = 0; reads = 0; held = []
-            self.others = others; filters = []; offlineLookups = false
+            self.others = others; filters = []; offlineLookups = false; rubricIDs = []
         }
         private var later: Grade?
         private var offlineLookups = false
@@ -485,9 +554,25 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
     }
     private static var improvements: [[String: Any]] { [["change": "Cite more.", "why": "Evidence."]] }
 
+    /// A request's JSON body. URLSession hands a protocol the body as a stream.
+    private static func body(of request: URLRequest) -> [String: Any] {
+        var data = request.httpBody ?? Data()
+        if data.isEmpty, let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let read = stream.read(&buffer, maxLength: buffer.count)
+                if read <= 0 { break }
+                data.append(buffer, count: read)
+            }
+        }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+    }
+
     override func startLoading() {
         let path = request.url?.path ?? ""
         if path.hasSuffix("/functions/v1/grade") {
+            Self.state.recordGrade(rubricID: Self.body(of: request)["rubric_id"] as? String)
             switch Self.state.nextGrade() {
             case .answer:
                 answerMarking()
@@ -621,7 +706,7 @@ struct MarkingSnapshots {
         // 1. Back on the grader while a marking runs.
         MarkingServer.state.reset(grade: .hold)
         let running = Task {
-            await marking.mark(work: work, rubricID: nil, assignment: nil, presentation: nil,
+            await marking.mark(work: work, rubric: nil, assignment: nil, presentation: nil,
                                title: "History essay", isBlind: false, context: context,
                                mayStore: { true })
         }
@@ -635,7 +720,7 @@ struct MarkingSnapshots {
         // 2. Finished while the student was on Home.
         marking.isWatched = false
         MarkingServer.state.reset(grade: .answer)
-        _ = await marking.mark(work: work, rubricID: nil, assignment: nil, presentation: nil,
+        _ = await marking.mark(work: work, rubric: nil, assignment: nil, presentation: nil,
                                title: "History essay", isBlind: false, context: context,
                                mayStore: { true })
         #expect(marking.ready != nil)
