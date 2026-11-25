@@ -141,6 +141,24 @@ struct MarkingCoordinatorTests {
         #expect(MarkingServer.state.gradeRequests == 2)
     }
 
+    @Test("the criteria chosen are sent with the rubric, and none when all are marked")
+    func sendsTheChosenCriteria() async throws {
+        MarkingServer.state.reset(grade: .answer)
+        let context = try store()
+        let rubric = Rubric(name: "Lab report", body: "A, B, C")
+        context.insert(rubric)
+        let marking = coordinator(RecordingAnnouncer())
+
+        _ = await marking.mark(work: work, rubric: rubric, criteria: [0, 2], assignment: nil,
+                               presentation: nil, title: "Lab", isBlind: false, context: context,
+                               mayStore: { true }, ensureRubric: { _ in nil })
+        _ = await marking.mark(work: work, rubric: rubric, assignment: nil,
+                               presentation: nil, title: "Lab", isBlind: false, context: context,
+                               mayStore: { true }, ensureRubric: { _ in nil })
+
+        #expect(MarkingServer.state.gradeCriteria == [[0, 2], nil])
+    }
+
     @Test("with no rubric, nothing is saved first and none is sent")
     func noRubricSendsNone() async throws {
         MarkingServer.state.reset(grade: .answer)
@@ -492,6 +510,10 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
         private var others: [Other] = []
         private var filters: [[String: String]] = []
         private var rubricIDs: [String?] = []
+        private var criteriaSent: [[Int]?] = []
+        /// The `criteria` each marking request carried, in order.
+        var gradeCriteria: [[Int]?] { lock.lock(); defer { lock.unlock() }; return criteriaSent }
+        func recordGrade(criteria: [Int]?) { lock.lock(); defer { lock.unlock() }; criteriaSent.append(criteria) }
         /// The `rubric_id` each marking request carried, in order.
         var gradeRubricIDs: [String?] { lock.lock(); defer { lock.unlock() }; return rubricIDs }
         func recordGrade(rubricID: String?) { lock.lock(); defer { lock.unlock() }; rubricIDs.append(rubricID) }
@@ -502,7 +524,7 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
         func reset(grade: Grade, then: Grade? = nil, saved: [[UUID]] = [[]], others: [Other] = []) {
             lock.lock(); defer { lock.unlock() }
             self.grade = grade; self.later = then; self.saved = saved; grades = 0; reads = 0; held = []
-            self.others = others; filters = []; offlineLookups = false; rubricIDs = []
+            self.others = others; filters = []; offlineLookups = false; rubricIDs = []; criteriaSent = []
         }
         private var later: Grade?
         private var offlineLookups = false
@@ -596,7 +618,9 @@ private final class MarkingServer: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         let path = request.url?.path ?? ""
         if path.hasSuffix("/functions/v1/grade") {
-            Self.state.recordGrade(rubricID: Self.body(of: request)["rubric_id"] as? String)
+            let sent = Self.body(of: request)
+            Self.state.recordGrade(rubricID: sent["rubric_id"] as? String)
+            Self.state.recordGrade(criteria: sent["criteria"] as? [Int])
             switch Self.state.nextGrade() {
             case .answer:
                 answerMarking()

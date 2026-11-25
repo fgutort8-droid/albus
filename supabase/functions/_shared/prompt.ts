@@ -23,6 +23,11 @@ export interface RubricContext {
   criteria: RubricCriterion[];
   /** The pasted sheet, when the student did not break it into criteria. */
   body: string | null;
+  /**
+   * True when the student chose some of the rubric's criteria to be marked on
+   * (`selectCriteria`). The pasted sheet may still name the others.
+   */
+  onlyListed?: boolean;
 }
 
 export interface BreakdownInput {

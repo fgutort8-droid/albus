@@ -7,6 +7,8 @@ import {
   MAX_WORK_CHARS,
   normaliseGrade,
   normaliseWork,
+  parseCriteriaPositions,
+  selectCriteria,
   sha256,
 } from "../_shared/grade_prompt.ts";
 import type { RubricContext } from "../_shared/prompt.ts";
@@ -675,4 +677,103 @@ Deno.test("normaliseWork still matches the copy the iOS app keeps", () => {
     assertEquals(normaliseWork(input), output);
     assertEquals(normaliseWork(input).length, length);
   }
+});
+
+// ── Choosing which criteria to mark ─────────────────────────────────────────
+
+const THREE: RubricContext = {
+  name: "Lab report",
+  criteria: [
+    { id: "a", code: "A", name: "Method", marks: 6, guidance: null },
+    { id: "b", code: "B", name: "Analysis", marks: 6, guidance: null },
+    { id: "c", code: "C", name: "Evaluation", marks: 6, guidance: null },
+  ],
+  body: "A: Method. B: Analysis. C: Evaluation.",
+};
+
+Deno.test("no choice in the request means every criterion, as older apps send", () => {
+  assertEquals(parseCriteriaPositions(undefined), null);
+  assertEquals(parseCriteriaPositions("A,B"), null);
+  assertEquals(selectCriteria(THREE, null), THREE);
+});
+
+Deno.test("positions are whole, in range, once each, and in order", () => {
+  assertEquals(parseCriteriaPositions([2, 0, 2, 1.5, -1, 40, "1", null]), [0, 2]);
+  assertEquals(parseCriteriaPositions([]), []);
+});
+
+Deno.test("a choice narrows the rubric to those criteria, in the rubric's order", () => {
+  const chosen = selectCriteria(THREE, [2, 0]);
+  assertEquals(chosen?.criteria.map((c) => c.code), ["A", "C"]);
+  assertEquals(chosen?.onlyListed, true);
+  assertEquals(chosen?.body, THREE.body, "the pasted sheet is kept for its descriptors");
+});
+
+Deno.test("choosing every criterion is no narrowing", () => {
+  const all = selectCriteria(THREE, [0, 1, 2]);
+  assertEquals(all, THREE);
+  assertEquals(all?.onlyListed, undefined);
+});
+
+Deno.test("choosing none of the rubric's criteria is refused, not marked", () => {
+  assertEquals(selectCriteria(THREE, []), null);
+  assertEquals(selectCriteria(THREE, [7]), null);
+});
+
+Deno.test("a rubric with no criteria has nothing to choose from", () => {
+  assertEquals(selectCriteria(BODY_ONLY, [0]), BODY_ONLY);
+});
+
+Deno.test("a narrowed rubric tells the model to leave the other criteria out", () => {
+  const narrowed = selectCriteria(THREE, [1])!;
+  const user = buildGradeUserPrompt({
+    taskTitle: "Lab",
+    taskType: "lab_report",
+    rubric: narrowed,
+    work: "w".repeat(300),
+    presentation: null,
+  });
+  assertStringIncludes(user, "- B: Analysis (6 marks)");
+  assert(!user.includes("- A: Method"), "a left-out criterion is not listed");
+  assertStringIncludes(user, "criteria listed in the rubric only");
+
+  const full = buildGradeUserPrompt({
+    taskTitle: "Lab",
+    taskType: "lab_report",
+    rubric: THREE,
+    work: "w".repeat(300),
+    presentation: null,
+  });
+  assert(!full.includes("criteria listed in the rubric only"));
+});
+
+Deno.test("the total is the chosen criteria's, not the whole rubric's", () => {
+  const narrowed = selectCriteria(THREE, [0, 1])!;
+  const grade = normaliseGrade({
+    overall_feedback: "Clear method.",
+    grade_label: null,
+    total_marks: 18,
+    criteria: [
+      {
+        code: "A",
+        name: "Method",
+        marks: 5,
+        out_of: 6,
+        comment: "Good.",
+        quote: null,
+        where: null,
+      },
+      {
+        code: "B",
+        name: "Analysis",
+        marks: 4,
+        out_of: 6,
+        comment: "Fine.",
+        quote: null,
+        where: null,
+      },
+    ],
+    improvements: [{ change: "Explain the error bars.", why: "Precision." }],
+  }, narrowed);
+  assertEquals(grade.totalMarks, 12);
 });

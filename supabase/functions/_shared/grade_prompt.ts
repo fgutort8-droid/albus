@@ -288,6 +288,42 @@ export function buildGradeSystemPrompt(basis: GradeBasis = "personal"): string {
   return basis === "blind" ? BLIND_VOICE : VOICE;
 }
 
+/** A rubric holds at most 40 criteria (`assert_rubric_limits`). */
+const MAX_CRITERIA = 40;
+
+/**
+ * Which of the rubric's criteria the student chose to be marked on, as
+ * positions in the rubric's own order (0 is the first). Null when the request
+ * names none, which means all of them; the apps before this shipped never send
+ * it. Entries that are not whole positions are dropped, so an empty array
+ * means the student chose nothing.
+ */
+export function parseCriteriaPositions(raw: unknown): number[] | null {
+  if (!Array.isArray(raw)) return null;
+  const positions = raw.filter((v): v is number =>
+    typeof v === "number" && Number.isInteger(v) && v >= 0 && v < MAX_CRITERIA
+  );
+  return [...new Set(positions)].sort((a, b) => a - b);
+}
+
+/**
+ * The rubric narrowed to the chosen criteria. Unchanged when no choice was
+ * made, when the rubric has no criteria to choose from, or when every one was
+ * chosen. Null when the choice names none of the rubric's criteria: marking
+ * against nothing is not a marking, and the caller refuses it before anything
+ * is spent.
+ */
+export function selectCriteria(
+  rubric: RubricContext,
+  positions: number[] | null,
+): RubricContext | null {
+  if (positions === null || rubric.criteria.length === 0) return rubric;
+  const criteria = rubric.criteria.filter((_, i) => positions.includes(i));
+  if (criteria.length === 0) return null;
+  if (criteria.length === rubric.criteria.length) return rubric;
+  return { ...rubric, criteria, onlyListed: true };
+}
+
 export function buildGradeUserPrompt(input: GradeInput): string {
   const { rubric } = input;
 
@@ -334,10 +370,21 @@ export function buildGradeUserPrompt(input: GradeInput): string {
     ? (rubric.body ? `${criteria}\n\n${rubric.body}` : criteria)
     : (rubric.body ?? "");
 
+  // Outside the fence: this is Albus speaking, not the student's sheet. The
+  // pasted sheet may still describe the criteria the student left out.
+  const onlyListed = rubric.onlyListed
+    ? [
+      "",
+      "The student chose to be marked on the criteria listed in the rubric only.",
+      "If the pasted sheet describes others, do not mark or mention them.",
+    ]
+    : [];
+
   return [
     task,
     "",
     fence("student_rubric", rubricText),
+    ...onlyListed,
     "",
     fence("student_work", input.work),
     ...preferenceBlock,
