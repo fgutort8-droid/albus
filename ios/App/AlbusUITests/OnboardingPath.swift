@@ -30,15 +30,15 @@ enum OnboardingPath {
     /// project, and spend a real AI call, on every run; now they make none.
     /// The first plan is the one the phone makes at once.
     ///
-    /// The AI question is answered at launch: "NO" unless a test needs the AI
-    /// (`allowAI`), so onboarding goes from the deadline straight to the plan,
-    /// and nothing is sent without the test saying so.
-    static func launch(_ app: XCUIApplication, allowAI: Bool = false) {
+    /// The AI question is answered "no" at launch: onboarding goes from the
+    /// deadline straight to the plan the phone makes, and no UI test sends
+    /// anything to the AI or the server's planner.
+    static func launch(_ app: XCUIApplication) {
         app.launchArguments += ["-albus.debug.skipNotificationPrompt",
                                 "-albus.debug.noPurchases",
                                 "-albus.debug.assumeSignedIn",
                                 "-albus.profile.onboarded", "NO",
-                                "-albus.ai.allowed", allowAI ? "YES" : "NO"]
+                                "-albus.ai.allowed", "NO"]
         app.launch()
     }
 
