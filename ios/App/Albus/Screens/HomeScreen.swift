@@ -335,7 +335,7 @@ struct HomeScreen: View {
                 .accessibilityLabel("Notification settings")
 
                 IconButton(systemImage: "plus", isFilled: true,
-                           accessibilityLabel: "Add assignment") { addingTask = true }
+                           accessibilityLabel: "Add assignment") { addTask() }
             }
         }
         .padding(.top, Tokens.Spacing.s)
@@ -388,6 +388,18 @@ struct HomeScreen: View {
         }
     }
 
+    /// The add form, or the plans once this phone's open tasks fill the
+    /// plan. The form could only end in a refusal then, after the student had
+    /// filled it in, and the notice above already says why.
+    private func addTask() {
+        let openHere = assignments.count(where: { !$0.isComplete && !$0.isArchived })
+        if entitlements.taskLimit(reachedBy: openHere) != nil {
+            showingPaywall = true
+        } else {
+            addingTask = true
+        }
+    }
+
     /// Open tasks the server counts that are not on this phone: made on
     /// another phone, or before Albus was reinstalled. They can fill the plan
     /// with nothing open here, and only the student knows whether that other
@@ -432,7 +444,7 @@ struct HomeScreen: View {
                        message: assignments.isEmpty
                          ? "Add an assignment and Albus will break it into steps and look for time for them."
                          : "No active assignments. Add the next thing when you're ready.",
-                       actionTitle: "Add an assignment") { addingTask = true }
+                       actionTitle: "Add an assignment") { addTask() }
         case .dueSoon:
             EmptyState(icon: "calendar", title: "Nothing due this week",
                        message: "No unfinished assignment is due in the next seven days.")

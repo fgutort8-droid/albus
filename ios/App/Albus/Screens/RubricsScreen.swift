@@ -10,12 +10,16 @@ import AlbusCore
 /// saved one from a list is the reason they would.
 struct RubricsScreen: View {
     @Environment(\.modelContext) private var context
+    @Environment(EntitlementService.self) private var entitlements
 
     @Query(sort: \Rubric.updatedAt, order: .reverse) private var rubrics: [Rubric]
 
     @State private var editing: RubricDraft?
     @State private var deleting: Rubric?
     @State private var syncFailure: String?
+    /// Set when a new rubric was asked for with the plan's rubrics used up.
+    @State private var rubricLimitReached: Int?
+    @State private var showingPaywall = false
 
     var body: some View {
         ScrollView {
@@ -34,7 +38,7 @@ struct RubricsScreen: View {
                                + "Albus can use it to shape your plan. Plus and Pro can estimate a mark for your "
                                + "work against it.",
                         actionTitle: "Add a rubric"
-                    ) { editing = .empty }
+                    ) { addRubric() }
                 } else {
                     ForEach(rubrics) { rubric in
                         Button { editing = RubricDraft(rubric) } label: {
@@ -57,6 +61,10 @@ struct RubricsScreen: View {
                 commit(saved)
             }
         }
+        .rubricLimitDialog($rubricLimitReached, planName: entitlements.plan.displayName) {
+            showingPaywall = true
+        }
+        .sheet(isPresented: $showingPaywall) { PaywallScreen() }
         .confirmationDialog(
             deleting.map { "Delete \($0.name)?" } ?? "",
             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
@@ -91,7 +99,7 @@ struct RubricsScreen: View {
                     .foregroundStyle(Tokens.Palette.ink)
                 Spacer()
                 IconButton(systemImage: "plus", isFilled: true,
-                           accessibilityLabel: "Add a rubric") { editing = .empty }
+                           accessibilityLabel: "Add a rubric") { addRubric() }
             }
 
             if !rubrics.isEmpty {
@@ -112,8 +120,26 @@ struct RubricsScreen: View {
         RubricWriter.commit(draft, context: context) { syncFailure = $0 }
     }
 
+    /// Runs `start` when the plan has room for one more rubric. When it has
+    /// not, the plan says so now, instead of the server after the rubric is
+    /// written.
+    private func whenRoomForRubric(_ start: () -> Void) {
+        if let limit = entitlements.rubricLimit(reachedBy: rubrics.count) {
+            rubricLimitReached = limit
+        } else {
+            start()
+        }
+    }
+
+    private func addRubric() {
+        whenRoomForRubric { editing = .empty }
+    }
+
+    /// A copy is a new rubric, and counts against the plan like one.
     private func duplicate(_ rubric: Rubric) {
-        RubricWriter.duplicate(rubric, context: context) { syncFailure = $0 }
+        whenRoomForRubric {
+            RubricWriter.duplicate(rubric, context: context) { syncFailure = $0 }
+        }
     }
 
     private func remove(_ rubric: Rubric) {

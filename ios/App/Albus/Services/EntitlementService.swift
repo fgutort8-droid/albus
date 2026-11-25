@@ -175,6 +175,37 @@ final class EntitlementService {
         return expiresAt > .now
     }
 
+    /// The plan's open-task limit, once the tasks open on this phone reach
+    /// it. Nil while there is room, and until the plan has been read.
+    ///
+    /// The same count `PlanCoordinator.addAssignment` turns a new task away
+    /// at, so the add form is not opened only to be refused once filled in.
+    func taskLimit(reachedBy openHere: Int) -> Int? {
+        reachedLimit(plan.tasks, by: openHere)
+    }
+
+    /// The plan's rubric limit, once the rubrics saved on this phone reach
+    /// it. Nil while there is room, and until the plan has been read.
+    ///
+    /// The server holds the count that matters and turns a rubric past the
+    /// limit away (`RUBRIC_PLAN_LIMIT`), but only after the student has
+    /// written it, so every door into a new rubric asks this first. It counts
+    /// what is on this phone rather than the plan's `used`, which is read with
+    /// the plan and not after each save or delete: a student who had just
+    /// deleted one would be kept waiting for the next refresh.
+    func rubricLimit(reachedBy savedHere: Int) -> Int? {
+        reachedLimit(plan.rubrics, by: savedHere)
+    }
+
+    /// Nil until the plan has been read: the plan shown before then is
+    /// Free's, and a Plus student must not be sent to buy what they have.
+    /// The server still decides then, as it always does.
+    private func reachedLimit(_ allowance: Allowance, by countedHere: Int) -> Int? {
+        guard lastCheckedAt != nil, let limit = allowance.limit, limit > 0,
+              countedHere >= limit else { return nil }
+        return limit
+    }
+
     private let reader: any PlanReading
 
     init(reader: any PlanReading = PlanReader()) {
