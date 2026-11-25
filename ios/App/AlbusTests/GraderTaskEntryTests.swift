@@ -7,6 +7,8 @@ import Testing
 /// "Mark my work" went straight to the work, past the screen that says
 /// marking needs Plus or Pro, and the student was turned away only when they
 /// pressed mark.
+// `GraderScreen` is a `View`, so its statics are main-actor isolated.
+@MainActor
 @Suite("Grader opened from a task")
 struct GraderTaskEntryTests {
 

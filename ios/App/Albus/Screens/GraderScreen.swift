@@ -67,9 +67,11 @@ struct GraderScreen: View {
     }
 
     /// Whether the student has begun giving the work: typed or pasted it, or
-    /// is choosing or reading a file or photo of it.
+    /// is choosing or reading a file or photo of it. A chosen photo counts
+    /// from the moment it is picked (`photo`), not only once it is being read:
+    /// loading it comes first, and a refresh landing then must not hide it.
     private var workStarted: Bool {
-        !work.isEmpty || extracting || importing || workPhotoPicking
+        !work.isEmpty || extracting || importing || workPhotoPicking || photo != nil
     }
 
     @State private var stage: Stage = .start
