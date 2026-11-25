@@ -365,24 +365,20 @@ struct AccountDeletionTests {
         #expect(!asked)
     }
 
-    /// The views and the sign-in service cannot be driven from a unit test
-    /// without a real Apple sign-in, so this reads the source, as
-    /// `PlanDoorWiringTests` does: every Apple sign-in hands its code to the
-    /// server, and the deletion screen asks Apple only through the flow above.
-    @Test("sign-in keeps the token, and deletion asks Apple only when needed")
-    func wiring() throws {
+    /// Screen glue only, read from the source as `PlanDoorWiringTests` does: what is sent, and when Apple is asked, is proved
+    /// above and in `SignInTests` through the real transport. This checks
+    /// the screens call those paths, which no test can drive without a real
+    /// Apple sheet.
+    @Test("the screens use the paths tested above")
+    func screenWiring() throws {
         func source(_ path: String) throws -> String {
             let url = URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent().deletingLastPathComponent()
                 .appendingPathComponent("Albus/\(path)")
             return try String(contentsOf: url, encoding: .utf8)
         }
-        let session = try source("Services/SessionService.swift")
         let signIn = try source("Screens/SignInScreen.swift")
         let screen = try source("Screens/AccountDeletionScreen.swift")
-        #expect(session.components(separatedBy: "keepAppleToken(authorizationCode)").count - 1 == 2,
-                "both Apple sign-ins hand their code to the server")
-        #expect(session.contains("\"apple-token\""))
         #expect(signIn.contains("code: AppleSignIn.authorizationCode(from: authorization)"))
         #expect(screen.contains("deletion.deleteAskingAppleOnlyIfNeeded("))
         #expect(screen.components(separatedBy: "AppleConfirmation()").count - 1 == 1,

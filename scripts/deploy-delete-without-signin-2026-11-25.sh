@@ -40,7 +40,7 @@ CHANGE=20261125180000
 # Every migration file's name and contents on main, as reviewed.
 MIGRATIONS_DIGEST=b94e83750b1e608739ec83c1fcd4c91ef3a3e21be6bde7c0817cfd77bfe7e69c
 # config.toml and every function source file on main, as reviewed.
-SOURCE_DIGEST=25cde641a7ec70ab6858e0d1ed70e769f058a82ea26dffa051d86dd465ef09ce
+SOURCE_DIGEST=351573b83e7029d9e777b901eaf36ab4a823e7d331c4fb06ed26c2d43e19e3d9
 DRY_RUN=${DRY_RUN:-1}
 case "$DRY_RUN" in 0|1) ;; *) echo 'DRY_RUN must be 0 or 1'; exit 1;; esac
 stop() { echo "STOPPED: $*; no later step ran." >&2; exit 1; }

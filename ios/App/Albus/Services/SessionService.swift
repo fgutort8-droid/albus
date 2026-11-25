@@ -303,12 +303,16 @@ final class SessionService {
     /// always did.
     private func keepAppleToken(_ code: String?) {
         guard let code, let client, case .signedIn = state else { return }
-        Task.detached {
+        appleTokenDelivery = Task.detached {
             try? await client.functions.invoke(
                 "apple-token",
                 options: FunctionInvokeOptions(body: ["apple_authorization_code": code]))
         }
     }
+
+    /// The latest hand-over of a sign-in's code, still running or done.
+    /// Nothing in the app waits on it; tests do, to see what was sent.
+    @ObservationIgnored private(set) var appleTokenDelivery: Task<Void, Never>?
 
     private var isAnonymousSignedIn: Bool {
         if case .signedIn(_, true) = state { return true }
