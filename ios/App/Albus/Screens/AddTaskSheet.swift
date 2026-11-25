@@ -32,6 +32,9 @@ struct AddTaskSheet: View {
     @State private var addingCourse = false
     /// Set when a new rubric was asked for with the plan's rubrics used up.
     @State private var rubricLimitReached: Int?
+    /// Why a rubric written here did not reach the server. It stays on the
+    /// phone and selected, so without this it looked saved.
+    @State private var rubricSyncFailure: String?
     @State private var showingPaywall = false
 
     /// The vocabulary the server's check constraint accepts. Kept here rather
@@ -104,6 +107,9 @@ struct AddTaskSheet: View {
                     .font(Tokens.Typography.micro)
                     .foregroundStyle(Tokens.Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
+                if let rubricSyncFailure {
+                    StatusBanner(tone: .warning, message: rubricSyncFailure)
+                }
             }
 
             SheetField(label: "Instructions (optional)") {
@@ -163,7 +169,9 @@ struct AddTaskSheet: View {
                 // Saved through the same path the Rubrics tab uses, then
                 // selected — so a rubric written here is a real saved rubric,
                 // reusable next time, not a one-off attached to this task.
-                if let created = RubricWriter.commit(saved, context: modelContext) {
+                rubricSyncFailure = nil
+                if let created = RubricWriter.commit(saved, context: modelContext,
+                                                     onSyncFailure: { rubricSyncFailure = $0 }) {
                     rubricID = created
                 }
             }
