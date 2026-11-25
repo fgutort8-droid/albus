@@ -26,7 +26,8 @@ final class LegalLinkDestinationsUITests: XCTestCase {
             "-albus.debug.forcePlan", "free",
         ]
         app.launchArguments += signedIn
-            ? ["-albus.debug.assumeSignedIn", "-albus.profile.onboarded", "YES", "-albus.debug.openSettings"]
+            ? ["-albus.debug.assumeSignedIn", "-albus.profile.onboarded", "YES",
+               "-albus.ai.allowed", "NO", "-albus.debug.openSettings"]
             : ["-albus.debug.assumeSignedOut"]
         app.launch()
         return app

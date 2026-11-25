@@ -29,11 +29,16 @@ enum OnboardingPath {
     /// automated. These tests used to make a real account on the production
     /// project, and spend a real AI call, on every run; now they make none.
     /// The first plan is the one the phone makes at once.
+    ///
+    /// The AI question is answered "no" at launch: onboarding goes from the
+    /// deadline straight to the plan the phone makes, and no UI test sends
+    /// anything to the AI or the server's planner.
     static func launch(_ app: XCUIApplication) {
         app.launchArguments += ["-albus.debug.skipNotificationPrompt",
                                 "-albus.debug.noPurchases",
                                 "-albus.debug.assumeSignedIn",
-                                "-albus.profile.onboarded", "NO"]
+                                "-albus.profile.onboarded", "NO",
+                                "-albus.ai.allowed", "NO"]
         app.launch()
     }
 

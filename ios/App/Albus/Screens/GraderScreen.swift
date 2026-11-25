@@ -80,6 +80,9 @@ struct GraderScreen: View {
     /// to be that meter and it reported only this feature — which is how it
     /// ended up counting differently from the gate that refuses.
     @Environment(EntitlementService.self) private var entitlements
+    @Environment(Preferences.self) private var preferences
+    /// Set when "Mark my work" was pressed with the AI not allowed.
+    @State private var askingAI = false
 
     // What is being marked.
     @State private var chosenAssignment: Assignment?
@@ -217,6 +220,15 @@ struct GraderScreen: View {
         }
         .animation(.spring(response: 0.38, dampingFraction: 0.86), value: stage)
         .sheet(isPresented: $showingPaywall) { PaywallScreen() }
+        .sheet(isPresented: $askingAI) {
+            AIPermissionView(
+                onAllow: {
+                    preferences.aiAllowed = true
+                    askingAI = false
+                    Task { await submit() }
+                },
+                onNotNow: { askingAI = false })
+        }
         .rubricLimitDialog($rubricLimitReached, planName: entitlements.plan.displayName) {
             showingPaywall = true
         }
@@ -643,7 +655,10 @@ struct GraderScreen: View {
                 .foregroundStyle(Tokens.Palette.inkSecondary)
         }
 
-        PrimaryButton(title: "Mark my work") { Task { await submit() } }
+        PrimaryButton(title: "Mark my work") {
+            // Marking is the AI; nothing is sent until the student allows it.
+            if preferences.mayUseAI { Task { await submit() } } else { askingAI = true }
+        }
     }
 
     private var presentationExamples: [String] {
@@ -1094,7 +1109,9 @@ struct GraderScreen: View {
             mayStore: { [accountDeletion, localAccount] in
                 !accountDeletion.requiresCleanup && accountDeletion.generation == accountGeneration
                     && localAccount.generation == localGeneration
-            })
+            },
+            // Read at each send, so turning the AI off stops a retry too.
+            mayUseAI: { [preferences] in preferences.mayUseAI })
 
         // Dropped once marked: holding an essay in memory behind a visible
         // result serves nobody.

@@ -26,6 +26,8 @@ final class PaywallUITests: XCTestCase {
         app.launchArguments += [
             "-albus.debug.assumeSignedIn",
             "-albus.profile.onboarded", "YES",
+            // Answered, so the one-time AI question does not cover the app.
+            "-albus.ai.allowed", "NO",
             "-albus.debug.skipNotificationPrompt",
             "-albus.debug.noPurchases",
             "-albus.debug.openSettings",

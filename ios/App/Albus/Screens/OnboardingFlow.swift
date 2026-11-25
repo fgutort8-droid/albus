@@ -10,7 +10,7 @@ struct OnboardingFlow: View {
     @Environment(PlanCoordinator.self) private var coordinator
     @Environment(Preferences.self) private var preferences
 
-    enum Step { case profile, deadline, building, meetAlbus }
+    enum Step { case profile, freeTime, deadline, aiPermission, building, meetAlbus }
 
     @State private var step: Step = .profile
 
@@ -18,6 +18,13 @@ struct OnboardingFlow: View {
     @State private var name = ""
     @State private var program: Preferences.Program = .other
     @State private var load: Preferences.StudyLoad = .standard
+
+    // Free time. School days start at the window every student had before
+    // this was asked; weekends start from the morning.
+    @State private var schoolFrom = Availability.default.windowStartHour
+    @State private var schoolUntil = Availability.default.windowEndHour
+    @State private var weekendFrom = 10
+    @State private var weekendUntil = 20
 
     // Screen 2
     @State private var taskTitle = ""
@@ -35,7 +42,12 @@ struct OnboardingFlow: View {
             BackgroundGradient()
             switch step {
             case .profile:    profileStep
+            case .freeTime:   freeTimeStep
             case .deadline:   deadlineStep
+            case .aiPermission:
+                AIPermissionView(
+                    onAllow: { preferences.aiAllowed = true; begin() },
+                    onNotNow: { preferences.aiAllowed = false; begin() })
             case .building:   buildingStep
             case .meetAlbus:  meetAlbusStep
             }
@@ -45,8 +57,8 @@ struct OnboardingFlow: View {
 
     // MARK: - 1. Profile
 
-    /// Name and study hours, then the first deadline.
-    private var formStepCount: Double { 2 }
+    /// Name and study hours, when they are free, then the first deadline.
+    private var formStepCount: Double { 3 }
 
     private var profileStep: some View {
         OnboardingScaffold(
@@ -55,7 +67,7 @@ struct OnboardingFlow: View {
             subtitle: "So Albus can build your first plan.",
             actionTitle: "Next",
             isEnabled: true,
-            action: { step = .deadline }
+            action: { step = .freeTime }
         ) {
             VStack(alignment: .leading, spacing: Tokens.Spacing.xl) {
                 field("Your name") {
@@ -89,16 +101,42 @@ struct OnboardingFlow: View {
         }
     }
 
-    // MARK: - 2. First deadline
+    // MARK: - 2. Free time
+
+    /// When study sessions may go. Without it Albus planned 4pm to 10pm every
+    /// day, and a student still at school at 4pm got sessions during lessons.
+    private var freeTimeStep: some View {
+        OnboardingScaffold(
+            progress: 2 / formStepCount,
+            title: "When are you free to study?",
+            subtitle: "Albus only plans sessions inside these hours.",
+            actionTitle: "Next",
+            isEnabled: true,
+            action: { step = .deadline }
+        ) {
+            VStack(alignment: .leading, spacing: Tokens.Spacing.xl) {
+                field("School days") {
+                    HourRangePicker(from: $schoolFrom, until: $schoolUntil)
+                }
+                field("Weekends") {
+                    HourRangePicker(from: $weekendFrom, until: $weekendUntil)
+                }
+            }
+        }
+    }
+
+    // MARK: - 3. First deadline
 
     private var deadlineStep: some View {
         OnboardingScaffold(
-            progress: 1.0,
+            progress: 3 / formStepCount,
             title: "Give me your most urgent deadline.",
             subtitle: "This is where your first plan begins.",
             actionTitle: "Build my plan",
             isEnabled: taskTitle.trimmingCharacters(in: .whitespaces).count >= 2,
-            action: begin
+            // The first plan is the first thing that could go to the AI, so
+            // permission is asked here, once, and not again on a later visit.
+            action: { if preferences.aiAllowed == nil { step = .aiPermission } else { begin() } }
         ) {
             VStack(alignment: .leading, spacing: Tokens.Spacing.xl) {
                 field("Task name") {
@@ -245,6 +283,10 @@ struct OnboardingFlow: View {
         preferences.name = name
         preferences.program = program
         preferences.load = load
+        preferences.windowStartHour = schoolFrom
+        preferences.windowEndHour = schoolUntil
+        preferences.weekendStartHour = weekendFrom
+        preferences.weekendEndHour = weekendUntil
 
         step = .building
         Task {
@@ -259,7 +301,8 @@ struct OnboardingFlow: View {
                     course: nil
                 ),
                 context: context,
-                availability: preferences.availability
+                availability: preferences.availability,
+                useAI: preferences.mayUseAI
             )
             // A failed generation must not trap the student in onboarding: the
             // assignment is saved either way, and Task detail explains the gap.

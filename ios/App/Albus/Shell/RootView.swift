@@ -35,6 +35,14 @@ struct RootView: View {
                     LaunchPlaceholder()
                 case .signedIn where preferences.hasOnboarded:
                     AppShell()
+                        // Once, for a student who joined before Albus asked:
+                        // nothing goes to the AI until they answer.
+                        .sheet(isPresented: Binding(get: { preferences.aiAllowed == nil },
+                                                    set: { _ in })) {
+                            AIPermissionView(onAllow: { preferences.aiAllowed = true },
+                                             onNotNow: { preferences.aiAllowed = false })
+                                .interactiveDismissDisabled()
+                        }
                 case .signedIn:
                     OnboardingFlow()
                 case .needsAccount, .failed:

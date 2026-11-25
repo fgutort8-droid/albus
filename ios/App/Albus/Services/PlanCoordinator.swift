@@ -25,6 +25,16 @@ final class PlanCoordinator {
 
     private(set) var status: Status = .idle
 
+    /// The study hours the week was last planned in. A plan the AI answers
+    /// late is placed in these, not the ones it set out with: the student may
+    /// have changed their hours while it was on its way, and the week has
+    /// already moved to them.
+    private var latestAvailability: Availability?
+
+    /// What Home says when the student has not allowed the AI.
+    static let aiOffNote = "AI is off, so Albus split this into study sessions for you. "
+        + "You can turn it on in Settings."
+
     /// Steps the scheduler could not fit before their deadline.
     ///
     /// The scheduler has always reported these and nothing ever read them, so a
@@ -157,10 +167,15 @@ final class PlanCoordinator {
     /// still leaves them a working plan and everything they typed. The AI's
     /// steps then replace the phone's, unless the student has already started
     /// on them: a plan they have begun is theirs.
+    ///
+    /// - Parameter useAI: false while the student has not allowed the AI
+    ///   (`Preferences.mayUseAI`). The phone's plan is then the plan, and
+    ///   nothing about the task is sent anywhere.
     func addAssignment(_ draft: NewAssignment,
                        context: ModelContext,
                        availability: Availability = .default,
                        taskLimit: Int? = nil,
+                       useAI: Bool = true,
                        now: Date = .now) async {
         guard !accountWasDeleted else { return }
         // The open-task cap, checked on the device first. The server trigger is
@@ -189,6 +204,10 @@ final class PlanCoordinator {
         // titles show as skeletons until the AI's arrive, for at most
         // `refiningDisplayLimit`.
         planLocally(assignment, context: context, availability: availability, now: now)
+        guard useAI else {
+            status = .plannedLocally(note: Self.aiOffNote, suggestsUpgrade: false)
+            return
+        }
         let localPlan = snapshot(of: assignment)
         let id = assignment.id
         pending.insert(id)
@@ -232,7 +251,7 @@ final class PlanCoordinator {
             if !result.steps.isEmpty, !claimed.contains(id), snapshot(of: current) == localPlan {
                 replaceSteps(of: current, with: result.steps, context: context)
                 save(context, "insert steps")
-                reschedule(context: context, availability: availability, now: now)
+                reschedule(context: context, availability: latestAvailability ?? availability, now: now)
             } else {
                 // The student has started on the phone's plan, opened a step,
                 // or edited it. Theirs stands.
@@ -259,7 +278,7 @@ final class PlanCoordinator {
                 if !claimed.contains(id), current.gradings.isEmpty, snapshot(of: current) == localPlan {
                     context.delete(current)
                     save(context, "remove refused assignment")
-                    reschedule(context: context, availability: availability, now: now)
+                    reschedule(context: context, availability: latestAvailability ?? availability, now: now)
                 } else {
                     // Started on already, by any route, or marked against.
                     // Removed now, it could go from under an open step or a
@@ -806,6 +825,7 @@ final class PlanCoordinator {
     func reschedule(context: ModelContext,
                     availability: Availability = .default,
                     now: Date = .now) {
+        latestAvailability = availability
         do {
             let assignments = try context.fetch(FetchDescriptor<Assignment>())
             let existing = try context.fetch(FetchDescriptor<PlanSessionRecord>())
