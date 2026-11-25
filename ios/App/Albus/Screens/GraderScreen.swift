@@ -1085,7 +1085,7 @@ struct GraderScreen: View {
         // lost on the way back.
         let outcome = await marking.mark(
             work: work,
-            rubricID: chosenRubric?.remoteID,
+            rubric: chosenRubric,
             assignment: chosenAssignment,
             presentation: presentation,
             title: workTitle,

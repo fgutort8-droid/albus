@@ -106,6 +106,18 @@ enum RubricWriter {
         return Task { await PendingRubricDeletions.flush(context: context, defaults: defaults, deleteRemote: deleteRemote) }
     }
 
+    /// Saves `rubric` to the server again before something reads it there by
+    /// id, and says why when that fails. Waits behind any save of the same
+    /// rubric still on its way. Nil when the server holds it.
+    static func ensureOnServer(_ rubric: Rubric,
+                               saveRemote: @escaping @MainActor (RubricService.Snapshot) async throws -> Void = {
+                                   try await RubricService().save($0)
+                               }) async -> String? {
+        var failure: String?
+        await sync(rubric, saveRemote: saveRemote) { failure = $0 }.value
+        return failure
+    }
+
     @discardableResult
     static func sync(_ rubric: Rubric, defaults: UserDefaults = .standard,
                      saveRemote: @escaping @MainActor (RubricService.Snapshot) async throws -> Void = {
