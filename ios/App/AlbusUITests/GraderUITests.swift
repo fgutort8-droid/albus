@@ -1,15 +1,14 @@
 import XCTest
 
-/// Drives Albus Grader on the Free plan, from a fresh install.
+/// Drives Albus Grader from a fresh install.
 ///
-/// **Free does not include marking.** So this proves that a student who
-/// cannot mark is shown a price rather than a broken screen, and that marking
-/// from an assignment opens the same Grader with that assignment carried in.
+/// It proves two things: a student on Free, who cannot mark, is shown a price
+/// rather than a broken screen; and on Plus, marking from an assignment opens
+/// the same Grader with that assignment carried in.
 ///
-/// No server is contacted. The plan is forced to Free
-/// (`-albus.debug.forcePlan`), onboarding's first plan is the one the phone
-/// makes (the AI question is answered no, `OnboardingPath`), and nothing is
-/// marked. It used to read the real `my_plan()` from a fresh production
+/// No server is contacted. The plan is forced (`-albus.debug.forcePlan`),
+/// onboarding's first plan is the one the phone makes (the AI question is
+/// answered no, `OnboardingPath`), and nothing is marked. It used to read the real `my_plan()` from a fresh production
 /// account and spend a real AI call on the first plan; whether `my_plan()`
 /// still decodes belongs in `EntitlementServiceTests` and the database tests,
 /// which need no account.
@@ -97,7 +96,10 @@ final class GraderUITests: XCTestCase {
     /// pushes it rather than silently doing nothing: `navigationDestination`
     /// has failed quietly in this app before.
     func testMarkingFromAnAssignmentOpensTheSameGrader() throws {
-        app.launchArguments += ["-albus.debug.forcePlan", "free"]
+        // Plus: a task opens the Grader at its work step only while the plan
+        // has a marking to spend (#63). Nothing is marked, and with the AI
+        // question answered no, nothing could be.
+        app.launchArguments += ["-albus.debug.forcePlan", "plus"]
         OnboardingPath.launch(app)
         OnboardingPath.reachApp(app)
 
