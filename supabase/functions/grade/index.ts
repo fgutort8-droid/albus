@@ -39,6 +39,9 @@ import {
   MIN_WORK_CHARS,
   normaliseGrade,
   normaliseWork,
+  parseCriteriaPositions,
+  rubricCacheKey,
+  selectCriteria,
   sha256,
 } from "../_shared/grade_prompt.ts";
 
@@ -47,6 +50,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 interface RequestBody {
   assignment_id?: unknown;
   rubric_id?: unknown;
+  criteria?: unknown;
   work?: unknown;
   presentation?: unknown;
   title?: unknown;
@@ -66,6 +70,10 @@ function parseBody(body: RequestBody) {
 
   // Optional, and only an override. Absent is the normal case now.
   const rubricId = uuid(body.rubric_id);
+
+  // Optional: which of the rubric's criteria to mark, by position. Absent
+  // means all of them, which is what every app before this sends.
+  const criteria = parseCriteriaPositions(body.criteria);
 
   // Normalised before it is measured, not after: the caps should describe the
   // work as the model will see it, and OCR output can be a fifth whitespace.
@@ -99,7 +107,7 @@ function parseBody(body: RequestBody) {
     ? body.title.replace(/\s+/g, " ").trim().slice(0, MAX_TITLE_CHARS)
     : "";
 
-  return { assignmentId, rubricId, work, presentation, title };
+  return { assignmentId, rubricId, criteria, work, presentation, title };
 }
 
 Deno.serve(async (req) => {
@@ -170,6 +178,17 @@ Deno.serve(async (req) => {
       basis = resolved.basis;
     }
 
+    // Narrowed before the hash and before anything is spent: the same essay
+    // marked on two criteria and on all five are different answers, and a
+    // choice of none is refused for free.
+    if (rubric) {
+      const chosen = selectCriteria(rubric, input.criteria);
+      if (!chosen) {
+        throw new HttpError(422, "NO_CRITERIA", "Choose at least one criterion to mark against.");
+      }
+      rubric = chosen;
+    }
+
     // What this piece is called.
     //
     // An assignment's own title wins — it is the one the student will recognise
@@ -200,8 +219,7 @@ Deno.serve(async (req) => {
       // and must not share one answer.
       title,
       taskType,
-      rubric?.name ?? "",
-      (rubric?.criteria ?? []).map((c) => `${c.code}:${c.name}:${c.marks}`).join("|"),
+      rubricCacheKey(rubric),
       input.presentation ?? "",
     ].join("\u0000"));
 

@@ -205,6 +205,9 @@ struct GradingService {
         /// Optional now, and only an override — the server works the rubric out
         /// from the assignment when this is absent.
         let rubric_id: String?
+        /// Which of the rubric's criteria to mark, by position in its own
+        /// order. Absent marks all of them.
+        let criteria: [Int]?
         let work: String
         /// How the student asked for the result to be shown, in their words.
         let presentation: String?
@@ -229,7 +232,8 @@ struct GradingService {
     /// overrides that; neither means a blind reading, which is a supported
     /// outcome rather than a failure.
     func grade(work: String, rubricID: UUID?, assignmentID: UUID?,
-               presentation: String?, title: String? = nil) async throws -> Result {
+               presentation: String?, title: String? = nil,
+               criteria: [Int]? = nil) async throws -> Result {
         guard let client else { throw Failure.unavailable }
 
         let trimmed = work.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -242,6 +246,7 @@ struct GradingService {
 
         let body = Request(assignment_id: assignmentID?.uuidString,
                            rubric_id: rubricID?.uuidString,
+                           criteria: criteria,
                            work: trimmed,
                            presentation: presentation?
                                .trimmingCharacters(in: .whitespacesAndNewlines)

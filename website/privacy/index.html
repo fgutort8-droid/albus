@@ -70,8 +70,9 @@
         nothing is sent to Anthropic. If the AI is asked but its answer can't be used, Albus keeps the
         plan your phone made.</li>
     <li>For marking, Albus first turns your file or photo into text <strong>on your phone</strong>.
-        The extracted text, relevant title and instructions, and the rubric you chose are sent to Anthropic. The file or photo itself never
-        leaves your phone.</li>
+        The extracted text, relevant title and instructions, and the rubric you chose are sent to Anthropic.
+        If you ticked only some of the rubric's criteria, Albus also sends which ones, and only those are marked.
+        The file or photo itself never leaves your phone.</li>
     <li>We store the mark and the feedback, and a fingerprint (a one-way hash) of the text, which lets us
         recognise the same work sent twice. We do not save the full submission in our database. Saved feedback can
         quote your work, though: each criterion can include a quotation of up to 400 characters, and the written

@@ -97,6 +97,9 @@ struct GraderScreen: View {
     // What it is marked against.
     @State private var chosenRubric: Rubric?
     @State private var acceptedBlind = false
+    /// Positions of the chosen rubric's criteria the student left out of this
+    /// marking. Empty marks them all; cleared when another rubric is chosen.
+    @State private var leftOutCriteria: Set<Int> = []
     @State private var editingRubric: RubricDraft?
     @State private var rubricPhotoPicking = false
     @State private var rubricPhoto: PhotosPickerItem?
@@ -243,6 +246,8 @@ struct GraderScreen: View {
         }
         .photosPicker(isPresented: $workPhotoPicking, selection: $photo, matching: .images)
         .photosPicker(isPresented: $rubricPhotoPicking, selection: $rubricPhoto, matching: .images)
+        // A choice of criteria belongs to the rubric it was made on.
+        .onChange(of: chosenRubric?.id) { leftOutCriteria = [] }
         .onChange(of: rubricPhoto) { _, item in
             guard let item else { return }
             Task {
@@ -537,6 +542,10 @@ struct GraderScreen: View {
             }
         }
 
+        if let rubric = chosenRubric, rubric.sortedItems.count > 1 {
+            criteriaPicker(rubric.sortedItems)
+        }
+
         VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
             SectionHeader(label: "Or add one") { EmptyView() }
             // The same editor and the same writer the Rubrics tab uses, so a
@@ -557,10 +566,53 @@ struct GraderScreen: View {
         .buttonStyle(.plain)
 
         PrimaryButton(title: "Continue",
-                      isEnabled: chosenRubric != nil || acceptedBlind
-                                 || chosenAssignment?.rubric != nil) {
+                      isEnabled: (chosenRubric != nil || acceptedBlind
+                                  || chosenAssignment?.rubric != nil)
+                                 && criteriaToMark != []) {
             stage = .presentation
         }
+    }
+
+    /// The chosen rubric's criteria, each ticked to be marked. Leaving one out
+    /// marks the work on the rest only, and the total is theirs.
+    private func criteriaPicker(_ items: [RubricItem]) -> some View {
+        VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+            SectionHeader(label: "Criteria to mark") { EmptyView() }
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                Button {
+                    if leftOutCriteria.contains(index) {
+                        leftOutCriteria.remove(index)
+                    } else {
+                        leftOutCriteria.insert(index)
+                    }
+                } label: {
+                    selectableRow(title: item.displayName,
+                                  detail: Self.criterionDetail(marks: item.marks, guidance: item.guidance),
+                                  selected: !leftOutCriteria.contains(index))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    static func criterionDetail(marks: Int?, guidance: String?) -> String {
+        if let marks { return marks == 1 ? "1 mark" : "\(marks) marks" }
+        return guidance?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "No marks set"
+    }
+
+    /// What this marking sends as its criteria (`criteriaToMark(count:leftOut:)`).
+    private var criteriaToMark: [Int]? {
+        Self.criteriaToMark(count: chosenRubric?.sortedItems.count ?? 0, leftOut: leftOutCriteria)
+    }
+
+    /// The positions of the criteria to mark, in the rubric's own order, which
+    /// is the order the server stores them in (`upsert_rubric`). Nil when all
+    /// of them are marked: the server then marks the whole rubric, exactly as
+    /// before this choice existed. Empty when every one was left out, which
+    /// the Grader does not let through.
+    static func criteriaToMark(count: Int, leftOut: Set<Int>) -> [Int]? {
+        guard count > 1, !leftOut.isEmpty else { return nil }
+        return (0..<count).filter { !leftOut.contains($0) }
     }
 
     /// Runs `start` when the plan has room for one more rubric. When it has
@@ -1101,6 +1153,7 @@ struct GraderScreen: View {
         let outcome = await marking.mark(
             work: work,
             rubric: chosenRubric,
+            criteria: criteriaToMark,
             assignment: chosenAssignment,
             presentation: presentation,
             title: workTitle,

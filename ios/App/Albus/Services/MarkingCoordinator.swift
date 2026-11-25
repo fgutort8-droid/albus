@@ -78,11 +78,13 @@ final class MarkingCoordinator {
     ///   - rubric: what to mark against. Sent by its `id`, the one it is saved
     ///     under on the server. Its `remoteID` is never set; sending that meant
     ///     the picked rubric never reached the marking.
+    ///   - criteria: which of the rubric's criteria to mark, by position;
+    ///     nil marks all of them.
     ///   - mayStore: false once the account that asked has gone, so a late
     ///     answer is not written into the store of whoever comes next.
     ///   - ensureRubric: makes sure the server holds the rubric, or says why
     ///     not (`RubricWriter.ensureOnServer`).
-    func mark(work: String, rubric: Rubric?, assignment: Assignment?,
+    func mark(work: String, rubric: Rubric?, criteria: [Int]? = nil, assignment: Assignment?,
               presentation: String?, title: String?, isBlind: Bool,
               context: ModelContext,
               mayStore: @escaping @MainActor () -> Bool,
@@ -139,7 +141,8 @@ final class MarkingCoordinator {
         do {
             let marked = try await service.grade(work: work, rubricID: rubricID,
                                                  assignmentID: assignmentRemoteID,
-                                                 presentation: presentation, title: title)
+                                                 presentation: presentation, title: title,
+                                                 criteria: criteria)
             outcome = store(marked, inputChars: work.count, fallbackTitle: title,
                             assignmentID: assignmentID, context: context, mayStore: mayStore)
         } catch GradingService.Failure.answerLost {
@@ -151,7 +154,8 @@ final class MarkingCoordinator {
                                         guard mayUseAI() else { throw Self.aiOff }
                                         return try await service.grade(work: work, rubricID: rubricID,
                                                                 assignmentID: assignmentRemoteID,
-                                                                presentation: presentation, title: title)
+                                                                presentation: presentation, title: title,
+                                                 criteria: criteria)
                                     })
         } catch let failure as GradingService.Failure {
             outcome = .failed(failure)
