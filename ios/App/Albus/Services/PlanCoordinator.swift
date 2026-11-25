@@ -25,6 +25,12 @@ final class PlanCoordinator {
 
     private(set) var status: Status = .idle
 
+    /// The study hours the week was last planned in. A plan the AI answers
+    /// late is placed in these, not the ones it set out with: the student may
+    /// have changed their hours while it was on its way, and the week has
+    /// already moved to them.
+    private var latestAvailability: Availability?
+
     /// What Home says when the student has not allowed the AI.
     static let aiOffNote = "AI is off, so Albus split this into study sessions for you. "
         + "You can turn it on in Settings."
@@ -245,7 +251,7 @@ final class PlanCoordinator {
             if !result.steps.isEmpty, !claimed.contains(id), snapshot(of: current) == localPlan {
                 replaceSteps(of: current, with: result.steps, context: context)
                 save(context, "insert steps")
-                reschedule(context: context, availability: availability, now: now)
+                reschedule(context: context, availability: latestAvailability ?? availability, now: now)
             } else {
                 // The student has started on the phone's plan, opened a step,
                 // or edited it. Theirs stands.
@@ -272,7 +278,7 @@ final class PlanCoordinator {
                 if !claimed.contains(id), current.gradings.isEmpty, snapshot(of: current) == localPlan {
                     context.delete(current)
                     save(context, "remove refused assignment")
-                    reschedule(context: context, availability: availability, now: now)
+                    reschedule(context: context, availability: latestAvailability ?? availability, now: now)
                 } else {
                     // Started on already, by any route, or marked against.
                     // Removed now, it could go from under an open step or a
@@ -819,6 +825,7 @@ final class PlanCoordinator {
     func reschedule(context: ModelContext,
                     availability: Availability = .default,
                     now: Date = .now) {
+        latestAvailability = availability
         do {
             let assignments = try context.fetch(FetchDescriptor<Assignment>())
             let existing = try context.fetch(FetchDescriptor<PlanSessionRecord>())

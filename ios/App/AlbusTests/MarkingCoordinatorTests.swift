@@ -141,6 +141,45 @@ struct MarkingCoordinatorTests {
         #expect(MarkingServer.state.gradeRequests == 2)
     }
 
+    // MARK: The AI permission
+
+    @MainActor private final class Permission { var allowed: Bool; init(_ a: Bool) { allowed = a } }
+
+    @Test("with the AI not allowed, nothing is sent")
+    func refusedSendsNothing() async throws {
+        MarkingServer.state.reset(grade: .answer)
+        let context = try store()
+        let outcome = await coordinator(RecordingAnnouncer()).mark(
+            work: work, rubric: nil, assignment: nil, presentation: nil, title: "History essay",
+            isBlind: true, context: context, mayStore: { true }, mayUseAI: { false })
+        #expect(outcome == .failed(MarkingCoordinator.aiOff))
+        #expect(MarkingServer.state.gradeRequests == 0)
+    }
+
+    @Test("the AI turned off while a lost answer is sought stops the retry")
+    func withdrawnBeforeRetry() async throws {
+        MarkingServer.state.reset(grade: .loseAnswer, then: .answer)
+        let context = try store()
+        let permission = Permission(true)
+        let marking = coordinator(RecordingAnnouncer(), recoveryWindow: 1)
+        let running = Task {
+            await marking.mark(work: work, rubric: nil, assignment: nil, presentation: nil,
+                               title: "History essay", isBlind: true, context: context,
+                               mayStore: { true }, mayUseAI: { permission.allowed })
+        }
+        // The first send has gone, and its answer was lost.
+        let clock = ContinuousClock(), deadline = clock.now.advanced(by: .seconds(3))
+        while MarkingServer.state.gradeRequests < 1 && clock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(MarkingServer.state.gradeRequests == 1)
+        permission.allowed = false
+
+        let outcome = await running.value
+        #expect(MarkingServer.state.gradeRequests == 1, "the work was sent again after the AI was turned off")
+        #expect(outcome == .failed(MarkingCoordinator.aiOff))
+    }
+
     @Test("with no rubric, nothing is saved first and none is sent")
     func noRubricSendsNone() async throws {
         MarkingServer.state.reset(grade: .answer)

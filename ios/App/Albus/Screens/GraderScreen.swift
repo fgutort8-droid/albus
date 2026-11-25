@@ -1109,7 +1109,9 @@ struct GraderScreen: View {
             mayStore: { [accountDeletion, localAccount] in
                 !accountDeletion.requiresCleanup && accountDeletion.generation == accountGeneration
                     && localAccount.generation == localGeneration
-            })
+            },
+            // Read at each send, so turning the AI off stops a retry too.
+            mayUseAI: { [preferences] in preferences.mayUseAI })
 
         // Dropped once marked: holding an essay in memory behind a visible
         // result serves nobody.

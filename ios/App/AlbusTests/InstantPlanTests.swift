@@ -476,6 +476,33 @@ struct InstantPlanTests {
                 "and the scheduler is never handed them")
     }
 
+    @Test("a plan the AI answers late is placed in the study hours changed meanwhile")
+    func lateAnswerUsesTheNewHours() async throws {
+        let context = try store()
+        let coordinator = coordinator()
+        let adding = Task {
+            await coordinator.addAssignment(essay(), context: context,
+                                            availability: availability, now: now)
+        }
+        #expect(try await eventually { try assignment(in: context)?.subtasks.isEmpty == false })
+
+        // The student moves their hours while the AI is still writing.
+        let evenings = Availability(windowStartHour: 18, windowEndHour: 20,
+                                    dailyCapacityMinutes: 60)
+        coordinator.reschedule(context: context, availability: evenings, now: now)
+
+        HeldPlanTransport.state.release()
+        await adding.value
+
+        let calendar = Scheduler.defaultCalendar
+        let sessions = try context.fetch(FetchDescriptor<PlanSessionRecord>())
+        #expect(!sessions.isEmpty)
+        #expect(sessions.allSatisfy {
+            calendar.component(.hour, from: $0.startsAt) >= 18 && $0.endsAt <= calendar.date(
+                bySettingHour: 20, minute: 0, second: 0, of: $0.startsAt)!
+        }, "the late plan went back to the old hours")
+    }
+
     @Test("with the AI not allowed, the phone's plan stands and nothing is sent")
     func noAIMeansNothingSent() async throws {
         let context = try store()

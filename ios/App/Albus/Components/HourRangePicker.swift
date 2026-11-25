@@ -19,7 +19,11 @@ struct HourRangePicker: View {
             hourMenu("Until", selection: $until, hours: Array((from + 1)...Self.latest))
         }
         .onChange(of: from) { _, newFrom in
-            until = Self.until(afterMoving: newFrom, until: until)
+            // Written only when it has to move. A weekend window still
+            // following the school days changes `from` without the student
+            // touching it, and a write here would save it as their own.
+            let adjusted = Self.until(afterMoving: newFrom, until: until)
+            if adjusted != until { until = adjusted }
         }
     }
 

@@ -100,7 +100,10 @@ final class Preferences {
         daysOff = Set(defaults.array(forKey: Key.daysOff) as? [Int] ?? [])
         weekendStartHour = defaults.object(forKey: Key.weekendStart) as? Int
         weekendEndHour = defaults.object(forKey: Key.weekendEnd) as? Int
-        aiAllowed = defaults.object(forKey: Key.aiAllowed) as? Bool
+        // Through `bool(forKey:)` once it exists: a value given at launch
+        // (`-albus.ai.allowed NO`, as the UI tests do) arrives as text, which
+        // `as? Bool` would read as unanswered.
+        aiAllowed = defaults.object(forKey: Key.aiAllowed) == nil ? nil : defaults.bool(forKey: Key.aiAllowed)
 
         let fallback = NotificationSettings.default
         // `bool(forKey:)` on an unset key is false, which would ship every new

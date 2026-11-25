@@ -40,7 +40,7 @@ final class GraderUITests: XCTestCase {
     /// and no offer — which, before three tiers, is exactly how a changed RPC
     /// shape presented twice.
     func testFreeIsOfferedThePlansRatherThanABrokenGrader() throws {
-        OnboardingPath.launch(app)
+        OnboardingPath.launch(app, allowAI: true)
         OnboardingPath.reachApp(app)
 
         app.buttons["Tools"].tap()
@@ -108,7 +108,7 @@ final class GraderUITests: XCTestCase {
     /// pushes it rather than silently doing nothing: `navigationDestination`
     /// has failed quietly in this app before.
     func testMarkingFromAnAssignmentOpensTheSameGrader() throws {
-        OnboardingPath.launch(app)
+        OnboardingPath.launch(app, allowAI: true)
         OnboardingPath.reachApp(app)
 
         app.buttons["Home"].tap()

@@ -50,6 +50,15 @@ struct AIPermissionAndFreeTimeTests {
         #expect(Preferences(defaults: defaults).mayUseAI)
     }
 
+    @Test("an answer given at launch, as text, is read as an answer")
+    func launchArgumentAnswer() {
+        let (_, defaults) = fresh()
+        defaults.set("NO", forKey: "albus.ai.allowed")
+        #expect(Preferences(defaults: defaults).aiAllowed == false)
+        defaults.set("YES", forKey: "albus.ai.allowed")
+        #expect(Preferences(defaults: defaults).aiAllowed == true)
+    }
+
     @Test("deleting the account forgets both answers")
     func resetForgets() {
         let (prefs, defaults) = fresh()
@@ -90,5 +99,7 @@ struct AIPermissionAndFreeTimeTests {
         #expect(grader.components(separatedBy: "await submit()").count - 1 == 2,
                 "submit is reached only from the guarded button and the Allow answer")
         #expect(root.contains("Binding(get: { preferences.aiAllowed == nil }"))
+        #expect(grader.contains("mayUseAI: { [preferences] in preferences.mayUseAI }"),
+                "the marking reads the answer at each send, retries included")
     }
 }
