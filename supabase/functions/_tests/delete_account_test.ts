@@ -72,6 +72,8 @@ type Options = {
   deleteError?: boolean;
   adminError?: boolean;
   logError?: boolean;
+  /** What `take_apple_refresh_token` hands back: a kept token, none, or a failure. */
+  stored?: string | null | "error";
 };
 function fixture(options: Options = {}) {
   const calls: string[] = [];
@@ -120,6 +122,12 @@ function fixture(options: Options = {}) {
         },
       },
       rpc: async (name, args) => {
+        if (name === "take_apple_refresh_token") {
+          assertEquals(args, { p_user_id: "caller" });
+          calls.push("take");
+          if (options.stored === "error") return { data: null, error: { message: REFRESH } };
+          return { data: options.stored ?? null, error: null };
+        }
         assertEquals(name, "log_security_event");
         calls.push("event-start");
         await Promise.resolve();
@@ -173,12 +181,13 @@ Deno.test("email and legacy anonymous accounts delete without Apple", async () =
     assertEquals(f.calls, ["delete"]);
   }
 });
-Deno.test("Apple account without a code requires reauthentication", async () => {
+Deno.test("Apple account without a code or a kept token requires reauthentication", async () => {
   const f = fixture();
   const response = await f.handler(request({}));
   assertEquals(response.status, 428);
   assertEquals((await response.json()).error, "APPLE_REAUTH_REQUIRED");
-  assertEquals(f.calls, []);
+  // Only the look for a kept token; nothing revoked or deleted.
+  assertEquals(f.calls, ["take"]);
 });
 Deno.test("expired code and another Apple ID neither revoke nor delete", async () => {
   for (
@@ -343,4 +352,47 @@ Deno.test("responses, console and security details never leak private data", asy
   } finally {
     Object.assign(console, originals);
   }
+});
+
+// ── Deleting without signing in again ──────────────────────────────────────
+
+const KEPT = "private-kept-refresh-token";
+
+Deno.test("a token kept at sign-in is revoked, with no code and no exchange", async () => {
+  const f = fixture({ stored: KEPT });
+  const response = await f.handler(request({}));
+  assertEquals(response.status, 200);
+  assertEquals(await response.json(), { deleted: true, apple_revoked: true });
+  assertEquals(f.calls, ["take", "revoke", "delete"]);
+  assertEquals(f.forms.length, 1);
+  assertEquals(f.forms[0].get("token"), KEPT);
+  assertEquals(f.forms[0].get("token_type_hint"), "refresh_token");
+  assertEquals(f.forms[0].get("client_id"), config.clientId);
+});
+
+Deno.test("with no token kept, or a failed read, the app is asked for Apple's code", async () => {
+  for (const stored of [null, "error" as const]) {
+    const f = fixture({ stored });
+    const response = await f.handler(request({}));
+    assertEquals(response.status, 428);
+    assertEquals((await response.json()).error, "APPLE_REAUTH_REQUIRED");
+    assertEquals(f.calls, ["take"], "nothing revoked or deleted");
+  }
+});
+
+Deno.test("a kept token Apple refuses still deletes, after one warning", async () => {
+  const f = fixture({ stored: KEPT, revoke: json({ error: "invalid_token" }, 400) });
+  const response = await f.handler(request({}));
+  assertEquals(response.status, 200);
+  assertEquals(await response.json(), { deleted: true, apple_revoked: false });
+  assertEquals(f.calls, ["take", "revoke", "event-start", "event-done", "delete"]);
+  assertEquals(f.events[0].p_kind, "apple_revoke_failed");
+  assertEquals(f.events[0].p_detail, { endpoint: "delete-account", code: "invalid_token" });
+});
+
+Deno.test("a fresh code still wins over a kept token", async () => {
+  const f = fixture({ stored: KEPT });
+  const response = await f.handler(request());
+  assertEquals(response.status, 200);
+  assertEquals(f.calls, ["exchange", "revoke", "delete"]);
 });

@@ -94,20 +94,17 @@ function tokenSubject(token: unknown): string | null {
   }
 }
 
-export async function revokeApple(
-  config: AppleConfig,
-  code: string,
-  subject: string,
-  fetcher: typeof fetch,
-  now: number,
-): Promise<AppleRevocation> {
+type Post = (path: string, fields: Record<string, string>) => Promise<Response>;
+
+/** A form POST to Apple's auth endpoints, signed with the app's client secret. */
+async function applePoster(config: AppleConfig, fetcher: typeof fetch, now: number): Promise<Post | null> {
   let clientSecret: string;
   try {
     clientSecret = await appleClientSecret(config, now);
   } catch {
-    return { revoked: false, code: "invalid_client" };
+    return null;
   }
-  const post = (path: string, fields: Record<string, string>) =>
+  return (path, fields) =>
     fetcher(
       `https://appleid.apple.com/auth/${path}`,
       {
@@ -122,25 +119,67 @@ export async function revokeApple(
         redirect: "error",
       },
     );
+}
+
+function networkCode(error: unknown): string {
+  return error instanceof DOMException &&
+      (error.name === "TimeoutError" || error.name === "AbortError")
+    ? "timeout"
+    : "network";
+}
+
+export type AppleExchange =
+  | { ok: true; refresh: string | null; access: string | null }
+  | { ok: false; code: string };
+
+/**
+ * Exchanges a sign-in authorization code for the account's tokens, checking
+ * they belong to `subject`. Throws APPLE_CODE_INVALID for a spent or expired
+ * code and APPLE_ACCOUNT_MISMATCH for another Apple ID's.
+ */
+export async function exchangeAppleCode(
+  config: AppleConfig,
+  code: string,
+  subject: string,
+  fetcher: typeof fetch,
+  now: number,
+): Promise<AppleExchange> {
+  const post = await applePoster(config, fetcher, now);
+  if (!post) return { ok: false, code: "invalid_client" };
   try {
     const exchange = await post("token", { code, grant_type: "authorization_code" });
     const body = await objectBody(exchange);
     if (exchange.status === 400 && body.error === "invalid_grant") {
       throw new HttpError(400, "APPLE_CODE_INVALID");
     }
-    if (!exchange.ok) return { revoked: false, code: failureCode(body, exchange.status) };
+    if (!exchange.ok) return { ok: false, code: failureCode(body, exchange.status) };
     // The id_token came directly from Apple's TLS endpoint in response to our
     // signed exchange, so only its payload is read; no signature verification.
     const returnedSubject = tokenSubject(body.id_token);
-    if (!returnedSubject) return { revoked: false, code: String(exchange.status) };
+    if (!returnedSubject) return { ok: false, code: String(exchange.status) };
     if (returnedSubject !== subject) throw new HttpError(400, "APPLE_ACCOUNT_MISMATCH");
-    const refresh = typeof body.refresh_token === "string" && body.refresh_token;
-    const access = typeof body.access_token === "string" && body.access_token;
-    if (!refresh && !access) return { revoked: false, code: String(exchange.status) };
-    const revoke = await post("revoke", {
-      token: refresh || access || "",
-      token_type_hint: refresh ? "refresh_token" : "access_token",
-    });
+    const refresh = typeof body.refresh_token === "string" && body.refresh_token ? body.refresh_token : null;
+    const access = typeof body.access_token === "string" && body.access_token ? body.access_token : null;
+    if (!refresh && !access) return { ok: false, code: String(exchange.status) };
+    return { ok: true, refresh, access };
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    return { ok: false, code: networkCode(error) };
+  }
+}
+
+/** Revokes a refresh or access token Apple issued for this app. */
+export async function revokeAppleToken(
+  config: AppleConfig,
+  token: string,
+  hint: "refresh_token" | "access_token",
+  fetcher: typeof fetch,
+  now: number,
+): Promise<AppleRevocation> {
+  const post = await applePoster(config, fetcher, now);
+  if (!post) return { revoked: false, code: "invalid_client" };
+  try {
+    const revoke = await post("revoke", { token, token_type_hint: hint });
     if (revoke.status === 200) return { revoked: true };
     let revokeBody = {};
     try {
@@ -148,13 +187,21 @@ export async function revokeApple(
     } catch { /* Status is sufficient. */ }
     return { revoked: false, code: failureCode(revokeBody, revoke.status) };
   } catch (error) {
-    if (error instanceof HttpError) throw error;
-    return {
-      revoked: false,
-      code: error instanceof DOMException &&
-          (error.name === "TimeoutError" || error.name === "AbortError")
-        ? "timeout"
-        : "network",
-    };
+    return { revoked: false, code: networkCode(error) };
   }
+}
+
+/** Exchanges a fresh sign-in code and revokes what it returns. */
+export async function revokeApple(
+  config: AppleConfig,
+  code: string,
+  subject: string,
+  fetcher: typeof fetch,
+  now: number,
+): Promise<AppleRevocation> {
+  const exchange = await exchangeAppleCode(config, code, subject, fetcher, now);
+  if (!exchange.ok) return { revoked: false, code: exchange.code };
+  return exchange.refresh
+    ? await revokeAppleToken(config, exchange.refresh, "refresh_token", fetcher, now)
+    : await revokeAppleToken(config, exchange.access!, "access_token", fetcher, now);
 }

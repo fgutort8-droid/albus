@@ -82,6 +82,77 @@ struct SignInTests {
         #expect(session.userID == Fixture.appleUserID)
     }
 
+    @Test("a sign-in hands Apple's code to the server, signed in as the new account")
+    func signInKeepsAppleToken() async throws {
+        let server = Server()
+        server.on("/auth/v1/token") { _ in .ok(Fixture.session(user: Fixture.appleUser)) }
+        server.on("/functions/v1/apple-token") { _ in .ok(#"{"stored":true}"#) }
+        let session = server.sessionService()
+
+        try await session.signInWithApple(idToken: "apple-id-token", nonce: "raw-nonce",
+                                          authorizationCode: "sign-in-code")
+        await session.appleTokenDelivery?.value
+
+        let calls = server.requests.filter { $0.path == "/functions/v1/apple-token" }
+        #expect(calls.count == 1)
+        let call = try #require(calls.first)
+        #expect(call.method == "POST")
+        #expect(call.json["apple_authorization_code"] as? String == "sign-in-code")
+        #expect(call.json.count == 1, "the code and nothing else")
+        #expect(call.headers["Authorization"] == "Bearer unit-access-token",
+                "sent as the account that just signed in, which is whose token the server keeps")
+    }
+
+    @Test("switching to an Apple ID's own account hands its code over as that account")
+    func switchKeepsAppleToken() async throws {
+        let server = Server()
+        server.on("/auth/v1/token") { _ in .ok(Fixture.session(user: Fixture.appleUser)) }
+        server.on("/functions/v1/apple-token") { _ in .ok(#"{"stored":true}"#) }
+        let session = try server.sessionService(stored: Fixture.session(user: Fixture.anonymousUser))
+        await session.start()
+
+        try await session.switchToApple(idToken: "apple-id-token", nonce: "raw-nonce",
+                                        authorizationCode: "switch-code")
+        await session.appleTokenDelivery?.value
+
+        let call = try #require(server.requests.first { $0.path == "/functions/v1/apple-token" })
+        #expect(call.json["apple_authorization_code"] as? String == "switch-code")
+        #expect(call.headers["Authorization"] == "Bearer unit-access-token",
+                "not the account left behind")
+    }
+
+    @Test("no code, or a failed sign-in, sends nothing; a failed hand-over leaves the sign-in standing")
+    func appleTokenOnlyAfterSignIn() async throws {
+        let noCode = Server()
+        noCode.on("/auth/v1/token") { _ in .ok(Fixture.session(user: Fixture.appleUser)) }
+        let first = noCode.sessionService()
+        try await first.signInWithApple(idToken: "apple-id-token", nonce: "raw-nonce")
+        await first.appleTokenDelivery?.value
+        #expect(!noCode.requests.contains { $0.path == "/functions/v1/apple-token" })
+
+        let refused = Server()
+        refused.on("/auth/v1/token") { _ in .error(422, code: "identity_already_exists") }
+        let second = try refused.sessionService(stored: Fixture.session(user: Fixture.anonymousUser))
+        await second.start()
+        await #expect(throws: SignInError.appleIDInUse) {
+            try await second.signInWithApple(idToken: "apple-id-token", nonce: "raw-nonce",
+                                              authorizationCode: "unused-code")
+        }
+        await second.appleTokenDelivery?.value
+        #expect(!refused.requests.contains { $0.path == "/functions/v1/apple-token" },
+                "the code is never sent for an account that did not sign in")
+
+        let failing = Server()
+        failing.on("/auth/v1/token") { _ in .ok(Fixture.session(user: Fixture.appleUser)) }
+        failing.on("/functions/v1/apple-token") { _ in .error(500, code: "INTERNAL_ERROR") }
+        let third = failing.sessionService()
+        try await third.signInWithApple(idToken: "apple-id-token", nonce: "raw-nonce",
+                                        authorizationCode: "sign-in-code")
+        await third.appleTokenDelivery?.value
+        #expect(failing.requests.contains { $0.path == "/functions/v1/apple-token" })
+        #expect(third.state == .signedIn(userID: Fixture.appleUserID, isAnonymous: false))
+    }
+
     // MARK: - Signing out
 
     @Test("signing out leaves the phone signed out, with no pass to restore")

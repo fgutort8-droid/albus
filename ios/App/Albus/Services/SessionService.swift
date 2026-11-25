@@ -272,24 +272,47 @@ final class SessionService {
     ///
     /// - Parameter nonce: the raw value whose SHA-256 went into Apple's
     ///   request. Supabase checks the token carries it.
-    func signInWithApple(idToken: String, nonce: String) async throws {
+    ///   - authorizationCode: the same sign-in's single-use code, handed to
+    ///     the server once signed in (`keepAppleToken`).
+    func signInWithApple(idToken: String, nonce: String, authorizationCode: String? = nil) async throws {
         try await establish { client, addsToAccount in
             let credentials = OpenIDConnectCredentials(provider: .apple, idToken: idToken, nonce: nonce)
             return addsToAccount
                 ? try await client.auth.linkIdentityWithIdToken(credentials: credentials)
                 : try await client.auth.signInWithIdToken(credentials: credentials)
         }
+        keepAppleToken(authorizationCode)
     }
 
     /// Signs in with the same Apple ID token, leaving behind an account made
     /// before sign-in existed. For when that Apple ID turned out to have its
     /// own account already, and the student chose it.
-    func switchToApple(idToken: String, nonce: String) async throws {
+    func switchToApple(idToken: String, nonce: String, authorizationCode: String? = nil) async throws {
         try await establish(replacingAnonymous: true) { client, _ in
             try await client.auth.signInWithIdToken(
                 credentials: OpenIDConnectCredentials(provider: .apple, idToken: idToken, nonce: nonce))
         }
+        keepAppleToken(authorizationCode)
     }
+
+    /// Hands a sign-in's authorization code to the server, which trades it
+    /// with Apple for the refresh token and keeps that (`apple-token`), so
+    /// deleting the account later revokes Sign in with Apple without sending
+    /// the student back through Apple's sheet. Best-effort, and off the
+    /// sign-in's path: without it, deletion asks Apple for a fresh code, as it
+    /// always did.
+    private func keepAppleToken(_ code: String?) {
+        guard let code, let client, case .signedIn = state else { return }
+        appleTokenDelivery = Task.detached {
+            try? await client.functions.invoke(
+                "apple-token",
+                options: FunctionInvokeOptions(body: ["apple_authorization_code": code]))
+        }
+    }
+
+    /// The latest hand-over of a sign-in's code, still running or done.
+    /// Nothing in the app waits on it; tests do, to see what was sent.
+    @ObservationIgnored private(set) var appleTokenDelivery: Task<Void, Never>?
 
     private var isAnonymousSignedIn: Bool {
         if case .signedIn(_, true) = state { return true }

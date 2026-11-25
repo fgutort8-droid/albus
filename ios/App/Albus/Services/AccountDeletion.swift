@@ -43,6 +43,35 @@ final class AccountDeletion {
         !requiresCleanup && defaults.bool(forKey: Self.requestKey)
     }
 
+    /// Deletes without Apple's sheet first, and asks Apple only if the server
+    /// needs it.
+    ///
+    /// The server revokes Sign in with Apple with the token kept at sign-in
+    /// (`apple-token`), so most deletions never show the sheet. An account
+    /// with no token kept, one that signed in before tokens were kept, is
+    /// answered with `needsApple`; only then does Apple confirm, once, and the
+    /// deletion is tried again with its code.
+    ///
+    /// - Parameters:
+    ///   - attempt: one `perform`, with Apple's code or without.
+    ///   - appleCode: shows Apple's sheet and returns its code.
+    func deleteAskingAppleOnlyIfNeeded(attempt: @MainActor (String?) async -> Bool,
+                                       appleCode: @MainActor () async throws -> String) async -> Bool {
+        if await attempt(nil) { return true }
+        guard refused == .needsApple else { return false }
+        errorMessage = nil
+        let code: String
+        do {
+            code = try await appleCode()
+        } catch {
+            errorMessage = SignInError.from(error) == .cancelled
+                ? DeletionRefusal.needsApple.message
+                : DeletionRefusal.appleCodeInvalid.message
+            return false
+        }
+        return await attempt(code)
+    }
+
     /// - Parameters:
     ///   - reachServer: asks the server something that changes nothing, with
     ///     the account's own credentials. Must not renew a pass still in date,

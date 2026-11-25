@@ -71,6 +71,16 @@ enum AppleSignIn {
         SHA256.hash(data: Data(input.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// The single-use authorization code from a completed authorization, if
+    /// Apple sent one. The server trades it for the refresh token that lets a
+    /// later deletion revoke Sign in with Apple without a second sign-in.
+    static func authorizationCode(from authorization: ASAuthorization) -> String? {
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let data = credential.authorizationCode
+        else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
     /// The ID token from a completed authorization, if Apple sent one.
     static func identityToken(from authorization: ASAuthorization) -> String? {
         guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
@@ -82,10 +92,11 @@ enum AppleSignIn {
 
 /// Asks Apple to confirm the student, without a button.
 ///
-/// Deleting an account that uses Sign in with Apple needs a fresh
-/// authorization code, which the server trades with Apple for a token and then
-/// revokes. Apple requires that revocation, and a code lasts five minutes, so
-/// it is asked for at the moment of deletion rather than kept.
+/// Deleting an account that uses Sign in with Apple revokes it with Apple,
+/// which Apple requires. The token for that is normally the one kept at
+/// sign-in (`SessionService.keepAppleToken`); an account that signed in before
+/// tokens were kept has none, and only then is a fresh authorization code
+/// asked for here, at the moment of deletion.
 @MainActor
 final class AppleConfirmation: NSObject, ASAuthorizationControllerDelegate,
                                ASAuthorizationControllerPresentationContextProviding {
