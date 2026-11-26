@@ -82,6 +82,28 @@ select is(private.ai_attempt_count('a1d00000-0000-4000-8000-000000000002', 'brea
 select is(private.ai_account_cost('a1d00000-0000-4000-8000-000000000002', interval '30 days'), 13000::bigint,
   'the 30-day fair-use ceiling carries over at real cost');
 
+-- At the real gate: the server function calls this before every AI request.
+-- Free keeps five plans a week, all five inherited, so the next is refused
+-- and nothing is reserved.
+select is((select p.breakdown_per_week from public.plans p where p.tier = 'free'), 5,
+  'Free keeps five AI plans a week');
+select throws_ok(
+  $$select public.check_and_record_ai_usage('a1d00000-0000-4000-8000-000000000002', 'breakdown', 'claude-sonnet-5')$$,
+  'Q0006', 'ALLOWANCE_WEEKLY',
+  'the gate refuses the new account''s next plan: the week''s five are already used');
+select is((select count(*)::integer from public.ai_usage
+            where user_id = 'a1d00000-0000-4000-8000-000000000002'), 0,
+  'and reserves nothing for it');
+
+-- What the app shows the new account, read as that account.
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'a1d00000-0000-4000-8000-000000000002', true);
+select is((select breakdown_used_week from public.my_plan()), 5,
+  'the app shows the new account all five plans used');
+select is((select breakdown_resets_at from public.my_plan()), now() - interval '5 hours' + interval '7 days',
+  'and when they come back');
+reset role;
+
 -- The new account's own plan counts once, on top of the inherited ones.
 insert into public.ai_usage (user_id, kind, model, attempt_state, reserved_cost_microusd,
                              actual_cost_microusd, budget_pool, created_at)
@@ -97,6 +119,15 @@ select is(private.apple_id_hash('a1d00000-0000-4000-8000-000000000004'), null,
   'an account with no Apple sign-in has no hash');
 select is(public.ai_spend_count('a1d00000-0000-4000-8000-000000000004', 'breakdown', interval '7 days'), 1,
   'and counts only its own usage');
+
+-- The gate still lets a different Apple ID through: the refusal above is the
+-- inheritance, not a gate that refuses everyone.
+select lives_ok(
+  $$select public.check_and_record_ai_usage('a1d00000-0000-4000-8000-000000000003', 'breakdown', 'claude-sonnet-5')$$,
+  'the gate lets another Apple ID plan');
+select is((select count(*)::integer from public.ai_usage
+            where user_id = 'a1d00000-0000-4000-8000-000000000003'), 1,
+  'and reserves its plan');
 
 -- Deleted a second time: the chain holds, and nothing is linked twice.
 set local role authenticated;
@@ -130,7 +161,8 @@ select is((select count(*)::integer from private.ai_usage_apple_ids a
   'an account deleted outside the app is remembered the same way');
 
 -- Money is never counted twice: the rows are the same rows.
-select is((select count(*)::integer from public.ai_usage where model = 'claude-sonnet-5'), 9,
+-- Nine rows written above, plus the one reservation the gate made for b.
+select is((select count(*)::integer from public.ai_usage where model = 'claude-sonnet-5'), 10,
   'linking adds no usage rows');
 
 -- After 30 days each link goes.
