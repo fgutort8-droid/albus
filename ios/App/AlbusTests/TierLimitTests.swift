@@ -99,6 +99,7 @@ struct TierLimitTests {
         #expect(onCalendar.count == 4, "every phone-made session should be on the calendar")
         #expect(coordinator.status == .plannedLocally(
             note: PlanService.Failure.unavailable.localPlanNote, suggestsUpgrade: false))
+        #expect(coordinator.localPlanReason(for: assignment) == .unavailable)
     }
 
     @Test("at the open-task cap, nothing is created and nothing is sent")
@@ -118,6 +119,7 @@ struct TierLimitTests {
         let afterCap = try ctx.fetch(FetchDescriptor<Assignment>())
         #expect(afterCap.count == 5, "a sixth open assignment must not exist, even unplanned")
         #expect(coordinator.status == .failed(PlanService.Failure.quotaReached.errorDescription ?? ""))
+        #expect(coordinator.problem == .taskLimit, "Home's meter says it, not a second card")
     }
 
     @Test("finished work frees its place under the cap")

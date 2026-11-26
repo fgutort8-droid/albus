@@ -52,8 +52,9 @@ struct PlanDoorWiringTests {
                     && context.contains("taskLimit(reachedBy:"),
                     "Home opens the add form without asking the plan")
         }
-        // Both doors, "+" and the empty state's "Add an assignment".
-        #expect(home.components(separatedBy: "{ addTask() }").count - 1 == 2)
+        // Every door: "+", and "Add an assignment" on the first-run and the
+        // all-caught-up empty states.
+        #expect(home.components(separatedBy: "{ addTask() }").count - 1 == 3)
     }
 
     @Test("every new-rubric door asks the plan first",

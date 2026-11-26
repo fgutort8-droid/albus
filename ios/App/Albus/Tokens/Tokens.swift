@@ -203,6 +203,9 @@ public enum Tokens {
         public static let chip: CGFloat = 8
         public static let control: CGFloat = 12
         public static let icon: CGFloat = 14
+        /// The card that says something did not go through: between a stripe
+        /// card and a glass panel, so it reads as part of the screen's flow.
+        public static let problemCard: CGFloat = 18
     }
 
     public enum Motion {

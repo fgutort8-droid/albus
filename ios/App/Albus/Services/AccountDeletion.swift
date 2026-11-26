@@ -27,6 +27,12 @@ final class AccountDeletion {
     private(set) var isBusy = false
     private(set) var generation = 0
     var errorMessage: String?
+    /// The card's title for `errorMessage`: what did, or might not, have
+    /// happened. Separate because the three ways a deletion can fail need
+    /// three different headlines, and one of them is "it may have worked".
+    private(set) var errorTitle: String?
+
+    static let notDeleted = "Your account wasn't deleted"
     /// Why the server last refused, when it did. The screen asks Apple to
     /// confirm and tries again after `needsApple`.
     private(set) var refused: DeletionRefusal?
@@ -60,10 +66,12 @@ final class AccountDeletion {
         if await attempt(nil) { return true }
         guard refused == .needsApple else { return false }
         errorMessage = nil
+        errorTitle = nil
         let code: String
         do {
             code = try await appleCode()
         } catch {
+            errorTitle = Self.notDeleted
             errorMessage = SignInError.from(error) == .cancelled
                 ? DeletionRefusal.needsApple.message
                 : DeletionRefusal.appleCodeInvalid.message
@@ -85,11 +93,18 @@ final class AccountDeletion {
         guard !isBusy else { return false }
         isBusy = true
         errorMessage = nil
+        errorTitle = nil
         refused = nil
         defer { isBusy = false }
 
+        // Whether this attempt saw the server confirm the deletion. False for
+        // an account this phone can no longer reach, and for a cleanup left
+        // over from an earlier attempt, so the cleanup message cannot claim
+        // a deletion nobody here confirmed.
+        var deletedRemotely = false
         if !requiresCleanup {
             var asked = false
+            var unreachable = false
             do {
                 // A question first, which deletes nothing. A phone with no
                 // signal stops here, before any request that could delete the
@@ -103,6 +118,7 @@ final class AccountDeletion {
                 asked = true
                 try await deleteRemote()
             } catch is AccountUnreachable {
+                unreachable = true
                 // The account cannot be reached from this device any more.
                 // Carrying on is the only outcome that keeps the promise this
                 // screen made; refusing would leave the work here for good. An
@@ -114,20 +130,32 @@ final class AccountDeletion {
                 defaults.removeObject(forKey: Self.requestKey)
                 defaults.removeObject(forKey: Self.requestedAtKey)
                 refused = refusal
+                errorTitle = Self.notDeleted
                 errorMessage = refusal.message
                 return false
             } catch {
                 // A dropped response cannot establish whether the server committed.
                 // Keep local work and credentials so the same idempotent RPC can retry.
-                if (error as? URLError)?.code == .notConnectedToInternet {
-                    errorMessage = "Couldn't delete your account. You're offline. Nothing on this device was changed. Reconnect and try again."
-                } else if !asked {
-                    errorMessage = "Couldn't reach Albus to delete your account. Nothing was changed. Please try again."
+                // Whether the request left decides what can be promised. Once
+                // it has, the server may have deleted the account even though
+                // no answer came back — offline or not — so "nothing was
+                // deleted" would be a guess.
+                // Asked now, or by an earlier attempt whose answer was lost:
+                // either way the account may be gone, and failing again
+                // before asking does not change that.
+                if asked || defaults.bool(forKey: Self.requestKey) {
+                    errorTitle = "Albus didn't hear back"
+                    errorMessage = "Your account may already be deleted. This phone still has everything. Hold the button again to finish."
+                } else if (error as? URLError)?.code == .notConnectedToInternet {
+                    errorTitle = Self.notDeleted
+                    errorMessage = "You're offline, so the request never left this phone. Connect, then hold the button again."
                 } else {
-                    errorMessage = "Couldn't confirm account deletion. Nothing on this device was changed. Please try again."
+                    errorTitle = Self.notDeleted
+                    errorMessage = "Albus couldn't be reached, so the request never left this phone. Hold the button again."
                 }
                 return false
             }
+            deletedRemotely = !unreachable
             defaults.set(true, forKey: Self.receiptKey)
             requiresCleanup = true
             generation += 1
@@ -144,7 +172,10 @@ final class AccountDeletion {
         } catch {
             // The account is already gone. A durable receipt prevents a restart
             // exposing its old cache or asking the student to delete it again.
-            errorMessage = "Albus couldn't finish clearing this phone. Tap Try again to finish."
+            errorTitle = "This phone isn't cleared yet"
+            errorMessage = deletedRemotely
+                ? "Your account is deleted, but this phone still holds some of it."
+                : "This phone still holds some of your account."
             return false
         }
     }

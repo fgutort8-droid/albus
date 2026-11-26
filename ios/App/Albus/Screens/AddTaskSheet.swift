@@ -108,7 +108,7 @@ struct AddTaskSheet: View {
                     .foregroundStyle(Tokens.Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
                 if let rubricSyncFailure {
-                    StatusBanner(tone: .warning, message: rubricSyncFailure)
+                    ProblemLine(message: rubricSyncFailure)
                 }
             }
 

@@ -207,7 +207,7 @@ final class PurchaseService {
     static func message(for error: Error) -> String {
         switch error as? PurchaseError {
         case .offline:
-            "No connection. Try again when you're online."
+            "You're offline, so the App Store can't be reached."
         case .notAllowed:
             "Purchases aren't allowed on this device."
         case .notOnSale:
@@ -217,13 +217,15 @@ final class PurchaseService {
         case .inProgress:
             "That purchase is already in progress."
         case .store:
+            // Also what loading prices and restoring report, so it names no
+            // purchase: the student may never have started one.
             "The App Store had a problem. Try again in a moment."
         case .pending:
             "Waiting for approval."
         case .cancelled:
             "Cancelled."
         case .other, nil:
-            "Something went wrong with the App Store. Try again."
+            "The App Store had a problem. Try again in a moment."
         }
     }
 }

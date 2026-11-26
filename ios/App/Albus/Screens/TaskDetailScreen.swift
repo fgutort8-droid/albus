@@ -26,6 +26,7 @@ struct TaskDetailScreen: View {
     @State private var grading = false
     @State private var viewingGrade: Grading?
     @State private var confirmingDelete = false
+    @State private var changingStudyHours = false
 
     private var subject: Tokens.SubjectColor { assignment.course?.subjectColor ?? .violet }
     private var steps: [Subtask] { assignment.subtasks.sorted { $0.ordinal < $1.ordinal } }
@@ -40,6 +41,55 @@ struct TaskDetailScreen: View {
         steps.reduce(into: 0) { n, step in
             if coordinator.unplacedStepIDs.contains(step.id) { n += 1 }
         }
+    }
+
+    /// Minutes of this plan the scheduler could not place.
+    private var unplacedMinutes: Int {
+        let ids = Set(steps.map(\.id))
+        let seconds = coordinator.unplacedItems
+            .filter { ids.contains($0.id) }
+            .reduce(0) { $0 + $1.duration }
+        return Int((seconds / 60).rounded(.up))
+    }
+
+    @ViewBuilder private var doesNotFitCard: some View {
+        let copy = Self.doesNotFit(unplaced: unplacedCount, of: steps.count,
+                                   minutes: unplacedMinutes, deadline: assignment.deadline)
+        if copy.isPast {
+            ProblemCard(title: copy.title, message: copy.message)
+        } else {
+            ProblemCard(title: copy.title, message: copy.message) {
+                CardButton(title: "Change study hours") { changingStudyHours = true }
+            }
+        }
+    }
+
+    /// The "doesn't fit" card's words.
+    ///
+    /// It says how much work has no time, never how much more time would fit
+    /// it: a step can miss its slot by minutes, or only because the free time
+    /// is in pieces too small for it, so "about an hour more would fit it" was
+    /// a promise the scheduler never made.
+    static func doesNotFit(unplaced: Int, of total: Int, minutes: Int, deadline: Date,
+                           now: Date = .now) -> (title: String, message: String, isPast: Bool) {
+        let all = unplaced == total
+        let what = all ? "This plan doesn't" : "\(unplaced) \(unplaced == 1 ? "step doesn't" : "steps don't")"
+        if deadline < now {
+            return ("\(what) fit before the deadline",
+                    "The deadline has passed, so there's no time left to place \(all || unplaced > 1 ? "them" : "it").",
+                    true)
+        }
+        return ("\(what) fit before \(dayName(deadline, now: now))",
+                "About \(HomeScreen.duration(minutes)) of this work has no time before then. "
+                    + "More study hours before the deadline would help.",
+                false)
+    }
+
+    /// "Monday" within the week, "30 Nov" beyond it.
+    static func dayName(_ date: Date, now: Date = .now) -> String {
+        let days = Calendar.current.dateComponents([.day], from: now, to: date).day ?? 0
+        return days < 6 ? date.formatted(.dateTime.weekday(.wide))
+                        : date.formatted(.dateTime.day().month(.abbreviated))
     }
 
     private var toolsByStep: [UUID: [StudyTool]] {
@@ -99,6 +149,19 @@ struct TaskDetailScreen: View {
         .navigationBarBackButtonHidden()
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showingPaywall) { PaywallScreen() }
+        // A sheet, not a push: this screen already has a destination, and two
+        // `isPresented` destinations in one scope route through one of them.
+        // Leaving it re-places the week (`NotificationSettingsScreen`).
+        .sheet(isPresented: $changingStudyHours) {
+            NavigationStack {
+                Screen { NotificationSettingsScreen() }
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { changingStudyHours = false }
+                        }
+                    }
+            }
+        }
         .sheet(item: $editing) { draft in
             StepEditorSheet(draft: draft) { saved in
                 guard let step = steps.first(where: { $0.id == saved.id }) else { return }
@@ -277,9 +340,8 @@ struct TaskDetailScreen: View {
         } else if isWritingSteps {
             AlbusNote("Albus is writing more specific steps. **You can start on these now.**", isBusy: true)
         } else if steps.isEmpty {
-            StatusBanner(tone: .warning,
-                         message: "This assignment has no steps yet. Add one to start planning.",
-                         retryTitle: "Add a step") { addingStep = true }
+            // An empty list, not a warning: nothing has gone wrong yet.
+            EmptyLine(title: "No steps yet", actionTitle: "Add a step") { addingStep = true }
         } else if let next = steps.first(where: { $0.completedAt == nil }) {
             AlbusNote("**\(next.title)** is next in your plan.", isBusy: true)
         } else {
@@ -409,13 +471,8 @@ struct TaskDetailScreen: View {
                 // Said plainly rather than hidden: the student needs to move the
                 // deadline, cut scope, or study more hours, and none of those
                 // decisions are the app's to make quietly.
-                StatusBanner(
-                    tone: .warning,
-                    message: unplacedCount == steps.count
-                        ? "This plan doesn't fit before the deadline. You'd need more study hours, or more time."
-                        : "\(unplacedCount) of these steps don't fit before the deadline."
-                )
-                .padding(.top, Tokens.Spacing.xs)
+                doesNotFitCard
+                    .padding(.top, Tokens.Spacing.xs)
             }
 
             // Usable from the first moment, even while the AI is still

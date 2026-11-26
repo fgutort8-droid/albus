@@ -6,5 +6,5 @@
 /// either case Claude returned nothing Albus could safely use, and a fresh
 /// request will usually succeed.
 enum ModelResponseFailure {
-    static let retryableDescription = "Albus received an answer it couldn't use. Try again."
+    static let retryableDescription = "Albus got an answer back that it couldn't use. Try again."
 }

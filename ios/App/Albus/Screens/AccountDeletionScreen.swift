@@ -57,8 +57,9 @@ struct AccountDeletionScreen: View {
                         .foregroundStyle(Tokens.Palette.accent)
                 }
 
+                // No Albus here: a worried cactus on the way out reads as guilt.
                 if let message = deletion.errorMessage {
-                    StatusBanner(tone: .error, message: message)
+                    ProblemCard(title: deletion.errorTitle ?? AccountDeletion.notDeleted, message: message)
                 }
             }
             .padding(Tokens.Spacing.xl)
@@ -70,7 +71,7 @@ struct AccountDeletionScreen: View {
                     ProgressView("Deleting your account…")
                         .frame(height: 50)
                 } else if recovering {
-                    PrimaryButton(title: "Try again") { Task { await removeAccount() } }
+                    PrimaryButton(title: "Finish clearing") { Task { await removeAccount() } }
                 } else {
                     HoldToConfirmButton(title: "Hold to delete") { Task { await removeAccount() } }
                         .accessibilityIdentifier("confirmAccountDeletion")

@@ -58,7 +58,7 @@ enum RubricWriter {
             try context.save()
         } catch {
             print("[Albus] rubric save failed")
-            onSyncFailure("Couldn't save that rubric.")
+            onSyncFailure("That rubric didn't save on this phone. Try again.")
             return nil
         }
 
@@ -78,7 +78,7 @@ enum RubricWriter {
         }
         do { try context.save() } catch {
             print("[Albus] rubric duplicate failed")
-            onSyncFailure("Couldn't save that rubric.")
+            onSyncFailure("That rubric didn't save on this phone. Try again.")
             return
         }
         sync(copy, onFailure: onSyncFailure)
@@ -100,7 +100,7 @@ enum RubricWriter {
         } catch {
             context.rollback()
             if !alreadyPending { PendingRubricDeletions.acknowledge(receipt, defaults: defaults) }
-            onFailure("Couldn't delete that rubric. Please try again.")
+            onFailure("That rubric wasn't deleted. Try again.")
             return nil
         }
         return Task { await PendingRubricDeletions.flush(context: context, defaults: defaults, deleteRemote: deleteRemote) }
@@ -132,7 +132,7 @@ enum RubricWriter {
             } catch {
                 guard !Task.isCancelled, RubricRemoteWrites.generation == generation else { return }
                 onFailure((error as? LocalizedError)?.errorDescription
-                          ?? "Couldn't sync this rubric. It's saved on your phone.")
+                          ?? "Saved on this phone only. Save it again to keep it in your account.")
             }
         }
     }

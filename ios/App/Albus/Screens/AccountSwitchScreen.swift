@@ -39,7 +39,7 @@ struct AccountSwitchScreen: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 if let message {
-                    StatusBanner(tone: .error, message: message)
+                    ProblemLine(message: message)
                 }
                 PrimaryButton(title: isWorking ? "Working…" : "Remove them and continue",
                               isEnabled: !isWorking) {
@@ -77,7 +77,7 @@ struct AccountSwitchScreen: View {
                 try AccountLocalData.erase(context: context, preferences: preferences)
             }
         } catch {
-            message = "Couldn't clear this phone. Please try again."
+            message = "This phone wasn't cleared. Tap the button again."
         }
     }
 
@@ -90,7 +90,7 @@ struct AccountSwitchScreen: View {
             try await session.signOut()
             localAccount.signedOut()
         } catch {
-            message = "Couldn't sign out. Please try again."
+            message = "You're still signed in. Try going back again."
         }
     }
 }

@@ -92,7 +92,11 @@ struct GraderScreen: View {
     @State private var photo: PhotosPickerItem?
     @State private var workPhotoPicking = false
     @State private var extracting = false
-    @State private var extractionFailure: String?
+    @State private var extractionFailure: WorkExtractor.Failure?
+    /// Whether the work that could not be read was a photo or a file, so the
+    /// card reopens the picker it came from: a blank text file and a scanned
+    /// PDF fail the same way a blurred photo does.
+    @State private var extractionWasPhoto = false
 
     // What it is marked against.
     @State private var chosenRubric: Rubric?
@@ -255,7 +259,7 @@ struct GraderScreen: View {
                       let image = UIImage(data: data),
                       let text = try? await WorkExtractor.text(from: .image(image))
                 else {
-                    syncFailure = "Albus couldn't read that rubric — try a clearer photo."
+                    syncFailure = "No words found in that photo of the rubric. Try one in good light with the page flat, or paste it."
                     return
                 }
                 // Straight into the editor rather than saved silently: OCR of a
@@ -461,10 +465,18 @@ struct GraderScreen: View {
         }
 
         if extracting {
-            StatusBanner(tone: .working, message: "Reading it…")
+            WorkingLine(text: "Reading it…")
         }
         if let extractionFailure {
-            StatusBanner(tone: .warning, message: extractionFailure)
+            ProblemCard(title: extractionFailure.headline,
+                        message: extractionFailure.message(fromPhoto: extractionWasPhoto)) {
+                if extractionWasPhoto {
+                    CardButton(title: "Choose another photo") { workPhotoPicking = true }
+                } else {
+                    CardButton(title: "Choose another file") { importing = true }
+                }
+                CardButton(title: "Paste instead", style: .secondary) { self.extractionFailure = nil }
+            }
         }
         if let sourceLabel, !work.isEmpty {
             AlbusNote("Read **\(sourceLabel)** — \(wordCount) words.", isBusy: true)
@@ -522,7 +534,7 @@ struct GraderScreen: View {
         // could not read. Both were set and never shown: a rubric past the
         // plan's limit looked saved, and a failed photo did nothing at all.
         if let syncFailure {
-            StatusBanner(tone: .warning, message: syncFailure)
+            ProblemLine(message: syncFailure)
         }
 
         if !rubrics.isEmpty {
@@ -691,11 +703,9 @@ struct GraderScreen: View {
             }
         }
 
-        if isBlind && !presentation.isEmpty {
-            StatusBanner(tone: .warning,
-                         message: "With no rubric, Albus still won't give a mark — "
-                                + "whatever scale you ask for.")
-        }
+        // No separate warning for a scale asked of a marking with no rubric:
+        // the line below already says there will be no marks, and saying it
+        // twice in a row is what made this screen read as generated.
 
         // Named here, where the basis is finally known and the claim is true.
         HStack(spacing: Tokens.Spacing.s) {
@@ -877,19 +887,78 @@ struct GraderScreen: View {
     /// it is four lines, not a document.
     @ViewBuilder private var resultStage: some View {
         if let failure {
-            StatusBanner(tone: .error, message: failure.errorDescription ?? "Marking failed.")
-
             // Running out is the one failure a retry cannot fix, so it does not
-            // offer one. Everything else is worth another go — and costs
-            // nothing, because an identical request comes back from the server
-            // without a second model call.
+            // offer one, and `blockedCard` says it in full.
             if failure.isAnswerableByUpgrading {
                 blockedCard
             } else {
+                // The end of a flow failed, so this is the screen, not a strip:
+                // what did not happen, and what was kept, so nobody fears
+                // starting over. Never "it costs nothing": the phone cannot
+                // know whether the attempt used a marking.
+                VStack(alignment: .leading, spacing: Tokens.Spacing.m) {
+                    AlbusCactus(size: 56, mood: .calm, isWorried: true)
+                    Text(failure.headline)
+                        .font(Tokens.Typography.title)
+                        .tracking(Tokens.Tracking.display)
+                        .foregroundStyle(Tokens.Palette.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(failure.errorDescription ?? "")
+                        .font(Tokens.Typography.body)
+                        .foregroundStyle(Tokens.Palette.inkSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+                .onAppear { AccessibilityNotification.Announcement(failure.headline).post() }
+
+                keptSummary
+
                 PrimaryButton(title: "Try again") { stage = .presentation }
+                Button("Change something first") { stage = .work }
+                    .font(Tokens.Typography.label)
+                    .foregroundStyle(Tokens.Palette.ink)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .buttonStyle(.plain)
             }
             historyLink
         }
+    }
+
+    /// What a failed marking kept: the work, the rubric and the scale.
+    private var keptSummary: some View {
+        VStack(spacing: 0) {
+            keptRow("Work", sourceLabel.map { "\($0) · \(wordCount) words" } ?? "\(wordCount) words")
+            Divider().overlay(Tokens.Palette.hairline)
+            keptRow("Rubric", chosenRubric?.name ?? "None")
+            if !presentation.isEmpty {
+                Divider().overlay(Tokens.Palette.hairline)
+                keptRow("Mark as", presentation)
+            }
+        }
+        .background(Tokens.Palette.cardSurface,
+                    in: RoundedRectangle(cornerRadius: Tokens.Radius.problemCard, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: Tokens.Radius.problemCard, style: .continuous)
+                .strokeBorder(Tokens.Palette.hairline, lineWidth: 0.5)
+        }
+    }
+
+    private func keptRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Tokens.Spacing.m) {
+            Text(label)
+                .font(Tokens.Typography.label)
+                .fontWeight(.regular)
+                .foregroundStyle(Tokens.Palette.inkSecondary)
+            Spacer(minLength: Tokens.Spacing.s)
+            Text(value)
+                .font(Tokens.Typography.label)
+                .foregroundStyle(Tokens.Palette.ink)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, Tokens.Spacing.l)
+        .padding(.vertical, Tokens.Spacing.m + 2)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Pieces
@@ -1124,6 +1193,7 @@ struct GraderScreen: View {
     }
 
     private func extract(_ source: WorkExtractor.Source, label: String) {
+        if case .image = source { extractionWasPhoto = true } else { extractionWasPhoto = false }
         extracting = true
         extractionFailure = nil
         Task {
@@ -1131,8 +1201,7 @@ struct GraderScreen: View {
                 work = try await WorkExtractor.text(from: source)
                 sourceLabel = label
             } catch {
-                extractionFailure = (error as? WorkExtractor.Failure)?.errorDescription
-                    ?? "Albus couldn't read that."
+                extractionFailure = (error as? WorkExtractor.Failure) ?? .unreadable
             }
             extracting = false
         }
@@ -1204,5 +1273,43 @@ struct GraderScreen: View {
             }
             stage = .result
         }
+    }
+}
+
+/// The failure screen's title: what did not happen. The sentence under it is
+/// the failure's own `errorDescription`.
+extension GradingService.Failure {
+    var headline: String {
+        switch self {
+        case .offline: "Marking needs a connection"
+        case .tooFast: "That's a lot of marking at once"
+        case .atCapacity: "Albus is busy right now"
+        case .notSaved: "Marked, but not saved on this phone"
+        case .unusableResponse, .unavailable, .answerLost: "Marking didn't finish"
+        case .tooLong, .tooLongToMark, .tooShort, .noRubric, .rejected:
+            "This can't be marked as it is"
+        case .needsVerification: "Sign in to carry on"
+        case .paused: "Marking is paused"
+        case .fairUseReached: "Marking has reached its safety limit"
+        case .notOnPlan, .allowanceUsed: "No markings left"
+        }
+    }
+}
+
+extension WorkExtractor.Failure {
+    var headline: String {
+        switch self {
+        case .empty: "No words found in this"
+        case .unreadable: "Albus can't open this file"
+        case .tooLarge: "That file is too big to read on the phone"
+        }
+    }
+
+    /// The photo advice only for a photo: an empty file is not blurred.
+    func message(fromPhoto: Bool) -> String {
+        if self == .empty, !fromPhoto {
+            return "Albus found no words in this file. Choose another, or paste the text."
+        }
+        return errorDescription ?? ""
     }
 }
