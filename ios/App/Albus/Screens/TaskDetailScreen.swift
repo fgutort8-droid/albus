@@ -53,23 +53,36 @@ struct TaskDetailScreen: View {
     }
 
     @ViewBuilder private var doesNotFitCard: some View {
-        let all = unplacedCount == steps.count
-        let what = all ? "This plan doesn't" : "\(unplacedCount) \(unplacedCount == 1 ? "step doesn't" : "steps don't")"
-        if assignment.deadline < .now {
-            ProblemCard(title: "\(what) fit before the deadline",
-                        message: "The deadline has passed, so there's no time left to place \(all || unplacedCount > 1 ? "them" : "it").")
+        let copy = Self.doesNotFit(unplaced: unplacedCount, of: steps.count,
+                                   minutes: unplacedMinutes, deadline: assignment.deadline)
+        if copy.isPast {
+            ProblemCard(title: copy.title, message: copy.message)
         } else {
-            ProblemCard(
-                title: "\(what) fit before \(Self.dayName(assignment.deadline))",
-                // How much work has no time, not how much more time would fit
-                // it: a step can miss its slot by minutes, or only because the
-                // free time is in pieces too small for it.
-                message: "About \(HomeScreen.duration(unplacedMinutes)) of this work has no time before then. "
-                    + "More study hours before the deadline would help."
-            ) {
+            ProblemCard(title: copy.title, message: copy.message) {
                 CardButton(title: "Change study hours") { changingStudyHours = true }
             }
         }
+    }
+
+    /// The "doesn't fit" card's words.
+    ///
+    /// It says how much work has no time, never how much more time would fit
+    /// it: a step can miss its slot by minutes, or only because the free time
+    /// is in pieces too small for it, so "about an hour more would fit it" was
+    /// a promise the scheduler never made.
+    static func doesNotFit(unplaced: Int, of total: Int, minutes: Int, deadline: Date,
+                           now: Date = .now) -> (title: String, message: String, isPast: Bool) {
+        let all = unplaced == total
+        let what = all ? "This plan doesn't" : "\(unplaced) \(unplaced == 1 ? "step doesn't" : "steps don't")"
+        if deadline < now {
+            return ("\(what) fit before the deadline",
+                    "The deadline has passed, so there's no time left to place \(all || unplaced > 1 ? "them" : "it").",
+                    true)
+        }
+        return ("\(what) fit before \(dayName(deadline, now: now))",
+                "About \(HomeScreen.duration(minutes)) of this work has no time before then. "
+                    + "More study hours before the deadline would help.",
+                false)
     }
 
     /// "Monday" within the week, "30 Nov" beyond it.

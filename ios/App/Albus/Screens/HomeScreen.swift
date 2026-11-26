@@ -562,22 +562,27 @@ struct HomeScreen: View {
                         : "Your \(openHere) open \(openHere == 1 ? "assignment is" : "assignments are") on time.",
                       isGoodNews: true, actionTitle: showAllTitle, action: showAll)
         case .needsTime:
-            // An empty list here proves nothing when the last re-flow failed:
-            // `weekFit` is nil then, not empty.
-            if coordinator.lastRunSucceeded {
-                EmptyLine(title: "Everything fits",
-                          message: "All work due in the next 7 days has time in your plan.",
+            let empty = Self.needsTimeEmpty(lastRunSucceeded: coordinator.lastRunSucceeded)
+            if empty.isKnown {
+                EmptyLine(title: empty.title, message: empty.message,
                           isGoodNews: true, actionTitle: showAllTitle, action: showAll)
             } else {
-                EmptyLine(title: "Albus can't tell yet",
-                          message: "Your week didn't update, so what fits isn't known.",
-                          actionTitle: "Rebuild now") {
+                EmptyLine(title: empty.title, message: empty.message, actionTitle: "Rebuild now") {
                     coordinator.reschedule(context: context, availability: preferences.availability)
                 }
             }
         case .done:
             EmptyLine(title: "Finished assignments land here")
         }
+    }
+
+    /// What an empty "Needs time" list says. An empty list proves nothing
+    /// when the last re-flow failed — `weekFit` is nil then, not empty — so
+    /// it must not say everything fits.
+    static func needsTimeEmpty(lastRunSucceeded: Bool) -> (title: String, message: String, isKnown: Bool) {
+        lastRunSucceeded
+            ? ("Everything fits", "All work due in the next 7 days has time in your plan.", true)
+            : ("Albus can't tell yet", "Your week didn't update, so what fits isn't known.", false)
     }
 
     private var showAllTitle: String? { openHere > 0 ? "Show all" : nil }

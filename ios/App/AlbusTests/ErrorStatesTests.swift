@@ -109,6 +109,50 @@ struct ErrorStatesTests {
         #expect(WorkExtractor.Failure.empty.message(fromPhoto: true).contains("blurred"))
     }
 
+    /// `weekFit` is nil after a failed re-flow, which empties "Needs time"
+    /// without proving anything fits.
+    @Test("an empty Needs-time list claims everything fits only after a good re-flow")
+    func needsTimeAfterFailedRebuild() {
+        let unknown = HomeScreen.needsTimeEmpty(lastRunSucceeded: false)
+        #expect(!unknown.isKnown)
+        #expect(unknown.title != "Everything fits")
+        #expect(!unknown.message.contains("has time"))
+
+        let known = HomeScreen.needsTimeEmpty(lastRunSucceeded: true)
+        #expect(known.isKnown && known.title == "Everything fits")
+    }
+
+    @Test("the doesn't-fit card says how much work lacks time, not how much more would fit it")
+    func doesNotFitWording() throws {
+        let now = try #require(Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 26, hour: 9)))
+        let sunday = try #require(Calendar.current.date(byAdding: .day, value: 3, to: now))
+        let copy = TaskDetailScreen.doesNotFit(unplaced: 1, of: 2, minutes: 60, deadline: sunday, now: now)
+        #expect(copy.title == "1 step doesn't fit before \(sunday.formatted(.dateTime.weekday(.wide)))")
+        #expect(copy.message.hasPrefix("About 1 h of this work has no time before then."))
+        #expect(!copy.message.contains("would fit"), "no promise the scheduler never made")
+        #expect(!copy.isPast)
+
+        let yesterday = try #require(Calendar.current.date(byAdding: .day, value: -1, to: now))
+        let past = TaskDetailScreen.doesNotFit(unplaced: 2, of: 2, minutes: 90, deadline: yesterday, now: now)
+        #expect(past.isPast && past.title == "This plan doesn't fit before the deadline")
+    }
+
+    /// The same fallback reports failures loading prices and restoring, when
+    /// no purchase was ever started.
+    @Test("App Store failures that can come from loading prices name no purchase",
+          arguments: [PurchaseError.store, .other])
+    func storeFallbackNamesNoPurchase(error: PurchaseError) {
+        let message = PurchaseService.message(for: error)
+        #expect(!message.localizedCaseInsensitiveContains("purchase"))
+        #expect(message == "The App Store had a problem. Try again in a moment.")
+    }
+
+    @Test("an error that is not the App Store's own gets the same neutral sentence")
+    func unknownErrorFallback() {
+        #expect(PurchaseService.message(for: URLError(.badServerResponse))
+                == "The App Store had a problem. Try again in a moment.")
+    }
+
     @Test("every marking failure has a title of its own")
     func markingHeadlines() {
         let failures: [GradingService.Failure] = [
