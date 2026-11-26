@@ -197,6 +197,21 @@ observations: the now-pseudonymous account UUID remains for the 90-day fraud
 window, while the auth row and all student content delete normally. The daily
 retention job then removes the observation.
 
+Deleting an account and signing in again with the same Apple ID cannot reset
+limits (20261126120000). A `BEFORE DELETE` trigger on `auth.users` links the
+account's AI usage from its last 30 days to an HMAC-SHA256 of its Apple
+identifier (`auth.identities.provider_id`), keyed with a pepper generated in
+the migration and kept in Vault (`albus_apple_id_pepper`). The four counting
+functions (`ai_spend_count`, `ai_window_resets_at`, `ai_attempt_count`,
+`ai_account_cost`) also count rows linked to the caller's own Apple ID hash,
+so the weekly allowance, its reset time, the hourly rate and the 30-day
+fair-use ceiling all carry over, the way a restored purchase already carries
+them. A row matches once however many ways it belongs, and global spend sums
+rows, so nothing is counted twice. Accounts without an Apple identity keep
+nothing. `prune-apple-usage-memory` removes each link daily once its usage row
+is 30 days old. A new Apple ID still starts fresh; the device signal above is
+what slows that down.
+
 An Apple ID identifies a student account. Production switches anonymous signup
 off after testers use the new build, closing that account-farming path; existing
 anonymous sessions keep working. Local anonymous signup remains limited to ten
@@ -315,6 +330,7 @@ production still needs the owner's deployment review.
 | `public.subscription_webhook_events` | Kept replay evidence, indexed by provider event ID; no account column. |
 | `private.subscription_transfers` | Kept restore routing. `active_destination_id` becomes null, but `source_ids` and `destination_id` retain account UUIDs. |
 | `private.ai_usage_purchases` | Kept links between retained usage and purchases. Links expire after 30 days of usage age; parent deletion also cascades. |
+| `private.ai_usage_apple_ids` | Created at deletion (trigger on `auth.users`): links the account's last 30 days of retained usage to a peppered HMAC of its Apple identifier, so the same Apple ID cannot reset limits. Never the identifier itself. Each link is removed daily by `prune-apple-usage-memory` once its usage is 30 days old; parent deletion also cascades. |
 | `private.financial_inbox` | Kept payment-processing evidence. No owner FK: `user_id` and the allowlisted JSON payload still name a deleted account. Completed payloads and `user_id` are cleared after 30 days; pending/retry/dead events retain their details until processing succeeds. |
 | `private.financial_audit` | Kept immutable evidence with only a SHA-256 account/resource hash and allowlisted financial fields, never student content or the raw UUID. No scheduled expiry. |
 | `public.curricula`, `course_templates`, `assessment_types`, `rubric_criteria`, `duration_priors`, `plans`, `app_config`, `subscription_products`; `private.ai_model_prices`, `ai_tier_budgets` | Kept shared reference/configuration data; no student ownership. |
