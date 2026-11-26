@@ -30,11 +30,11 @@ enum WorkExtractor {
         var errorDescription: String? {
             switch self {
             case .unreadable:
-                "Albus couldn't open that file."
+                "Paste the text instead, or try a PDF or plain-text file."
             case .empty:
-                "Albus couldn't read any text — try a clearer photo, or paste it instead."
+                "It may be blurred or too dark. Try a photo in good light with the page flat, or paste the text."
             case .tooLarge:
-                "That file is too big to read on the phone."
+                "Try a shorter file, or paste the part you want marked."
             }
         }
     }

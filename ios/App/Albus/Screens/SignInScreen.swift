@@ -14,6 +14,7 @@ struct SignInScreen: View {
     var savingAccount = false
 
     @Environment(SessionService.self) private var session
+    @Environment(LocalAccount.self) private var localAccount
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
@@ -40,7 +41,7 @@ struct SignInScreen: View {
                         header
                         appleButton
                         if let message {
-                            StatusBanner(tone: .error, message: message)
+                            ProblemLine(message: message)
                         }
                     }
                     .padding(.horizontal, Tokens.Spacing.xl)
@@ -66,6 +67,16 @@ struct SignInScreen: View {
 
     // MARK: - Pieces
 
+    /// The phone's session could not be restored, and it holds an account's
+    /// tasks. That student did not choose to leave, so the screen says what
+    /// happened instead of welcoming them as if they were new. The reason
+    /// itself is technical (a Keychain error, a refused refresh) and stays in
+    /// `SessionService`.
+    private var wasSignedOut: Bool {
+        guard !savingAccount, case .failed = session.state else { return false }
+        return localAccount.owner != nil
+    }
+
     @ViewBuilder
     private var topBar: some View {
         HStack {
@@ -84,13 +95,16 @@ struct SignInScreen: View {
             AlbusCactus(size: 64, mood: .calm)
                 .padding(.bottom, Tokens.Spacing.s)
                 .accessibilityHidden(true)
-            Text(savingAccount ? "Save your account." : "Welcome to Albus.")
+            Text(savingAccount ? "Save your account."
+                 : wasSignedOut ? "You've been signed out" : "Welcome to Albus.")
                 .font(Tokens.Typography.title)
                 .foregroundStyle(Tokens.Palette.ink)
                 .fixedSize(horizontal: false, vertical: true)
             Text(savingAccount
                  ? "Add Apple, so you can sign back in if you change phones. Your tasks stay on this phone."
-                 : "Sign in to start planning.")
+                 : wasSignedOut
+                    ? "Everything on this phone is still here. Sign in with the same Apple ID to pick up where you left off."
+                    : "Sign in to start planning.")
                 .font(Tokens.Typography.body)
                 .foregroundStyle(Tokens.Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)

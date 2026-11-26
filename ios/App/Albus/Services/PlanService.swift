@@ -131,6 +131,16 @@ struct PlanService {
             }
         }
 
+        /// The same reason, for the line on the assignment's own card.
+        var localPlanReason: PlanCoordinator.LocalPlanReason {
+            switch self {
+            case .aiPlansUsed: .aiPlansUsed
+            case .aiPlansNotIncluded: .aiPlansNotIncluded
+            case .offline: .offline
+            default: .unavailable
+            }
+        }
+
         /// True when the honest next step is a plan with more AI in it.
         var suggestsUpgrade: Bool { self == .aiPlansUsed || self == .aiPlansNotIncluded }
     }

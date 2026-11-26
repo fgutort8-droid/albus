@@ -126,8 +126,7 @@ struct GradingService {
             case .answerLost:
                 Failure.unavailable.errorDescription
             case .notSaved:
-                "Albus marked this but couldn't save it on this phone. "
-                + "Try again with the same work and settings to retrieve a saved result."
+                "Run it again with the same work and settings to get the same result back."
             case .notOnPlan:
                 "Marking is part of Albus Plus and Pro."
             case .allowanceUsed(let resetsAt):
@@ -137,7 +136,7 @@ struct GradingService {
                     "That's this week's markings used."
                 }
             case .tooFast:
-                "That's a lot of marking at once. Try again later."
+                "Try again in a little while."
             case .needsVerification:
                 "Sign in to carry on marking."
             case .paused:
@@ -158,7 +157,7 @@ struct GradingService {
                 "Albus is at capacity right now, so this wasn't marked "
                 + "and none of your markings was used. Try again later."
             case .offline:
-                "No connection — marking needs one."
+                "Your work and rubric are kept. Connect, then try again."
             case .unusableResponse:
                 ModelResponseFailure.retryableDescription
             case .unavailable:
@@ -168,7 +167,7 @@ struct GradingService {
                 // lie a student could check. The server hands the slot back on
                 // failure and returns an identical result for free on a retry,
                 // which is what makes this true rather than reassuring.
-                "Albus couldn't finish marking that. Try again with the same work and settings."
+                "Nothing came back this time. Try again with the same work and settings."
             case .rejected(let why):
                 why
             }

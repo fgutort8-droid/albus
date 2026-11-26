@@ -62,6 +62,10 @@ struct AlbusCactus: View {
     var mood: Mood = .busy
     /// Eyes closed, for a running focus session.
     var isResting: Bool = false
+    /// Brows lifted inward and a small frown: something needs the student.
+    /// A face rather than a colour, so the one Albus on a screen can say it
+    /// without a second, sadder one appearing beside him.
+    var isWorried: Bool = false
     /// How far the bud on his head has opened: 0 is the bud he always wears,
     /// 1 is in flower. Only the moment a purchase goes through opens it.
     var bloom: Double = 0
@@ -237,6 +241,14 @@ struct AlbusCactus: View {
                 context.stroke(lid, with: .color(Palette.eye),
                                style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
             }
+        } else if isWorried {
+            // A touch smaller and lower: looking up from under the brows.
+            for cx in [50.0, 70.0] {
+                context.fill(Path(ellipseIn: CGRect(x: cx - 4.2, y: 66.8, width: 8.4, height: 8.4)),
+                             with: .color(Palette.eye))
+                context.fill(Path(ellipseIn: CGRect(x: cx - 3, y: 68.2, width: 2.8, height: 2.8)),
+                             with: .color(.white))
+            }
         } else {
             for cx in [50.0, 70.0] {
                 context.fill(Path(ellipseIn: CGRect(x: cx - 4.6, y: 65.4, width: 9.2, height: 9.2)),
@@ -246,22 +258,34 @@ struct AlbusCactus: View {
             }
         }
 
-        // Brows, lifted.
+        // Brows: lifted, or, worried, raised at the inner ends.
         var browL = Path()
-        browL.move(to: CGPoint(x: 44, y: 60))
-        browL.addQuadCurve(to: CGPoint(x: 55, y: 59), control: CGPoint(x: 50, y: 57))
         var browR = Path()
-        browR.move(to: CGPoint(x: 65, y: 59))
-        browR.addQuadCurve(to: CGPoint(x: 76, y: 60), control: CGPoint(x: 70, y: 57))
+        if isWorried {
+            browL.move(to: CGPoint(x: 44, y: 62))
+            browL.addQuadCurve(to: CGPoint(x: 55, y: 57.5), control: CGPoint(x: 49, y: 58.5))
+            browR.move(to: CGPoint(x: 65, y: 57.5))
+            browR.addQuadCurve(to: CGPoint(x: 76, y: 62), control: CGPoint(x: 71, y: 58.5))
+        } else {
+            browL.move(to: CGPoint(x: 44, y: 60))
+            browL.addQuadCurve(to: CGPoint(x: 55, y: 59), control: CGPoint(x: 50, y: 57))
+            browR.move(to: CGPoint(x: 65, y: 59))
+            browR.addQuadCurve(to: CGPoint(x: 76, y: 60), control: CGPoint(x: 70, y: 57))
+        }
         for brow in [browL, browR] {
             context.stroke(brow, with: .color(Palette.eye),
                            style: StrokeStyle(lineWidth: 2, lineCap: .round))
         }
 
-        // Mouth.
+        // Mouth: a smile, or a small frown.
         var mouth = Path()
-        mouth.move(to: CGPoint(x: 54, y: 84))
-        mouth.addQuadCurve(to: CGPoint(x: 66, y: 84), control: CGPoint(x: 60, y: 88))
+        if isWorried {
+            mouth.move(to: CGPoint(x: 55, y: 87))
+            mouth.addQuadCurve(to: CGPoint(x: 65, y: 87), control: CGPoint(x: 60, y: 84))
+        } else {
+            mouth.move(to: CGPoint(x: 54, y: 84))
+            mouth.addQuadCurve(to: CGPoint(x: 66, y: 84), control: CGPoint(x: 60, y: 88))
+        }
         context.stroke(mouth, with: .color(Palette.eye),
                        style: StrokeStyle(lineWidth: 2, lineCap: .round))
     }
@@ -318,7 +342,10 @@ struct AlbusPeep: View {
                     }
                 }
             }
-            AlbusCactus(size: 120, mood: .calm, isResting: true)
+            HStack(spacing: Tokens.Spacing.l) {
+                AlbusCactus(size: 120, mood: .calm, isResting: true)
+                AlbusCactus(size: 120, mood: .calm, isWorried: true)
+            }
             HStack(spacing: Tokens.Spacing.l) {
                 AlbusCactus(size: 28)
                 AlbusCactus(size: 40)

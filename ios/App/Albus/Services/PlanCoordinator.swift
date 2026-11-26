@@ -23,7 +23,53 @@ final class PlanCoordinator {
         case failed(String)
     }
 
-    private(set) var status: Status = .idle
+    private(set) var status: Status = .idle {
+        // A problem belongs to the failure that raised it: once the status
+        // moves on, so does the card that described it.
+        didSet { if case .failed = status {} else { problem = nil } }
+    }
+
+    /// What went wrong, for the card Home shows, when `status` is `.failed`.
+    ///
+    /// Kept beside `status` rather than replacing its message: the message is
+    /// what the tests and the server's wording already agree on, and the card
+    /// needs more than one sentence — what did not happen, what is safe, and
+    /// which button fixes it.
+    enum Problem: Equatable {
+        /// A write to the phone's store failed. `again` once a retry also has.
+        case notSaved(again: Bool)
+        /// The week could not be re-placed; the times shown are older.
+        case notRebuilt
+        /// Already at the plan's open-task limit. Home's meter says so.
+        case taskLimit
+        /// The server refused the assignment, with its reason. `kept` when the
+        /// student had started on it, so it stays until Albus next opens.
+        case refused(String, kept: Bool)
+    }
+
+    private(set) var problem: Problem?
+
+    /// Why the phone, not the AI, planned an assignment.
+    ///
+    /// Per assignment, so Home can say it on that assignment's card rather
+    /// than in a strip above everything. In memory only, on purpose: it
+    /// explains what just happened, and after a relaunch the card simply shows
+    /// its sessions — persisting it would be a change to the store's schema
+    /// for a sentence that has stopped being news.
+    enum LocalPlanReason: Equatable {
+        case aiOff, offline, aiPlansUsed, aiPlansNotIncluded, unavailable
+    }
+
+    private(set) var localPlanReasons: [UUID: LocalPlanReason] = [:]
+
+    func localPlanReason(for assignment: Assignment) -> LocalPlanReason? {
+        localPlanReasons[assignment.id]
+    }
+
+    private func fail(_ problem: Problem, message: String) {
+        status = .failed(message)
+        self.problem = problem
+    }
 
     /// The study hours the week was last planned in. A plan the AI answers
     /// late is placed in these, not the ones it set out with: the student may
@@ -185,7 +231,7 @@ final class PlanCoordinator {
            let open = try? context.fetch(FetchDescriptor<Assignment>())
                .count(where: { !$0.isComplete && !$0.isArchived }),
            open >= taskLimit {
-            status = .failed(PlanService.Failure.quotaReached.errorDescription ?? "")
+            fail(.taskLimit, message: PlanService.Failure.quotaReached.errorDescription ?? "")
             return
         }
 
@@ -205,6 +251,7 @@ final class PlanCoordinator {
         // `refiningDisplayLimit`.
         planLocally(assignment, context: context, availability: availability, now: now)
         guard useAI else {
+            localPlanReasons[assignment.id] = .aiOff
             status = .plannedLocally(note: Self.aiOffNote, suggestsUpgrade: false)
             return
         }
@@ -265,6 +312,7 @@ final class PlanCoordinator {
         } catch let failure as PlanService.Failure where failure.plansLocally {
             guard !accountWasDeleted else { return }
             // The phone's plan is already in place.
+            localPlanReasons[id] = failure.localPlanReason
             status = .plannedLocally(note: failure.localPlanNote,
                                      suggestsUpgrade: failure.suggestsUpgrade)
         } catch let failure as PlanService.Failure {
@@ -286,13 +334,15 @@ final class PlanCoordinator {
                     // next launch takes its plan out of the week instead,
                     // before any screen can show it, and keeps the work.
                     RefusedAssignments.record(id, defaults: defaults)
-                    status = .failed(refusal + " The one you just added stays until Albus next opens, as you've started on it. The work you do on it is kept.")
+                    fail(.refused(refusal, kept: true),
+                         message: refusal + " The one you just added stays until Albus next opens, as you've started on it. The work you do on it is kept.")
                     return
                 }
             }
-            status = .failed(refusal)
+            fail(failure == .quotaReached ? .taskLimit : .refused(refusal, kept: false), message: refusal)
         } catch {
             guard !accountWasDeleted else { return }
+            localPlanReasons[id] = .unavailable
             status = .plannedLocally(note: PlanService.Failure.unavailable.localPlanNote,
                                      suggestsUpgrade: false)
         }
@@ -852,6 +902,8 @@ final class PlanCoordinator {
             workload = result.workload
             movedCount = result.movedCount
             lastRunSucceeded = true
+            // The week is current again, so the card saying it was not goes.
+            if problem == .notRebuilt { status = .idle }
             save(context, "apply schedule")
             // Every mutation path — add, delete, complete, the missed sweep and
             // all four plan edits — ends here, so this is the only hook the
@@ -864,7 +916,7 @@ final class PlanCoordinator {
             // the mascot's mood, a "your plan stopped fitting" alert — has to
             // know that, or it reports a state the student cannot see or fix.
             lastRunSucceeded = false
-            status = .failed("Couldn't rebuild your plan.")
+            fail(.notRebuilt, message: "Couldn't rebuild your plan.")
         }
     }
 
@@ -887,13 +939,29 @@ final class PlanCoordinator {
     private func save(_ context: ModelContext, _ what: StaticString) -> Bool {
         do {
             try persist(context)
+            // Everything pending is stored now, the failed write included.
+            if case .notSaved = problem { status = .idle }
             return true
         } catch {
             // Losing a write silently is worse than a visible failure.
-            status = .failed("Couldn't save.")
+            fail(.notSaved(again: false), message: "Couldn't save.")
             print("save failed during \(what)")
             return false
         }
+    }
+
+    /// Home's "Save again": the change is still in the context, so storing it
+    /// is one more attempt at the same write.
+    func retrySave(context: ModelContext) {
+        if !save(context, "retry") {
+            fail(.notSaved(again: true), message: "Couldn't save.")
+        }
+    }
+
+    /// Home's "Got it" on a refusal: the reason has been read, and nothing on
+    /// the phone needs doing about it.
+    func dismissProblem() {
+        if case .failed = status { status = .idle }
     }
 }
 

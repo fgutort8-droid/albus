@@ -205,8 +205,7 @@ private struct DaySheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Tokens.Spacing.m) {
                         if sessions.isEmpty {
-                            EmptyState(icon: "sun.max", title: "Nothing scheduled",
-                                       message: "This day is clear.")
+                            EmptyLine(title: "This day is clear", isGoodNews: true)
                         } else {
                             ForEach(sessions.sorted { $0.startsAt < $1.startsAt }) { session in
                                 DayRow(session: session)

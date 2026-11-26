@@ -403,9 +403,7 @@ struct SettingsScreen: View {
                             }
                     }
                     if let signOutError {
-                        Text(signOutError)
-                            .font(Tokens.Typography.caption)
-                            .foregroundStyle(Tokens.Palette.danger)
+                        ProblemLine(message: signOutError)
                     }
                 }
             }
@@ -435,7 +433,7 @@ struct SettingsScreen: View {
                                                  context: modelContext,
                                                  localAccount: localAccount)
             } catch {
-                signOutError = "Couldn't sign out. Please try again."
+                signOutError = "You're still signed in. Try signing out again."
             }
         }
     }

@@ -27,12 +27,11 @@ struct RubricsScreen: View {
                 header
 
                 if let syncFailure {
-                    StatusBanner(tone: .warning, message: syncFailure)
+                    ProblemLine(message: syncFailure)
                 }
 
                 if rubrics.isEmpty {
                     EmptyState(
-                        icon: "list.bullet.rectangle.portrait",
                         title: "No rubrics yet",
                         message: "Paste the marking criteria from an assignment sheet. "
                                + "Albus can use it to shape your plan. Plus and Pro can estimate a mark for your "

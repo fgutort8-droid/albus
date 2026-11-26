@@ -21,12 +21,12 @@ enum SignInError: Error, Equatable {
     var message: String? {
         switch self {
         case .cancelled: nil
-        case .offline: "No connection. Check your internet and try again."
-        case .tooManyRequests: "Too many tries. Wait a minute, then try again."
+        case .offline: "You're offline. Connect to Wi-Fi or mobile data, then tap the button again."
+        case .tooManyRequests: "Too many tries. Wait a minute, then sign in again."
         case .appleIDInUse: "This Apple ID already has an Albus account."
-        case .unavailable: "Sign in with Apple isn't available right now. Please try again later."
+        case .unavailable: "Apple's sign-in isn't answering. Try again in a few minutes."
         case .storage: SessionStorageUnavailable().errorDescription
-        case .other: "Couldn't sign in. Please try again."
+        case .other: "That didn't go through. Tap the button to try again."
         }
     }
 

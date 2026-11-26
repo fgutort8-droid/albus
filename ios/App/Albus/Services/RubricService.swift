@@ -43,9 +43,9 @@ struct RubricService {
         var errorDescription: String? {
             switch self {
             case .offline:
-                "No connection — this rubric is saved on your phone. Try saving it again when you're online."
+                "Saved on this phone only. Save it again when you're online to keep it in your account."
             case .unavailable:
-                "Couldn't sync this rubric. It's saved on your phone."
+                "Saved on this phone only. Save it again to keep it in your account."
             case .planLimit:
                 // No number, for the reason `PlanService` gives for tasks:
                 // Free keeps 3 and Plus 5, and a literal would be wrong for one.

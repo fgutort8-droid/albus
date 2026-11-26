@@ -40,6 +40,6 @@ struct GraderRubricTests {
         #expect(offline == RubricService.Failure.offline.errorDescription)
 
         let unknown = await RubricWriter.ensureOnServer(rubric) { _ in throw SaveFailed() }
-        #expect(unknown == "Couldn't sync this rubric. It's saved on your phone.")
+        #expect(unknown == "Saved on this phone only. Save it again to keep it in your account.")
     }
 }

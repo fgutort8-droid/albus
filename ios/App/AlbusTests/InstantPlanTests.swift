@@ -515,6 +515,7 @@ struct InstantPlanTests {
         #expect(added.remoteID == nil)
         #expect(HeldPlanTransport.state.breakdownRequests == 0, "nothing went to the AI")
         #expect(coordinator.status == .plannedLocally(note: PlanCoordinator.aiOffNote, suggestsUpgrade: false))
+        #expect(coordinator.localPlanReason(for: added) == .aiOff, "Home says why on this card")
     }
 
     @Test("an archived assignment does not count against the open-task cap")
@@ -554,6 +555,14 @@ struct InstantPlanTests {
         #expect(RefusedAssignments.all(defaults: refusedList) == [added.id], "still listed for the next launch")
         #expect(try assignment(in: context)?.id == added.id, "nothing half-removed in memory")
         #expect(coordinator.status == .failed("Couldn't save."))
+        #expect(coordinator.problem == .notSaved(again: false))
+
+        // Home's "Save again", while the store still refuses, then once it takes.
+        coordinator.retrySave(context: context)
+        #expect(coordinator.problem == .notSaved(again: true), "the card says it still won't save")
+        saves.fail = false
+        coordinator.retrySave(context: context)
+        #expect(coordinator.status == .idle && coordinator.problem == nil, "the card goes once it saves")
 
         saves.fail = false
         coordinator.removeRefusedAssignments(context: context, availability: availability, now: now)

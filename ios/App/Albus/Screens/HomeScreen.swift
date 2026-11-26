@@ -60,7 +60,8 @@ struct HomeScreen: View {
     /// name the thing it is about to destroy.
     @State private var confirmingDelete: Assignment?
     @State private var confirmingRelease = false
-    @State private var releaseFailed = false
+    /// Why "Stop counting" did not go through, said under its button.
+    @State private var releaseFailure: String?
     @State private var focusing: PlanSessionRecord?
 
     enum Filter: String, CaseIterable, Identifiable {
@@ -171,9 +172,8 @@ struct HomeScreen: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: Tokens.Spacing.l) {
                 header(now: now)
-                status
-                freeLimitNotice
-                uncountedNotice
+                problemCard
+                taskMeter
 
                 if let next = upNext(now: now) {
                     UpNextCard(record: next, now: now) {
@@ -205,7 +205,9 @@ struct HomeScreen: View {
                                         Screen { TaskDetailScreen(assignment: assignment) }
                                     } label: {
                                         AssignmentCard(assignment: assignment, now: now,
-                                                       isRefining: coordinator.isRefining(assignment))
+                                                       isRefining: coordinator.isRefining(assignment),
+                                                       localPlan: coordinator.localPlanReason(for: assignment),
+                                                       seePlus: { showingPaywall = true })
                                     }
                                     .buttonStyle(.plain)
                                     // The up-next card shows the same title, so
@@ -274,28 +276,28 @@ struct HomeScreen: View {
                        workload: coordinator.workload, now: now)
     }
 
+    /// Work the week cannot fit before its deadlines. A card, not a cactus:
+    /// Albus is already at the top of the screen, and his mood there already
+    /// says the week is full.
     private func weekFitNotice(_ fit: WeekFit) -> some View {
-        VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
-            HStack(spacing: Tokens.Spacing.s) {
-                AlbusCactus(size: 28, mood: .init(fit.workload))
-                Text("Some work still needs time")
-                    .font(Tokens.Typography.cardTitle)
-            }
-            Text("Next 7 days and overdue: \(fit.items.count) \(fit.items.count == 1 ? "step" : "steps") across \(fit.assignmentIDs.count) \(fit.assignmentIDs.count == 1 ? "assignment" : "assignments") could not be scheduled by their deadlines (\(fit.minutesNeedingTime) min).")
-                .font(Tokens.Typography.body)
-            Text("Review the affected work. You can split a long step into smaller sittings, revise an estimate, or discuss a deadline with your teacher.")
-                .font(Tokens.Typography.caption)
-                .foregroundStyle(Tokens.Palette.inkSecondary)
-            Button("Review affected work") { filter = .needsTime }
-                .font(Tokens.Typography.label)
-                .foregroundStyle(Tokens.Palette.accent)
+        let steps = fit.items.count
+        let works = fit.assignmentIDs.count
+        return ProblemCard(
+            title: "\(steps) \(steps == 1 ? "step doesn't" : "steps don't") fit before \(steps == 1 ? "its deadline" : "their deadlines")",
+            message: "\(Self.duration(fit.minutesNeedingTime)) of work across \(works) \(works == 1 ? "assignment" : "assignments"), "
+                + "due in the next 7 days or overdue. Split a long step, change an estimate, "
+                + "or talk to your teacher about the deadline."
+        ) {
+            CardButton(title: "See which") { filter = .needsTime }
         }
-        .foregroundStyle(Tokens.Palette.ink)
-        .padding(Tokens.Spacing.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Tokens.Palette.cardSurface,
-                    in: RoundedRectangle(cornerRadius: Tokens.Radius.card))
         .accessibilityIdentifier("weekFitNotice")
+    }
+
+    /// "1 h 25", "40 min".
+    static func duration(_ minutes: Int) -> String {
+        let hours = minutes / 60, rest = minutes % 60
+        if hours == 0 { return "\(rest) min" }
+        return rest == 0 ? "\(hours) h" : "\(hours) h \(rest)"
     }
 
     /// The block happening now, or the next one due. Nil once everything is done.
@@ -330,7 +332,10 @@ struct HomeScreen: View {
                 // for redundancy, and adding one back for settings would argue
                 // against reasoning that is already written down.
                 Button { destination = .notificationSettings } label: {
-                    AlbusCactus(size: 36, mood: .init(coordinator.workload))
+                    // The one Albus on Home: when a card below says something
+                    // did not go through, he says it with his face.
+                    AlbusCactus(size: 36, mood: .init(coordinator.workload),
+                                isWorried: showsProblemCard)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Notification settings")
@@ -350,50 +355,158 @@ struct HomeScreen: View {
         }
     }
 
-    @ViewBuilder private var status: some View {
-        if coordinator.status == .planning {
-            // The plan is already in the week; what is still coming is the
-            // detail of each step.
-            StatusBanner(tone: .working, message: "Albus is writing the steps…")
-        }
-        if case .plannedLocally(let note, let suggestsUpgrade) = coordinator.status {
-            StatusBanner(tone: .working, message: note,
-                         retryTitle: suggestsUpgrade ? "See Plus" : nil,
-                         retry: suggestsUpgrade ? { showingPaywall = true } : nil)
-        }
-        if case .failed(let message) = coordinator.status {
-            StatusBanner(tone: .error, message: message)
-        }
-        if case .failed(let why) = session.state {
-            StatusBanner(tone: .warning, message: "Not signed in: \(why)")
+    /// The plan's open-task limit, when it is the thing stopping the student.
+    private var taskLimitReached: Bool {
+        guard let limit = entitlements.plan.tasks.limit, limit > 0 else { return false }
+        return openHere >= limit
+    }
+
+    private var openHere: Int {
+        assignments.count(where: { !$0.isComplete && !$0.isArchived })
+    }
+
+    /// Whether the meter is showing, which already says what a task-limit
+    /// refusal would.
+    private var showsTaskMeter: Bool {
+        taskLimitReached || (uncountedOnPhone > 0 && !coordinator.serverCountSettling)
+    }
+
+    private var showsProblemCard: Bool {
+        guard let problem = coordinator.problem else { return false }
+        return problem != .taskLimit || !showsTaskMeter
+    }
+
+    /// Something the student did that did not go through.
+    ///
+    /// The AI still writing steps, or the phone having planned without it, is
+    /// not here: each is said on the assignment's own card. Neither is being
+    /// signed out — `RootView` shows the sign-in screen for that, so a line
+    /// about it here could never appear.
+    @ViewBuilder private var problemCard: some View {
+        if showsProblemCard, let problem = coordinator.problem {
+            switch problem {
+            case .notSaved(let again):
+                ProblemCard(
+                    title: again ? "It still won't save" : "Your last change didn't save",
+                    message: again
+                        ? "This phone is refusing to store it. If it's nearly full, freeing some space usually fixes it."
+                        : "It's on screen but not stored on this phone yet. If Albus closes now, it's lost."
+                ) {
+                    CardButton(title: "Save again") { coordinator.retrySave(context: context) }
+                }
+            case .notRebuilt:
+                ProblemCard(title: "Your week didn't update",
+                            message: "The times below are from before your last change.") {
+                    CardButton(title: "Rebuild now") {
+                        coordinator.reschedule(context: context, availability: preferences.availability)
+                    }
+                }
+            case .refused(let why, let kept):
+                ProblemCard(
+                    title: "Albus can't plan that",
+                    message: kept
+                        ? why + " You've started on it, so it stays until Albus next opens, and what you do on it is kept."
+                        : why
+                ) {
+                    CardButton(title: "Got it", style: .secondary) { coordinator.dismissProblem() }
+                }
+            case .taskLimit:
+                ProblemCard(title: "That's as many tasks as your plan keeps open",
+                            message: "Finish one, or move up a plan.") {
+                    CardButton(title: "See plans") { showingPaywall = true }
+                }
+            }
         }
     }
 
-    /// How full the plan is. Guidance only — a trigger on `public.assignments`
-    /// enforces it on every write path (migration 0036), so this being wrong
-    /// costs a clearer message, never a bypassed limit.
+    /// How full the plan is, as one meter rather than two strips that said
+    /// nearly the same thing. Guidance only — a trigger on
+    /// `public.assignments` enforces it on every write path (migration 0036),
+    /// so this being wrong costs a clearer message, never a bypassed limit.
     ///
     /// The number comes from the server's plan rather than a constant here.
     /// Three tiers means three caps, and a literal in this file is a literal
     /// that will eventually disagree with the one the database enforces.
-    @ViewBuilder private var freeLimitNotice: some View {
-        let tasks = entitlements.plan.tasks
-        if let limit = tasks.limit, limit > 0,
-           assignments.count(where: { !$0.isComplete && !$0.isArchived }) >= limit {
-            StatusBanner(
-                tone: .warning,
-                message: "\(entitlements.plan.displayName) keeps \(limit) "
-                       + "\(limit == 1 ? "task" : "tasks") open at once. "
-                       + "Finish one, or move up a plan.",
-                retryTitle: "See plans") { showingPaywall = true }
+    @ViewBuilder private var taskMeter: some View {
+        if showsTaskMeter, let limit = entitlements.plan.tasks.limit, limit > 0 {
+            let missing = coordinator.serverCountSettling ? 0 : uncountedOnPhone
+            let counted = min(limit, max(openHere + missing, entitlements.plan.tasks.used))
+            VStack(alignment: .leading, spacing: Tokens.Spacing.m) {
+                HStack(alignment: .center, spacing: Tokens.Spacing.m) {
+                    VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+                        Text("\(counted) of \(limit) open tasks")
+                            .font(Tokens.Typography.body)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Tokens.Palette.ink)
+                        // Bars up to ten; past that a row of them stops being
+                        // countable at a glance, and the sentence says it.
+                        if limit <= 10 {
+                            HStack(spacing: 4) {
+                                ForEach(0..<limit, id: \.self) { index in
+                                    Capsule()
+                                        .fill(index < counted ? Tokens.Palette.ink : Tokens.Palette.hairline)
+                                        .frame(width: 26, height: 6)
+                                }
+                            }
+                            .accessibilityHidden(true)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    Button("See plans") { showingPaywall = true }
+                        .font(Tokens.Typography.label)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Tokens.Palette.accent)
+                        .buttonStyle(.plain)
+                        .frame(minHeight: 44)
+                }
+
+                Text(Self.meterSentence(plan: entitlements.plan.displayName, limit: limit,
+                                        here: openHere, elsewhere: missing))
+                    .font(Tokens.Typography.label)
+                    .fontWeight(.regular)
+                    .foregroundStyle(Tokens.Palette.inkSecondary)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if missing > 0 {
+                    VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+                        CardButton(title: openHere == 0
+                                     ? (missing == 1 ? "Stop counting it" : "Stop counting them")
+                                     : "Stop counting the other \(missing)",
+                                   style: .secondary) { confirmingRelease = true }
+                        if let releaseFailure {
+                            ProblemLine(message: releaseFailure)
+                        }
+                    }
+                }
+            }
+            .padding(Tokens.Spacing.l)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Tokens.Palette.cardSurface,
+                        in: RoundedRectangle(cornerRadius: Tokens.Radius.problemCard, style: .continuous))
+            .shadow(color: Tokens.Glass.shadow.opacity(0.5), radius: 12, y: 6)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("taskMeter")
         }
+    }
+
+    /// What the meter says under its count, in one sentence.
+    static func meterSentence(plan: String, limit: Int, here: Int, elsewhere: Int) -> String {
+        let keeps = "\(plan) keeps \(limit) open at once."
+        guard elsewhere > 0 else { return keeps + " Finish one to add the next." }
+        let origin = "made on another phone, or before Albus was reinstalled."
+        if here == 0 {
+            return (elsewhere == 1 ? "It isn't on this phone. It was " : "None of them are on this phone. They were ")
+                + origin + " " + keeps
+        }
+        return "Only \(here) of them \(here == 1 ? "is" : "are") on this phone. The other \(elsewhere) "
+            + "\(elsewhere == 1 ? "was" : "were") " + origin + " " + keeps
     }
 
     /// The add form, or the plans once this phone's open tasks fill the
     /// plan. The form could only end in a refusal then, after the student had
     /// filled it in, and the notice above already says why.
     private func addTask() {
-        let openHere = assignments.count(where: { !$0.isComplete && !$0.isArchived })
         if entitlements.taskLimit(reachedBy: openHere) != nil {
             showingPaywall = true
         } else {
@@ -412,54 +525,50 @@ struct HomeScreen: View {
             openHere: open.count, openHereOnServer: open.count(where: { $0.remoteID != nil }))
     }
 
-    @ViewBuilder private var uncountedNotice: some View {
-        let missing = uncountedOnPhone
-        // While the phone is still telling the server what it finished, the
-        // count is out of date: a task finished a moment ago would show here.
-        if missing > 0, !coordinator.serverCountSettling {
-            StatusBanner(
-                tone: .warning,
-                message: "Your plan still counts \(missing) open "
-                       + "\(missing == 1 ? "task that isn't" : "tasks that aren't") "
-                       + "on this phone, so you can't add more here.",
-                retryTitle: "Stop counting") { confirmingRelease = true }
-        }
-        if releaseFailed {
-            StatusBanner(tone: .error, message: "Couldn't stop counting them. Check your connection and try again.")
-        }
-    }
-
     private func releaseUncounted() async {
-        releaseFailed = false
+        releaseFailure = nil
         do {
             try await coordinator.releaseOthers(context: context) { await entitlements.refresh() }
         } catch {
-            releaseFailed = true
+            releaseFailure = (error as? URLError)?.code == .notConnectedToInternet
+                ? "Didn't go through. You're offline."
+                : "Didn't go through. Tap it again."
         }
     }
 
+    /// Nothing to list. The first run gets the screen's words; a filter with
+    /// nothing in it gets one line, because it is usually good news.
     @ViewBuilder private var emptyState: some View {
         switch filter {
         case .all:
-            EmptyState(icon: "tray", title: assignments.isEmpty ? "Nothing here yet" : "No open work",
-                       message: assignments.isEmpty
-                         ? "Add an assignment and Albus will break it into steps and look for time for them."
-                         : "No active assignments. Add the next thing when you're ready.",
-                       actionTitle: "Add an assignment") { addTask() }
+            if assignments.isEmpty {
+                EmptyState(title: "Your week is open",
+                           message: "Add the first thing that's due. Albus breaks it into steps and finds time for them before the deadline.",
+                           actionTitle: "Add an assignment") { addTask() }
+            } else {
+                EmptyState(title: "All caught up",
+                           message: "Nothing open right now. Add the next thing when it comes in.",
+                           actionTitle: "Add an assignment") { addTask() }
+            }
         case .dueSoon:
-            EmptyState(icon: "calendar", title: "Nothing due this week",
-                       message: "No unfinished assignment is due in the next seven days.")
+            EmptyLine(title: "Nothing due in the next 7 days", isGoodNews: true,
+                      actionTitle: showAllTitle, action: showAll)
         case .overdue:
-            EmptyState(icon: "checkmark.circle", title: "Nothing overdue",
-                       message: "Nothing on your list is overdue.")
+            EmptyLine(title: "Nothing's overdue",
+                      message: openHere == 0 ? nil
+                        : "Your \(openHere) open \(openHere == 1 ? "assignment is" : "assignments are") on time.",
+                      isGoodNews: true, actionTitle: showAllTitle, action: showAll)
         case .needsTime:
-            EmptyState(icon: "calendar", title: "No work to review",
-                       message: "Unplaced work due in the next seven days or already overdue appears here after your plan is rebuilt.")
+            EmptyLine(title: "Everything fits",
+                      message: "All work due in the next 7 days has time in your plan.",
+                      isGoodNews: true, actionTitle: showAllTitle, action: showAll)
         case .done:
-            EmptyState(icon: "checkmark.seal", title: "Nothing finished yet",
-                       message: "Completed assignments collect here.")
+            EmptyLine(title: "Finished assignments land here")
         }
     }
+
+    private var showAllTitle: String? { openHere > 0 ? "Show all" : nil }
+    private func showAll() { filter = .all }
 }
 
 /// One assignment in the list.
@@ -474,6 +583,9 @@ private struct AssignmentCard: View {
     /// The phone's plan is in place and the AI is still writing the steps, so
     /// the step count is about to change: its shape, not a number.
     var isRefining = false
+    /// Why the phone planned this rather than the AI, while that is news.
+    var localPlan: PlanCoordinator.LocalPlanReason?
+    var seePlus: () -> Void = {}
 
     private var subject: Tokens.SubjectColor {
         assignment.course?.subjectColor ?? .violet
@@ -481,6 +593,7 @@ private struct AssignmentCard: View {
 
     var body: some View {
         SubjectStripeCard(subject: subject, padding: Tokens.Spacing.m + 2) {
+          VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Tokens.Spacing.m + 2) {
                 VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
                     HStack(spacing: Tokens.Spacing.s) {
@@ -545,10 +658,42 @@ private struct AssignmentCard: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Tokens.Palette.inkMuted)
             }
+            // Said on this card, not in a strip over all of Home: it is about
+            // this assignment, and only while it is still being planned.
+            if let localPlan, !isRefining, !assignment.isComplete, !assignment.isArchived {
+                Divider()
+                    .overlay(Tokens.Palette.hairline)
+                    .padding(.top, Tokens.Spacing.m)
+                localPlanLine(localPlan)
+                    .padding(.top, Tokens.Spacing.xs)
+            }
+          }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(assignment.title)
         .accessibilityHint("Opens the plan")
+    }
+}
+
+extension AssignmentCard {
+    @ViewBuilder fileprivate func localPlanLine(_ reason: PlanCoordinator.LocalPlanReason) -> some View {
+        let count = assignment.subtasks.count
+        let sessions = "\(count) study \(count == 1 ? "session" : "sessions")"
+        switch reason {
+        case .offline:
+            QuietLine(text: "Planned on this phone while you were offline, as \(sessions).",
+                      systemImage: "wifi.slash")
+        case .aiOff:
+            QuietLine(text: "AI is off, so Albus split this into \(sessions). You can turn it on in Settings.")
+        case .aiPlansUsed:
+            QuietLine(text: "This week's AI plans are used, so Albus split it into \(sessions).",
+                      linkTitle: "See Plus", link: seePlus)
+        case .aiPlansNotIncluded:
+            QuietLine(text: "Split into \(sessions). Step-by-step plans come with Plus.",
+                      linkTitle: "See Plus", link: seePlus)
+        case .unavailable:
+            QuietLine(text: "Albus couldn't write steps just now, so it split this into \(sessions).")
+        }
     }
 }
 

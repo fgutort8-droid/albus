@@ -25,7 +25,6 @@ struct GradingHistoryScreen: View {
             LazyVStack(alignment: .leading, spacing: Tokens.Spacing.m) {
                 if gradings.isEmpty {
                     EmptyState(
-                        icon: "checkmark.seal",
                         title: "Nothing marked yet",
                         message: "Your saved markings on this phone appear here, so you can put a "
                                + "draft next to the version you fixed."
