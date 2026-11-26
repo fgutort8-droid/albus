@@ -518,6 +518,31 @@ struct InstantPlanTests {
         #expect(coordinator.localPlanReason(for: added) == .aiOff, "Home says why on this card")
     }
 
+    /// Adding carries on to `.plannedLocally` after a failed write. The
+    /// warning that the assignment is not stored must outlast that, or Home
+    /// hides "Save again" while the work can still be lost.
+    @Test("a failed write while adding keeps its warning after planning moves on")
+    func failedWriteOutlivesPlanning() async throws {
+        let context = try store()
+        let saves = SaveSwitch()
+        saves.fail = true
+        let coordinator = coordinator(saves: saves)
+        HeldPlanTransport.state.release()
+        await coordinator.addAssignment(essay(), context: context, availability: availability,
+                                        useAI: false, now: now)
+        if case .plannedLocally = coordinator.status {} else {
+            Issue.record("planning should carry on past the failed write")
+        }
+        #expect(coordinator.unsaved == .failed, "still unsaved, so still said")
+
+        saves.fail = false
+        coordinator.retrySave(context: context)
+        #expect(coordinator.unsaved == nil)
+        if case .plannedLocally = coordinator.status {} else {
+            Issue.record("a save that succeeds leaves the planning status alone")
+        }
+    }
+
     @Test("an archived assignment does not count against the open-task cap")
     func archivedIsNotCounted() async throws {
         let context = try store()
@@ -555,14 +580,14 @@ struct InstantPlanTests {
         #expect(RefusedAssignments.all(defaults: refusedList) == [added.id], "still listed for the next launch")
         #expect(try assignment(in: context)?.id == added.id, "nothing half-removed in memory")
         #expect(coordinator.status == .failed("Couldn't save."))
-        #expect(coordinator.problem == .notSaved(again: false))
+        #expect(coordinator.unsaved == .failed)
 
         // Home's "Save again", while the store still refuses, then once it takes.
         coordinator.retrySave(context: context)
-        #expect(coordinator.problem == .notSaved(again: true), "the card says it still won't save")
+        #expect(coordinator.unsaved == .failedAgain, "the card says it still won't save")
         saves.fail = false
         coordinator.retrySave(context: context)
-        #expect(coordinator.status == .idle && coordinator.problem == nil, "the card goes once it saves")
+        #expect(coordinator.status == .idle && coordinator.unsaved == nil, "the card goes once it saves")
 
         saves.fail = false
         coordinator.removeRefusedAssignments(context: context, availability: availability, now: now)

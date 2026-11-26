@@ -36,8 +36,6 @@ final class PlanCoordinator {
     /// needs more than one sentence — what did not happen, what is safe, and
     /// which button fixes it.
     enum Problem: Equatable {
-        /// A write to the phone's store failed. `again` once a retry also has.
-        case notSaved(again: Bool)
         /// The week could not be re-placed; the times shown are older.
         case notRebuilt
         /// Already at the plan's open-task limit. Home's meter says so.
@@ -48,6 +46,20 @@ final class PlanCoordinator {
     }
 
     private(set) var problem: Problem?
+
+    /// A write to the phone's store failed and nothing has been stored since.
+    ///
+    /// Not a `Problem`: those go when the status moves on, and adding an
+    /// assignment carries on to `.plannedLocally` or `.idle` after a failed
+    /// write, which would hide "Save again" while the work is still unsaved.
+    /// Only a write that succeeds clears this.
+    enum UnsavedChanges: Equatable {
+        case failed
+        /// "Save again" was tried and failed too.
+        case failedAgain
+    }
+
+    private(set) var unsaved: UnsavedChanges?
 
     /// Why the phone, not the AI, planned an assignment.
     ///
@@ -940,11 +952,15 @@ final class PlanCoordinator {
         do {
             try persist(context)
             // Everything pending is stored now, the failed write included.
-            if case .notSaved = problem { status = .idle }
+            if unsaved != nil {
+                unsaved = nil
+                if status == .failed(Self.notSavedMessage) { status = .idle }
+            }
             return true
         } catch {
             // Losing a write silently is worse than a visible failure.
-            fail(.notSaved(again: false), message: "Couldn't save.")
+            if unsaved == nil { unsaved = .failed }
+            status = .failed(Self.notSavedMessage)
             print("save failed during \(what)")
             return false
         }
@@ -953,10 +969,10 @@ final class PlanCoordinator {
     /// Home's "Save again": the change is still in the context, so storing it
     /// is one more attempt at the same write.
     func retrySave(context: ModelContext) {
-        if !save(context, "retry") {
-            fail(.notSaved(again: true), message: "Couldn't save.")
-        }
+        if !save(context, "retry") { unsaved = .failedAgain }
     }
+
+    static let notSavedMessage = "Couldn't save."
 
     /// Home's "Got it" on a refusal: the reason has been read, and nothing on
     /// the phone needs doing about it.

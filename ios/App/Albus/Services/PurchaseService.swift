@@ -217,13 +217,15 @@ final class PurchaseService {
         case .inProgress:
             "That purchase is already in progress."
         case .store:
-            "The App Store didn't finish the purchase. Try again in a moment."
+            // Also what loading prices and restoring report, so it names no
+            // purchase: the student may never have started one.
+            "The App Store had a problem. Try again in a moment."
         case .pending:
             "Waiting for approval."
         case .cancelled:
             "Cancelled."
         case .other, nil:
-            "The App Store didn't finish the purchase. Try again in a moment."
+            "The App Store had a problem. Try again in a moment."
         }
     }
 }

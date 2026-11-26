@@ -74,6 +74,41 @@ struct ErrorStatesTests {
         #expect(deletion.errorMessage?.contains("wasn't deleted") == false)
     }
 
+    /// A lost answer left the request outstanding; a retry that then fails
+    /// before asking again still cannot say the account was not deleted.
+    @Test("a retry after a lost answer keeps saying the account may be deleted")
+    func retryAfterLostAnswer() async {
+        let store = defaults()
+        let first = AccountDeletion(defaults: store)
+        _ = await first.perform(reachServer: {}, deleteRemote: { throw URLError(.networkConnectionLost) },
+                                clearLocal: {}, signOut: {})
+        let retry = AccountDeletion(defaults: store)
+        _ = await retry.perform(reachServer: { throw URLError(.notConnectedToInternet) },
+                                deleteRemote: {}, clearLocal: {}, signOut: {})
+        #expect(retry.errorTitle == "Albus didn't hear back")
+    }
+
+    /// An account this phone cannot reach is cleared from the phone only, so
+    /// a cleanup that fails must not say the account itself was deleted.
+    @Test("a failed cleanup claims a deletion only when the server confirmed one")
+    func cleanupClaims() async {
+        let confirmed = AccountDeletion(defaults: defaults())
+        _ = await confirmed.perform(reachServer: {}, deleteRemote: {},
+                                    clearLocal: { throw URLError(.cannotCreateFile) }, signOut: {})
+        #expect(confirmed.errorMessage?.hasPrefix("Your account is deleted") == true)
+
+        let unreachable = AccountDeletion(defaults: defaults())
+        _ = await unreachable.perform(reachServer: { throw AccountUnreachable() }, deleteRemote: {},
+                                      clearLocal: { throw URLError(.cannotCreateFile) }, signOut: {})
+        #expect(unreachable.errorMessage == "This phone still holds some of your account.")
+    }
+
+    @Test("an empty file is not told it is blurred")
+    func emptyFileAdvice() {
+        #expect(WorkExtractor.Failure.empty.message(fromPhoto: false).contains("file"))
+        #expect(WorkExtractor.Failure.empty.message(fromPhoto: true).contains("blurred"))
+    }
+
     @Test("every marking failure has a title of its own")
     func markingHeadlines() {
         let failures: [GradingService.Failure] = [

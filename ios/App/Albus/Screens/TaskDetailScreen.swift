@@ -61,8 +61,11 @@ struct TaskDetailScreen: View {
         } else {
             ProblemCard(
                 title: "\(what) fit before \(Self.dayName(assignment.deadline))",
-                message: "There isn't enough of your study time before then. "
-                    + "About \(HomeScreen.duration(unplacedMinutes)) more would fit \(all || unplacedCount > 1 ? "them" : "it")."
+                // How much work has no time, not how much more time would fit
+                // it: a step can miss its slot by minutes, or only because the
+                // free time is in pieces too small for it.
+                message: "About \(HomeScreen.duration(unplacedMinutes)) of this work has no time before then. "
+                    + "More study hours before the deadline would help."
             ) {
                 CardButton(title: "Change study hours") { changingStudyHours = true }
             }

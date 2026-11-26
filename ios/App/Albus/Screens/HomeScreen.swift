@@ -372,6 +372,7 @@ struct HomeScreen: View {
     }
 
     private var showsProblemCard: Bool {
+        if coordinator.unsaved != nil { return true }
         guard let problem = coordinator.problem else { return false }
         return problem != .taskLimit || !showsTaskMeter
     }
@@ -383,17 +384,19 @@ struct HomeScreen: View {
     /// signed out — `RootView` shows the sign-in screen for that, so a line
     /// about it here could never appear.
     @ViewBuilder private var problemCard: some View {
-        if showsProblemCard, let problem = coordinator.problem {
+        // An unsaved change comes first: it is the one problem that loses work.
+        if let unsaved = coordinator.unsaved {
+            let again = unsaved == .failedAgain
+            ProblemCard(
+                title: again ? "It still won't save" : "Your last change didn't save",
+                message: again
+                    ? "This phone is refusing to store it. If it's nearly full, freeing some space usually fixes it."
+                    : "It's on screen but not stored on this phone yet. If Albus closes now, it's lost."
+            ) {
+                CardButton(title: "Save again") { coordinator.retrySave(context: context) }
+            }
+        } else if showsProblemCard, let problem = coordinator.problem {
             switch problem {
-            case .notSaved(let again):
-                ProblemCard(
-                    title: again ? "It still won't save" : "Your last change didn't save",
-                    message: again
-                        ? "This phone is refusing to store it. If it's nearly full, freeing some space usually fixes it."
-                        : "It's on screen but not stored on this phone yet. If Albus closes now, it's lost."
-                ) {
-                    CardButton(title: "Save again") { coordinator.retrySave(context: context) }
-                }
             case .notRebuilt:
                 ProblemCard(title: "Your week didn't update",
                             message: "The times below are from before your last change.") {
@@ -559,9 +562,19 @@ struct HomeScreen: View {
                         : "Your \(openHere) open \(openHere == 1 ? "assignment is" : "assignments are") on time.",
                       isGoodNews: true, actionTitle: showAllTitle, action: showAll)
         case .needsTime:
-            EmptyLine(title: "Everything fits",
-                      message: "All work due in the next 7 days has time in your plan.",
-                      isGoodNews: true, actionTitle: showAllTitle, action: showAll)
+            // An empty list here proves nothing when the last re-flow failed:
+            // `weekFit` is nil then, not empty.
+            if coordinator.lastRunSucceeded {
+                EmptyLine(title: "Everything fits",
+                          message: "All work due in the next 7 days has time in your plan.",
+                          isGoodNews: true, actionTitle: showAllTitle, action: showAll)
+            } else {
+                EmptyLine(title: "Albus can't tell yet",
+                          message: "Your week didn't update, so what fits isn't known.",
+                          actionTitle: "Rebuild now") {
+                    coordinator.reschedule(context: context, availability: preferences.availability)
+                }
+            }
         case .done:
             EmptyLine(title: "Finished assignments land here")
         }

@@ -97,8 +97,14 @@ final class AccountDeletion {
         refused = nil
         defer { isBusy = false }
 
+        // Whether this attempt saw the server confirm the deletion. False for
+        // an account this phone can no longer reach, and for a cleanup left
+        // over from an earlier attempt, so the cleanup message cannot claim
+        // a deletion nobody here confirmed.
+        var deletedRemotely = false
         if !requiresCleanup {
             var asked = false
+            var unreachable = false
             do {
                 // A question first, which deletes nothing. A phone with no
                 // signal stops here, before any request that could delete the
@@ -112,6 +118,7 @@ final class AccountDeletion {
                 asked = true
                 try await deleteRemote()
             } catch is AccountUnreachable {
+                unreachable = true
                 // The account cannot be reached from this device any more.
                 // Carrying on is the only outcome that keeps the promise this
                 // screen made; refusing would leave the work here for good. An
@@ -133,7 +140,10 @@ final class AccountDeletion {
                 // it has, the server may have deleted the account even though
                 // no answer came back — offline or not — so "nothing was
                 // deleted" would be a guess.
-                if asked {
+                // Asked now, or by an earlier attempt whose answer was lost:
+                // either way the account may be gone, and failing again
+                // before asking does not change that.
+                if asked || defaults.bool(forKey: Self.requestKey) {
                     errorTitle = "Albus didn't hear back"
                     errorMessage = "Your account may already be deleted. This phone still has everything. Hold the button again to finish."
                 } else if (error as? URLError)?.code == .notConnectedToInternet {
@@ -145,6 +155,7 @@ final class AccountDeletion {
                 }
                 return false
             }
+            deletedRemotely = !unreachable
             defaults.set(true, forKey: Self.receiptKey)
             requiresCleanup = true
             generation += 1
@@ -161,8 +172,10 @@ final class AccountDeletion {
         } catch {
             // The account is already gone. A durable receipt prevents a restart
             // exposing its old cache or asking the student to delete it again.
-            errorTitle = "Almost done"
-            errorMessage = "Your account is deleted. This phone still holds some of it."
+            errorTitle = "This phone isn't cleared yet"
+            errorMessage = deletedRemotely
+                ? "Your account is deleted, but this phone still holds some of it."
+                : "This phone still holds some of your account."
             return false
         }
     }

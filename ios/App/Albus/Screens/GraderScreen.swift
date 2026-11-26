@@ -93,6 +93,10 @@ struct GraderScreen: View {
     @State private var workPhotoPicking = false
     @State private var extracting = false
     @State private var extractionFailure: WorkExtractor.Failure?
+    /// Whether the work that could not be read was a photo or a file, so the
+    /// card reopens the picker it came from: a blank text file and a scanned
+    /// PDF fail the same way a blurred photo does.
+    @State private var extractionWasPhoto = false
 
     // What it is marked against.
     @State private var chosenRubric: Rubric?
@@ -465,8 +469,8 @@ struct GraderScreen: View {
         }
         if let extractionFailure {
             ProblemCard(title: extractionFailure.headline,
-                        message: extractionFailure.errorDescription ?? "") {
-                if extractionFailure == .empty {
+                        message: extractionFailure.message(fromPhoto: extractionWasPhoto)) {
+                if extractionWasPhoto {
                     CardButton(title: "Choose another photo") { workPhotoPicking = true }
                 } else {
                     CardButton(title: "Choose another file") { importing = true }
@@ -1189,6 +1193,7 @@ struct GraderScreen: View {
     }
 
     private func extract(_ source: WorkExtractor.Source, label: String) {
+        if case .image = source { extractionWasPhoto = true } else { extractionWasPhoto = false }
         extracting = true
         extractionFailure = nil
         Task {
@@ -1298,5 +1303,13 @@ extension WorkExtractor.Failure {
         case .unreadable: "Albus can't open this file"
         case .tooLarge: "That file is too big to read on the phone"
         }
+    }
+
+    /// The photo advice only for a photo: an empty file is not blurred.
+    func message(fromPhoto: Bool) -> String {
+        if self == .empty, !fromPhoto {
+            return "Albus found no words in this file. Choose another, or paste the text."
+        }
+        return errorDescription ?? ""
     }
 }
