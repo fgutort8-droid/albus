@@ -47,6 +47,7 @@ jobs:
           bash scripts/tests/set-secrets-test.sh
           bash scripts/tests/deploy-advisor-fixes-test.sh
           bash scripts/tests/deploy-delete-without-signin-test.sh
+          bash scripts/tests/deploy-apple-id-memory-test.sh
           python3 scripts/tools/test_fetch_logos.py
       - name: Install checksum-pinned Gitleaks
         env:

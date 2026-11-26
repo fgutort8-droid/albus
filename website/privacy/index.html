@@ -12,7 +12,7 @@
   <header><a class="brand" href="/">Albus</a></header>
 
   <h1>Privacy policy</h1>
-  <p class="updated">Last updated 25 November 2026</p>
+  <p class="updated">Last updated 26 November 2026</p>
 
   <p>Albus is an iPhone app that plans study time. This page explains what information it
      handles, why, who helps us run it, and the choices you have.</p>
@@ -103,6 +103,10 @@
      your IP address when the app connects. In our abuse-detection tables, the IP address is shortened to its
      network part, and both values are replaced with a keyed one-way code. These tables do not store the raw identifier or IP address. Our hosting and authentication providers may separately keep network information in operational and security logs. We also keep short security records, such as which feature was
      used and an error code, never anything you wrote.
+     If you delete your account, we keep a keyed one-way code made from the identifier Sign in with Apple
+     gives Albus, linked to the records of your AI requests from the 30 days before (which hold no content).
+     If you sign in again with the same Apple ID, those requests still count towards your limits, so deleting
+     your account can't reset them. We never keep the identifier itself.
      <em>Why: our legitimate interest in preventing abuse and keeping Albus affordable, including free.</em></p>
   <h3>Reminders</h3>
   <p>Study reminders are scheduled on your phone. Albus does not use a push notification service.</p>
@@ -140,6 +144,9 @@
         which contain no content, are kept for cost accounting.</li>
     <li>Rate-limit counters: about two hours.</li>
     <li>The one-way codes made from device identifiers and IP addresses: removed by scheduled cleanup after 90 days without another observation. Security records: 180 days.</li>
+    <li>The one-way code made from your Apple sign-in after you delete your account: each link to an AI request
+        is removed by a daily cleanup once that request is 30 days old, so none is kept for more than about
+        30 days after you delete.</li>
     <li>Subscription records, and the log of changes to plans and payments: as long as accounting and tax law require.</li>
     <li>Payment events in the queue: their details for 30 days after they are applied; after that, only an identifier,
         a fingerprint and the outcome, which stop the same event being applied twice. An event that hasn't been
@@ -156,7 +163,7 @@
         there isn't one, Apple first asks you to confirm it's you. If Albus can't reach Apple at that
         point, your account is still deleted, and you can stop it yourself in your iPhone's Settings, under
         your name, in Sign in with Apple. The payment and security records
-        described above are kept under their retention rules. They hold no name, email address or study
+        described above, and the one-way code from your Apple sign-in, are kept under their retention rules. They hold no name, email address or study
         content, but subscription records and queued payment events still carry the random identifier your
         account had, and so does RevenueCat's record of your purchases. Deleting your account does not cancel
         a subscription; cancel it first in your iPhone's Settings → your name → Subscriptions.</li>
